@@ -10,6 +10,7 @@ from i18n import tr
 from vision import normalize_hex
 from palette import allowed_colors,overview
 from palette_viewer import PaletteViewer
+from search_overlay import SearchOverlay
 from result_history import describe_result,read_history,save_result
 from eyedropper import pick_screen
 from concurrent.futures import ThreadPoolExecutor
@@ -158,7 +159,7 @@ class App(ct.CTk):
     def __init__(self):
         super().__init__();self.title(tr('染色工坊 · 瑪奇 Mobile'));self.geometry('1120x900');self.minsize(784,630);self.wm_aspect(56,45,56,45);self.configure(fg_color=BG)
         self.after(100,self.fit_screen)
-        self.active_rules=None;self.history=read_history(DATA/'history.json');self.best_summary=None
+        self.overlay=None;self.active_rules=None;self.history=read_history(DATA/'history.json');self.best_summary=None
         self.q=queue.Queue();self.runner=None;self.busy=False;self.picking=False;self.keys={};self.cards=[];self.auto=tk.BooleanVar(value=False)
         self.grid_columnconfigure(0,weight=1); self.grid_rowconfigure(2,weight=1)
         header=ct.CTkFrame(self,fg_color='transparent');header.grid(row=0,column=0,padx=20,pady=(14,6),sticky='ew')
@@ -283,10 +284,14 @@ class App(ct.CTk):
         self.active_mode=mode
         self.busy=True;self.start.configure(state='disabled');self.status.configure(text='正在识别游戏界面…')
         folder=DATA/'sessions'/datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+        if mode=='search':
+            if self.overlay is None:self.overlay=SearchOverlay(self,self.stop)
+            self.overlay.begin(rules)
         self.runner=Runner(lambda k,d:self.q.put((k,d)),folder)
         threading.Thread(target=self.runner.launch,args=(rules,mode,self.auto.get()),daemon=True).start()
     def stop(self):
         if self.runner:self.runner.stop.set();self.status.configure(text='正在停止并释放鼠标…')
+        if self.overlay is not None:self.overlay.render('正在停止并释放鼠标…','')
     def hotkey_loop(self):
         registered=[]
         keys=[(1,0x77),(2,0x78),(3,0x79),(4,0x76)]
@@ -300,6 +305,7 @@ class App(ct.CTk):
     def tick(self):
         while not self.q.empty():
             k,d=self.q.get()
+            if self.overlay is not None:self.overlay.handle(k,d)
             if k=='hotkey':
                 if d['id']==1:self.go()
                 elif d['id']==2:self.stop()
@@ -317,13 +323,13 @@ class App(ct.CTk):
                 if k=='scene':self.status.configure(text=f'正在寻色 · 游戏剩余 {d.get("seconds") or "—"} 秒')
                 elif k=='restore_action':self.status.configure(text=f'正在恢复最佳颜色 · 游戏剩余 {d.get("seconds") or "—"} 秒')
             elif k=='waiting':
-                self.status.configure(text=tr('等待染色界面 · 剩余 ')+str(d['seconds'])+tr(' 秒'))
+                self.status.configure(text=tr('等待染色界面') if d.get('seconds') is None else tr('等待染色界面 · 剩余 ')+str(d['seconds'])+tr(' 秒'))
                 self.detail.configure(text=tr(d['message']))
             elif k in ('wait_timeout','interrupted'):
                 self.status.configure(text=tr(d['message']))
                 self.after(100,lambda m=d['message']:messagebox.showinfo(tr('流程已中断'),tr(m),parent=self))
             elif k=='action':self.detail.configure(text='正在调整色板，持续寻找更接近的颜色…')
-            elif k in ('explore','restoring','magnifying'):self.detail.configure(text=d['message'])
+            elif k in ('explore','restoring','magnifying','restore_fallback','input_recheck'):self.detail.configure(text=d['message'])
             elif k=='best':
                 if self.active_rules:self.display_best(describe_result(d['colors'],self.active_rules))
             elif k in ('error','done'):

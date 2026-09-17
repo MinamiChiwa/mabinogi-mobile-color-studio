@@ -1,12 +1,15 @@
 import time,json,threading,traceback
 from pathlib import Path
+from collections import deque
 import numpy as np
 import cv2
 from PIL import Image
 from platform_win import Game,Interrupted
 from vision import recognize,accepted,candidate_shift,configure_ocr,green_buttons,result_colors,measure_board_motion,error
 from planner import joint_plan,decompose_gestures
-from best_result import BestResult,proximity
+from best_result import BestResult,proximity,ranking
+from input_response import assess_response,ResponseGuard
+from session_store import SessionStore,cleanup
 
 def local_offsets(radius=2):
     """Visit nearby integer offsets without ever issuing a zero displacement."""
@@ -42,6 +45,19 @@ def perfect_match(colors,rules):
     enabled=[(c,r) for c,r in zip(colors,rules) if r['enabled']]
     return bool(enabled) and all(c is not None and c.upper() in [v.upper() for v in r['colors']] for c,r in enabled)
 
+def recovery_close(colors,target,rules):
+    if target is None:return False
+    if accepted(target,rules) and not accepted(colors,rules):return False
+    for color,saved,rule in zip(colors,target,rules):
+        if not rule['enabled']:continue
+        if color is None or saved is None:return False
+        # An originally exact match must be recovered exactly.
+        if rule['exact'] and saved.upper() in [c.upper() for c in rule['colors']]:
+            if color.upper()!=saved.upper():return False
+        elif error(color,[saved],False)>.6:return False
+    return True
+
+
 def reconcile_deadline(deadline,seconds,now):
     """Reject OCR digit loss; the monotonic countdown remains authoritative."""
     if seconds is None or abs(seconds-(deadline-now))>4:return deadline
@@ -76,16 +92,18 @@ def bounded_zoom(ticks,current,best):
 
 class Runner:
     def __init__(self,emit,folder):
-        self.emit=emit; self.stop=threading.Event(); self.folder=Path(folder); self.trace=[]
+        self.emit=emit; self.stop=threading.Event(); self.folder=Path(folder); self.trace=deque(maxlen=2048);self.store=SessionStore(self.folder)
     def event(self,kind,**data):
         entry={'time':round(time.time(),3),'kind':kind,**data}
         self.trace.append(entry); self.emit(kind,data)
-        with (self.folder/'events.jsonl').open('a',encoding='utf-8') as log:
-            log.write(json.dumps(entry,ensure_ascii=False)+'\n')
+        self.store.event(entry)
     def snapshot(self,g,label):
-        im=g.capture(); Image.fromarray(im).save(self.folder/f'{label}.png'); return im
+        im=g.capture(); self.store.image(label,im); return im
+    def clean_sessions(self):
+        try:cleanup(self.folder.parent)
+        except OSError:pass
     def wait_for_board(self,g,im,require_timer=True,timeout=60):
-        deadline=time.monotonic()+timeout;next_notice=0
+        deadline=None if timeout is None else time.monotonic()+timeout;next_notice=0
         while True:
             if self.stop.is_set():raise Interrupted('已停止，鼠标已释放。')
             try:
@@ -101,27 +119,40 @@ class Runner:
             except RuntimeError as e:
                 if 'timeout' not in str(e).lower():raise
             now=time.monotonic()
-            if now>=deadline:
+            if deadline is not None and now>=deadline:
                 raise TimeoutError('等待染色界面超时，尚未开始寻色。请打开染色界面、完成教学后再按 F8。')
             if now>=next_notice:
-                self.event('waiting',message='正在等待染色界面，请打开普通染色并完成教学。按 F9 可取消。',seconds=max(1,int(np.ceil(deadline-now))))
+                self.event('waiting',message='正在等待染色界面，请打开普通染色并完成教学。按 F9 可取消。',seconds=None if deadline is None else max(1,int(np.ceil(deadline-now))))
                 next_notice=now+5
-            if self.stop.wait(min(.5,deadline-now)):raise Interrupted('已停止，鼠标已释放。')
+            if self.stop.wait(.5 if deadline is None else min(.5,max(0,deadline-now))):raise Interrupted('已停止，鼠标已释放。')
             try:im=g.capture_waiting()
             except Interrupted:
                 if self.stop.is_set():raise
                 im=None
     def launch(self,rules,mode='search',auto=False):
-        self.folder.mkdir(parents=True,exist_ok=True)
+        self.store=SessionStore(self.folder,enabled=mode in ('diagnostic','recovery_test'))
+        # Housekeeping is independent of the timed search and ignores legacy/unmarked files.
+        threading.Thread(target=self.clean_sessions,daemon=True).start()
         try:
-            configure_ocr(); g=Game(self.stop); g.focus(); im=self.snapshot(g,'start')
+            configure_ocr()
+            if mode=='search':
+                self.event('waiting',message='正在等待染色界面，请打开普通染色并完成教学。按 F9 可取消。',seconds=None)
+                while True:
+                    if self.stop.is_set():raise Interrupted('已停止，鼠标已释放。')
+                    try:g=Game(self.stop);break
+                    except RuntimeError as e:
+                        if not any(t in str(e) for t in ('未找到瑪奇','已最小化','窗口已关闭')):raise
+                        if self.stop.wait(.5):raise Interrupted('已停止，鼠标已释放。')
+                im=None
+            else:
+                g=Game(self.stop);g.focus();im=self.snapshot(g,'start')
             self.event('config',rules=rules,auto_apply=auto,dpi=int(__import__('platform_win').u.GetDpiForWindow(g.hwnd)))
-            result=result_colors(im)
+            result=result_colors(im) if im is not None and mode!='search' else None
             if result is not None:
                 if mode=='search' and auto and accepted(result,rules):return self.apply_result(g,im,result)
                 return self.event('done',message='当前在结果页，颜色未满足目标或自动套用已关闭，未操作。',colors=result)
             # Wait without mouse input; the dye countdown starts independently.
-            im,scene=self.wait_for_board(g,im,require_timer=mode not in ('read','capture'))
+            im,scene=self.wait_for_board(g,im,require_timer=mode not in ('read','capture'),timeout=None if mode=='search' else 60)
             self.event('scene',colors=scene.colors,seconds=scene.seconds,board=scene.board,markers=scene.markers,size=list(im.shape[:2]))
             if mode=='read':return self.event('done',message='已读取当前色码。',colors=scene.colors)
             if mode in ('capture','recovery_test'):
@@ -144,10 +175,12 @@ class Runner:
                 im=self.snapshot(g,'disturbed');scene=recognize(im,previous=scene)
                 self.event('disturbed',colors=scene.colors,motion=measure_board_motion(zoomed,im,scene.board))
             if scene.seconds is None:raise RuntimeError('未能可靠读取倒计时，已停止。请在教学结束后再按 F8。')
-            deadline=time.monotonic()+scene.seconds
+            captured=getattr(g,'captured_at',None)
+            deadline=(captured if isinstance(captured,(int,float)) else time.monotonic())+scene.seconds
             if mode=='diagnostic':return self.diagnostic(g,im,scene,deadline)
             self.best=BestResult(rules)
-            visited=[]; no_change=0; misses=0; explore_index=0; explore_remaining=0; gain=np.ones(2); rotation_gain=1.0
+            response_guard=ResponseGuard()
+            visited=[]; misses=0; explore_index=0; explore_remaining=0; gain=np.ones(2); rotation_gain=1.0
             step=-1; zoom_index=0; last_refine=-20; zoom_blocked_direction=0; pending=None; track_attempts=0; locked=None; lock_steps=0
             local=[];local_at=(0,0);local_cooldown=0
             zoom_burst=0;zoom_cooldown=0;zoom_hold_until=0
@@ -161,7 +194,7 @@ class Runner:
                 self.event('scene',colors=scene.colors,seconds=scene.seconds)
                 if self.best.observe(im,scene):
                     best_zoom=search_zoom
-                    Image.fromarray(im).save(self.folder/'best-observed.png')
+                    self.store.image('best-observed',im)
                     self.event('best',colors=scene.colors,delta=self.best.score[0])
                 if perfect_match(scene.colors,rules):
                     time.sleep(.18); verify=recognize(g.capture(),previous=scene)
@@ -172,8 +205,7 @@ class Runner:
                 if time.monotonic()>=deadline-30:
                     return self.restore_best(g,im,scene,rules,deadline)
                 # A tolerance hit is a saved candidate, not the end of search.
-                if accepted(scene.colors,rules):
-                    pending=None;locked=None;local=[];explore_remaining=max(explore_remaining,1)
+                # Tolerance hits remain candidates for further improvement.
                 if magnify_started is not None and (magnify_attempts>=3 or time.monotonic()-magnify_started>=12):
                     zoom_out_remaining=max(32,magnify_ticks)
                     magnify_started=None;magnify_attempts=0;magnify_ticks=0
@@ -182,13 +214,23 @@ class Runner:
                 before=im
                 move=pending if pending is not None else candidate_shift(im,scene,rules,visited,excluded=excluded)
                 tracking=pending is not None;pending=None
+                improving=False
+                if move is not None and not tracking:
+                    predicted=list(scene.colors)
+                    for i,rule in enumerate(rules):
+                        if rule['enabled']:
+                            x,y=np.rint(np.asarray(scene.markers[i])-move[:2]).astype(int)
+                            predicted[i]='#%02X%02X%02X'%tuple(im[y,x,:3])
+                    improving=np.isfinite(proximity(scene.colors,rules)[0]) and ranking(predicted,rules)<ranking(scene.colors,rules)
+                    if not improving and accepted(scene.colors,rules):
+                        move=None;explore_remaining=max(explore_remaining,1)
+
                 threshold=1.0
                 enabled=[i for i,rule in enumerate(rules) if rule['enabled']]
                 plan=None
                 zoom_target=None
                 if not multi and not zoom_out_remaining and not wide_explore and magnify_attempts==0 and zoom_burst<2 and not tracking and locked is None and step>=zoom_cooldown and zoom_blocked_direction!=1 and time.monotonic()<deadline-42:
                     zoom_target=exact_zoom_candidate(im,scene,rules,excluded=excluded)
-                if accepted(scene.colors,rules):move=None;tracking=False
                 if locked is not None and not local:
                     targets=np.array([scene.markers[i] for i in enabled],np.float32)
                     matrix,_=cv2.estimateAffinePartial2D(locked.astype(np.float32),targets,method=cv2.LMEDS)
@@ -196,30 +238,32 @@ class Runner:
                         center=np.array([(scene.board[0]+scene.board[2])/2,(scene.board[1]+scene.board[3])/2])
                         delta=matrix[:,:2]@center+matrix[:,2]-center
                         plan=dict(score=0.,dx=float(delta[0]),dy=float(delta[1]),angle=float(np.degrees(np.arctan2(matrix[1,0],matrix[0,0]))),scale=float(np.hypot(matrix[0,0],matrix[1,0])))
-                elif len(enabled)>1 and not accepted(scene.colors,rules) and not tracking and not local and step>=local_cooldown and (move is None or move[2]>threshold):
+                elif len(enabled)>1 and not tracking and not local and step>=local_cooldown and (move is None or move[2]>threshold):
                     plan=joint_plan(im,scene,rules)
                     if plan is not None:self.event('plan',**plan)
                 # Planning can be expensive: do not start another gesture after
                 # it consumes the time reserved for restoring the best pose.
                 if time.monotonic()>=deadline-30:
                     return self.restore_best(g,im,scene,rules,deadline)
-                if multi and plan is not None and plan['score']<=1:
+                current_rank=ranking(scene.colors,rules)
+                plan_good=plan is not None and plan.get('cost',0)<current_rank[0]*1000+current_rank[1]+current_rank[2]*len(enabled)*.000001
+                if multi and plan_good:
                     requested=round(np.log(plan['scale'])/np.log(1.01))
                     remaining=search_zoom+requested
                     if (remaining < max(-48,best_zoom-48) or remaining > min(48,best_zoom+48)
                             or (requested and np.sign(requested)==zoom_blocked_direction)):
-                        plan=None;locked=None;local_cooldown=step+4;wide_explore=max(wide_explore,2)
+                        plan=None;plan_good=False;locked=None;local_cooldown=step+4;wide_explore=max(wide_explore,2)
                 misses=misses+1 if move is None or move[2]>threshold else 0
                 if move is None or misses>=2:
                     explore_remaining=max(explore_remaining,3 if misses==2 or move is None else 0)
                     misses=0
-                if move is not None and move[2]<=threshold:
+                if move is not None and (move[2]<=threshold or improving):
                     explore_remaining=0
                 refine=not tracking and move is not None and 0<move[2]<=threshold and len(enabled)==1 and step-last_refine>=12
                 exact_near=move is not None and len(enabled)==1 and rules[enabled[0]]['exact'] and move[2]*.6<=12
                 if magnify_started is not None and move is not None:explore_remaining=0
                 if exact_near and step<zoom_hold_until:explore_remaining=0
-                promising=move is not None and move[2]<=threshold
+                promising=move is not None and (move[2]<=threshold or improving)
                 if plan is not None and plan['score']<=1 and abs(plan['angle'])<=1 and abs(plan['scale']-1)<=.01 and np.hypot(plan['dx'],plan['dy'])<2.5:
                     local=local_offsets(1)[:2];local_at=(0,0);locked=None;pending=None;plan=None
                     self.event('local_refine',message='候选已接近，逐点读取三个实际色码进行微调。')
@@ -254,7 +298,7 @@ class Runner:
                     g.drag(scene.board,tx,ty);action={'dx':tx,'dy':ty,'local_refine':True}
                     pending=None;locked=None
                     if not local:local_cooldown=step+4;explore_remaining=2
-                elif plan is not None and plan['score']<=1:
+                elif plan is not None and plan_good:
                     gestures=decompose_gestures(plan,scene.board,[scene.markers[i] for i in enabled])
                     self.event('gestures',**gestures,angle=plan['angle'],scale=plan['scale'])
                     if locked is None:
@@ -306,8 +350,26 @@ class Runner:
                     self.event('explore',message='当前范围没有合适候选，正在拖动色板探索新颜色。')
                     g.drag(scene.board,dx,dy);action={'explore':True,'dx':dx,'dy':dy};visited=[];explore_index+=1
                 self.best.expect(dict(action,rotation_gain=rotation_gain))
-                time.sleep(.10 if 'wheel' in action else .15); im=g.capture(); Image.fromarray(im).save(self.folder/f'step-{step+1:02d}.png',compress_level=1); next_scene=recognize(im,previous=scene,enabled=[r['enabled'] for r in rules])
+                time.sleep(.10 if 'wheel' in action else .15); im=g.capture(); self.store.image(f'step-{step+1:02d}',im); next_scene=recognize(im,previous=scene,enabled=[r['enabled'] for r in rules])
                 motion=measure_board_motion(before,im,scene.board)
+                response=assess_response(before,im,scene,next_scene,action,motion)
+                # A slow frame is not a failed input. Recheck passively only when
+                # failure evidence repeats, and never spend the recovery reserve.
+                if response.state=='static' and response_guard.failures>=1 and time.monotonic()<deadline-32:
+                    self.event('input_recheck',message='画面变化暂不明显，正在等待更新并复查；按 F9 可接管。')
+                    if self.stop.wait(.3):raise Interrupted('已停止，鼠标已释放。')
+                    delayed=g.capture()
+                    try:delayed_scene=recognize(delayed,previous=next_scene,enabled=[r['enabled'] for r in rules])
+                    except (ValueError,RuntimeError) as e:
+                        if isinstance(e,RuntimeError) and 'timeout' not in str(e).lower():raise
+                        response=type(response)('uncertain','delayed_frame_unreadable')
+                    else:
+                        im=delayed;next_scene=delayed_scene
+                        motion=measure_board_motion(before,im,scene.board)
+                        response=assess_response(before,im,scene,next_scene,action,motion)
+                action['input_response']=response.state
+                action['response_reason']=response.reason
+
                 if multi and 'wheel' in action:
                     actual_ticks=np.log(motion['scale'])/np.log(1.01) if motion is not None and motion['scale']>0 else action['wheel']
                     search_zoom+=float(np.clip(actual_ticks,-32,32))
@@ -383,18 +445,24 @@ class Runner:
                                 gain[axis]=.3*gain[axis]+.7*shift[axis]/commanded
                     action['measured_shift']=[round(v,2) for v in shift]
                     action['input_gain']=[round(v,3) for v in gain]
-                # A zoom boundary is not failed mouse input; reverse on next zoom.
-                substantial=abs(action.get('dx',0))+abs(action.get('dy',0))>=8 or 'rotate' in action
-                no_change=no_change+1 if change<1.5 and substantial else 0
+                unresponsive=response_guard.observe(response,action,time.monotonic())
+                if response.state=='static' and response_guard.failures>=2:
+                    # Use a different broad-search direction, not repeated tiny
+                    # corrections on the same island. Reuse normal bounded input.
+                    wide_explore=max(wide_explore,2);pending=None;locked=None;local=[]
                 self.event('action',step=step+1,change=round(change,2),before=scene.colors,after=next_scene.colors,**action)
-                if no_change>=2:raise RuntimeError('连续两次输入后色板未变化。已停止，请检查游戏是否接受模拟鼠标输入。')
-                deadline=reconcile_deadline(deadline,next_scene.seconds,time.monotonic())
+                if unresponsive:
+                    raise RuntimeError('多次不同方向操作并延迟复查后，仍未检测到色板或色码变化，已停止。请确认鼠标是否实际拖动色板；这不一定代表游戏拒绝输入。')
+                captured=getattr(g,'captured_at',None)
+                deadline=reconcile_deadline(deadline,next_scene.seconds,captured if isinstance(captured,(int,float)) else time.monotonic())
                 scene=next_scene
         except TimeoutError as e:self.event('wait_timeout',message=str(e))
         except Interrupted as e:self.event('interrupted',message=str(e))
         except Exception as e:self.event('error',message=str(e),detail=traceback.format_exc())
         finally:
-            (self.folder/'trace.json').write_text(json.dumps(self.trace,ensure_ascii=False,indent=2),encoding='utf-8')
+            self.store.close()
+            self.trace.clear()
+            if hasattr(self,'best'):del self.best
             self.emit('finished',{})
     def refine_actual(self,g,im,scene,rules,deadline):
         """Bound local trials; retain best globally and leave on no improvement."""
@@ -422,43 +490,64 @@ class Runner:
     def restore_best(self,g,im,scene,rules,deadline):
         self.event('restoring',message='剩余约 30 秒，正在回到本轮最接近的已观察颜色。',colors=self.best.colors)
         restored=False
-        offsets=iter(local_offsets(2));last_offset=(0,0)
-        for attempt in range(18):
+        self.best.begin_restore()
+        target_best=True;stalls=0;attempt=0;previous_error=float('inf')
+        offsets=iter(local_offsets(1)[:2]);last_offset=(0,0)
+        near_restored=False
+        while time.monotonic()<deadline-12:
+            attempt+=1
             g.check()
-            if self.best.colors is not None and proximity(scene.colors,rules)<=self.best.score:
+            if self.best.colors is not None and np.isfinite(self.best.target_rank()[1]) and ranking(scene.colors,rules)<=self.best.target_rank():
                 verify=recognize(g.capture(),previous=scene)
-                if proximity(verify.colors,rules)<=self.best.score:
+                if ranking(verify.colors,rules)<=self.best.target_rank():
                     scene=verify;restored=True;break
-            if time.monotonic()>deadline-3:break
-            matrix=self.best.restoration(im,scene.board)
-            if matrix is None:break
+            # Never keep disturbing a visually equivalent, verified compromise.
+            target_colors=self.best.records[self.best.target_index]['colors'] if isinstance(self.best,BestResult) else self.best.colors
+            if recovery_close(scene.colors,target_colors,rules):
+                verify=recognize(g.capture(),previous=scene)
+                if recovery_close(verify.colors,target_colors,rules):
+                    scene=verify;near_restored=True;break
+            if time.monotonic()>deadline-12:break
+            matrix=self.best.restoration(im,scene.board,waypoints=stalls>=3)
+            if matrix is None or stalls>=6:
+                if not self.best.next_target():break
+                target_best=False;stalls=0;previous_error=float('inf')
+                self.event('restore_fallback',message='最佳位置暂无法恢复，正在尝试已记录的备用方案。')
+                continue
+            if time.monotonic()>=deadline-12:break
             l,t,r,b=scene.board;center=np.array([(l+r)/2,(t+b)/2]);delta=matrix[:2,:2]@center+matrix[:2,2]-center
             plan=dict(angle=float(np.degrees(np.arctan2(matrix[1,0],matrix[0,0]))),scale=float(np.hypot(matrix[0,0],matrix[1,0])),dx=float(delta[0]),dy=float(delta[1]))
             gestures=decompose_gestures(plan,scene.board,scene.markers)
-            zoom_ticks=int(np.clip(round(np.log(plan['scale'])/np.log(1.01)),-32,32))
+            residual=abs(plan['angle'])+abs(np.log(plan['scale']))*100+np.linalg.norm(delta)
+            stalls=stalls+1 if residual>=previous_error-.2 else 0;previous_error=residual
+            wheel_gain=self.best.wheel_log_gain
+            zoom_ticks=int(np.clip(round(np.log(plan['scale'])/wheel_gain),-32,32))
             if abs(zoom_ticks)>=3:
                 value=zoom_ticks;g.wheel(scene.board,value,anchor=gestures['zoom_anchor']);kind='zoom'
                 self.best.expect({'wheel':value,'zoom_anchor':gestures['zoom_anchor']})
             elif abs(plan['angle'])>.5:
-                value=float(np.clip(plan['angle'],-90,90));g.rotate(scene.board,value,anchor=gestures['rotation_anchor']);kind='rotate'
-                self.best.expect({'rotate':value,'rotation_anchor':gestures['rotation_anchor']})
-            elif abs(round(np.log(plan['scale'])/np.log(1.01)))>=1:
+                value=float(np.clip(plan['angle']/self.best.rotation_gain,-90,90));g.rotate(scene.board,value,anchor=gestures['rotation_anchor']);kind='rotate'
+                self.best.expect({'rotate':value,'rotation_anchor':gestures['rotation_anchor'],'rotation_gain':self.best.rotation_gain})
+            elif abs(round(np.log(plan['scale'])/wheel_gain))>=1:
                 value=zoom_ticks;g.wheel(scene.board,value,anchor=gestures['zoom_anchor']);kind='zoom'
                 self.best.expect({'wheel':value,'zoom_anchor':gestures['zoom_anchor']})
             else:
                 dx,dy=np.rint(delta).astype(int)
                 if dx==0 and dy==0:
-                    dest=next(offsets,(0,0));dx,dy=dest[0]-last_offset[0],dest[1]-last_offset[1];last_offset=dest
+                    dest=next(offsets,None)
+                    if dest is None:break
+                    dx,dy=dest[0]-last_offset[0],dest[1]-last_offset[1];last_offset=dest
                 g.drag(scene.board,int(dx),int(dy));kind='drag'
                 self.best.expect({'dx':int(dx),'dy':int(dy)})
             time.sleep(.15);im=self.snapshot(g,f'restore-{attempt+1}');scene=recognize(im,previous=scene)
             self.best.observe(im,scene)
             self.event('restore_action',operation=kind,colors=scene.colors,seconds=scene.seconds)
         matched=accepted(scene.colors,rules)
-        message=('寻色完成：已回到本轮最接近结果。' if restored else '寻色结束：未能可靠恢复本轮最佳颜色，已停止操作。')
+        message=(('寻色完成：已回到本轮最接近结果。' if target_best else '寻色完成：已恢复备用方案，未回到最佳组合。') if restored else '寻色结束：未能可靠恢复本轮最佳颜色，已停止操作。')
+        if near_restored:message='寻色完成：已保留接近最佳的组合，停止微调，未精确复现最佳记录。'
         message+=(' 当前颜色已达到目标。' if matched else ' 当前为妥协颜色，未达到设定目标。')
         message+=' 未自动套用，请返回游戏决定使用或取消。'
-        self.event('done',message=message,colors=scene.colors,best_colors=self.best.colors,popup=True,outcome='matched' if matched else 'compromise',restored=restored)
+        self.event('done',message=message,colors=scene.colors,best_colors=self.best.colors,popup=True,outcome='matched' if matched else 'compromise',restored=restored and target_best)
     def diagnostic(self,g,im,scene,deadline):
         initial=scene.colors
         anchor=safe_anchor(scene.board,scene.markers[0])
@@ -482,7 +571,7 @@ class Runner:
             time.sleep(.25); im=g.capture(); colors=result_colors(im)
             if colors is not None:break
         else:raise RuntimeError('已提交，但结果页未能可靠识别，未点击套用。请在游戏中确认。')
-        Image.fromarray(im).save(self.folder/'result.png')
+        self.store.image('result',im)
         if not accepted(colors,rules):raise RuntimeError('结果色码与目标不符，已停止套用。请取消本次结果。')
         return self.apply_result(g,im,colors)
     def apply_result(self,g,im,colors):
@@ -494,7 +583,7 @@ class Runner:
             if len(buttons)==1 and result_colors(im)==colors:break
             if attempt==16:raise RuntimeError('结果页按钮在等待后仍无法可靠定位，未套用。')
             time.sleep(.25);im=g.capture()
-        Image.fromarray(im).save(self.folder/'result-ready.png')
+        self.store.image('result-ready',im)
         g.click(buttons[0][:2]);time.sleep(.8);after=self.snapshot(g,'applied')
         if result_colors(after) is not None:raise RuntimeError('确认点击后结果页仍在，未确认套用成功。')
         self.event('done',message='染色完成：目标色已通过结果页复核并套用。',colors=colors,popup=True,outcome='applied')

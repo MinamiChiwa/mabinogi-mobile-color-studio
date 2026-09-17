@@ -11,7 +11,7 @@ except (AttributeError,OSError):
     except Exception:pass
 u.FindWindowW.argtypes=[W.LPCWSTR,W.LPCWSTR]; u.FindWindowW.restype=W.HWND
 u.GetForegroundWindow.restype=W.HWND
-for name in ['GetClientRect','ClientToScreen','SetForegroundWindow','IsIconic','GetDpiForWindow']:
+for name in ['GetClientRect','ClientToScreen','SetForegroundWindow','IsIconic','GetDpiForWindow','IsWindow']:
     getattr(u,name).argtypes=[W.HWND]+([C.c_void_p] if name in ['GetClientRect','ClientToScreen'] else [])
 ULONG_PTR=C.c_size_t
 class Mouse(C.Structure):
@@ -47,7 +47,7 @@ class Game:
     def __init__(self,stop):
         self.stop=stop; self.hwnd=u.FindWindowW(None,'瑪奇 Mobile')
         if not self.hwnd:raise RuntimeError('未找到瑪奇 Mobile。请先启动台服游戏。')
-        self.initial=self.geometry()
+        self.initial=None if u.IsIconic(self.hwnd) else self.geometry()
     def geometry(self):
         if u.IsIconic(self.hwnd):raise RuntimeError('游戏窗口已最小化，请恢复后重试。')
         r=W.RECT(); p=W.POINT(0,0)
@@ -62,8 +62,12 @@ class Game:
         if self.geometry()!=self.initial:raise Interrupted('窗口位置或尺寸已变化。已停止，请按 F8 重新识别。')
     def capture(self):
         self.check(); x,y,w,h=self.geometry()
+        self.captured_at=time.monotonic()
         return np.array(ImageGrab.grab(bbox=(x,y,x+w,y+h),all_screens=True).convert('RGB'))
     def capture_waiting(self):
+        if not u.IsWindow(self.hwnd):
+            self.hwnd=u.FindWindowW(None,'瑪奇 Mobile')
+            if not self.hwnd:return None
         if self.stop.is_set():raise Interrupted('已停止，鼠标已释放。')
         if u.IsIconic(self.hwnd) or u.GetForegroundWindow()!=self.hwnd:return None
         self.initial=self.geometry()

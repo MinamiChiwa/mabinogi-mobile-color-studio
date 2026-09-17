@@ -4,6 +4,24 @@ from opencc import OpenCC
 language='简体中文'
 traditional=OpenCC('s2twp')
 EN={
+'画面变化暂不明显，正在等待更新并复查；按 F9 可接管。':'Waiting for a fresh frame to recheck movement. Press F9 to take over.',
+'正在复查画面变化':'Rechecking board response',
+'尚未确认输入失败，请稍候。\n满意当前颜色时仍可按 F9 接管。':'Input failure is not confirmed. Please wait.\nPress F9 to keep colors you like.',
+'多次不同方向操作并延迟复查后，仍未检测到色板或色码变化，已停止。请确认鼠标是否实际拖动色板；这不一定代表游戏拒绝输入。':'Stopped after repeated moves in different directions and a delayed recheck showed no board or color-code change. Check whether the board actually moves; this does not prove the game rejected input.',
+
+'等待染色界面':'Waiting for dye screen',
+'可从任意游戏界面进入普通染色并完成教学。\n识别成功后自动寻色；F9 取消等待。':'Open regular dye from any game screen and finish the tutorial.\nSearch starts automatically. F9 cancels waiting.',
+'满意当前颜色？停止接管 F9':'Keep current colors · Stop with F9',
+'正在回退 · 随时可按 F9 接管':'Restoring · F9 to take over',
+'正在恢复本轮最佳组合，结束前提前停止微调。\n满意当前颜色时，按 F9 保留当前画面。':'Restoring the best combination with time to spare.\nPress F9 to stop on colors you like.',
+'当前组合已达标 · 仍在优化':'Current colors meet targets · Optimizing',
+'持续搜索最佳颜色组合':'Searching for the best combination',
+'剩余约 30 秒回退最佳方案。\n满意当前颜色时请按 F9 停止，由你确认使用。':'At about 30 seconds remaining, restore the best.\nLike these colors? Press F9 and confirm in game.',
+'寻色完成：已保留接近最佳的组合，停止微调，未精确复现最佳记录。':'Stopped on a combination close to the best; the saved best was not reproduced exactly.',
+'正在停止并释放鼠标…':'Stopping and releasing the mouse…',
+
+'最佳位置暂无法恢复，正在尝试已记录的备用方案。':'Trying a recorded alternative because the best position could not be restored.',
+'寻色完成：已恢复备用方案，未回到最佳组合。':'Search complete: an alternative was restored, not the best combination.',
 '流程已中断':'Process interrupted',
 '已启用':'Enabled',
 '未启用':'Disabled',

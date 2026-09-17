@@ -47,6 +47,29 @@ class ProductTests(unittest.TestCase):
             with patch.object(runner.stop,'wait',return_value=True),self.assertRaises(Interrupted):
                 runner.wait_for_board(MagicMock(),None)
 
+    def test_unlimited_wait_survives_more_than_sixty_seconds(self):
+        game=MagicMock();image=np.zeros((150,150,3),np.uint8)
+        game.capture_waiting.return_value=image
+        ready=Scene([],[],(0,0,150,150),[None]*3,110,None)
+        with tempfile.TemporaryDirectory() as folder,patch('engine.recognize',side_effect=[ValueError('inventory'),ready]),patch('engine.time.monotonic',side_effect=[0,200]):
+            runner=Runner(lambda *args:None,folder)
+            with patch.object(runner.stop,'wait',return_value=False):
+                _,scene=runner.wait_for_board(game,None,timeout=None)
+        self.assertIs(scene,ready)
+        self.assertTrue(all(e['seconds'] is None for e in runner.trace if e['kind']=='waiting'))
+        game.focus.assert_not_called();game.click.assert_not_called()
+
+    def test_search_bypasses_focus_capture_and_result_page_before_waiting(self):
+        game=MagicMock();game.hwnd=1;events=[]
+        rules=[dict(enabled=True,colors=['#FFFFFF'],exact=True,tolerance=0)]*3
+        with tempfile.TemporaryDirectory() as folder,patch('engine.Game',return_value=game),patch('engine.configure_ocr'),patch('engine.result_colors') as result,patch('platform_win.u.GetDpiForWindow',return_value=96):
+            runner=Runner(lambda k,d:events.append(k),folder)
+            with patch.object(runner,'wait_for_board',side_effect=Interrupted('cancel')) as wait:
+                runner.launch(rules)
+            self.assertIsNone(wait.call_args.kwargs['timeout'])
+        game.focus.assert_not_called();game.capture.assert_not_called();result.assert_not_called()
+        self.assertIn('interrupted',events)
+
     def test_multi_zoom_stays_close_to_entry_and_best(self):
         self.assertEqual(bounded_zoom(32,40,0),8)
         self.assertEqual(bounded_zoom(32,48,0),0)
@@ -56,6 +79,7 @@ class ProductTests(unittest.TestCase):
 
     def test_multi_search_does_not_repeat_unresponsive_joint_zoom(self):
         game=MagicMock();game.hwnd=1
+        game.capture_waiting.side_effect=game.capture
         game.capture.side_effect=[np.full((150,150,3),i*20,np.uint8) for i in range(9)]+[Interrupted('finished')]
         scene=Scene([],[(40,50),(80,70),(120,80)],(0,0,150,150),['#AAAAAA']*3,110,None)
         rules=[dict(enabled=True,colors=['#FFFFFF'],exact=True,tolerance=0) for _ in range(3)]
@@ -107,6 +131,7 @@ class ProductTests(unittest.TestCase):
         self.assertEqual(candidate_shift(image,scene,rules),(30,70,0.0))
     def test_zoom_limit_exits_after_three_failed_attempts(self):
         game=MagicMock();game.hwnd=1
+        game.capture_waiting.side_effect=game.capture
         game.capture.side_effect=[np.full((150,150,3),i*25,np.uint8) for i in range(8)]+[Interrupted('finished')]
         scene=Scene([],[(40,50),(80,70),(120,80)],(0,0,150,150),['#AAAAAA',None,None],110,None)
         rules=[dict(enabled=True,colors=['#FFFFFF'],exact=True,tolerance=0)]+[dict(enabled=False)]*2
@@ -122,6 +147,7 @@ class ProductTests(unittest.TestCase):
         self.assertEqual([c[0] for c in actions[5:7]],['drag']*2)
     def test_zoom_tracks_original_island_before_reset_and_wide_search(self):
         game=MagicMock();game.hwnd=1
+        game.capture_waiting.side_effect=game.capture
         game.capture.side_effect=[np.full((150,150,3),i*17,np.uint8) for i in range(11)]+[Interrupted('finished')]
         scene=Scene([],[(40,50),(80,70),(120,80)],(0,0,150,150),['#AAAAAA',None,None],110,None)
         rules=[dict(enabled=True,colors=['#FFFFFF'],exact=True,tolerance=0)]+[dict(enabled=False)]*2

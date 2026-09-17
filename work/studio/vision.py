@@ -217,8 +217,9 @@ def measure_board_motion(before,after,board):
     """Fit texture motion, rejecting weak matches and static UI features."""
     l,t,r,b=board
     detector=cv2.SIFT_create(nfeatures=1800)
-    ka,da=detector.detectAndCompute(cv2.cvtColor(before[t:b,l:r],cv2.COLOR_RGB2GRAY),None)
-    kb,db=detector.detectAndCompute(cv2.cvtColor(after[t:b,l:r],cv2.COLOR_RGB2GRAY),None)
+    a=before[t:b,l:r];bim=after[t:b,l:r]
+    ka,da=detector.detectAndCompute(cv2.cvtColor(a,cv2.COLOR_RGB2GRAY) if a.ndim==3 else a,None)
+    kb,db=detector.detectAndCompute(cv2.cvtColor(bim,cv2.COLOR_RGB2GRAY) if bim.ndim==3 else bim,None)
     if da is None or db is None or len(db)<2:return None
     pairs=cv2.BFMatcher().knnMatch(da,db,k=2)
     good=[p[0] for p in pairs if len(p)==2 and p[0].distance<.7*p[1].distance]
@@ -241,7 +242,7 @@ def candidate_shift(image,scene,rules,visited=(),excluded=()):
     ymax=min(my-(t+9) for mx,my in enabled)
     yy,xx=np.mgrid[ymin:ymax+1,-int(third*.5):int(third*.5)+1]
     dx,dy=xx.ravel(),yy.ravel(); scores=np.zeros(dx.shape,float); valid=np.ones(dx.shape,bool)
-    active=0
+    active=0;raw_worst=np.zeros(dx.shape);raw_total=np.zeros(dx.shape);feasible=np.ones(dx.shape,bool)
     for i,((mx,my),rule) in enumerate(zip(scene.markers,rules)):
         if not rule['enabled']:continue
         active+=1; sx=mx-dx; sy=my-dy
@@ -256,15 +257,19 @@ def candidate_shift(image,scene,rules,visited=(),excluded=()):
         good &= ~(stem|marker)
         for region,px,py in excluded:
             if region==i:good &= (sx-px)**2+(sy-py)**2>16
+        raw_worst=np.maximum(raw_worst,distances);raw_total+=distances
+        feasible &= np.any(np.all(pixels[:,None,:]==np.array([rgb(c) for c in rule['colors']])[None,:,:],axis=2),axis=1) if rule['exact'] else distances<=rule['tolerance']
         scores=np.maximum(scores,distances/max(.6 if rule['exact'] else rule['tolerance'],.001)); valid &=good
     valid &= (np.abs(dx)+np.abs(dy)>0)
     for vx,vy in visited:valid &= (dx!=vx)|(dy!=vy)
     if not active or not valid.any():return None
     scores[~valid]=np.inf
-    best=float(np.min(scores)); candidates=np.flatnonzero(valid & (scores==best))
+    ids=np.flatnonzero(valid)
+    winner=ids[np.lexsort((raw_total[ids],raw_worst[ids],~feasible[ids]))[0]]
+    best=float(scores[winner]); candidates=np.flatnonzero(valid & (feasible==feasible[winner]) & (raw_worst==raw_worst[winner]) & (raw_total==raw_total[winner]))
     # Equal-color candidates are not equally robust: land inside an island,
     # away from antialiased edges, before preferring a shorter translation.
-    mask=(valid & (scores==best)).reshape(xx.shape).astype(np.uint8)
+    mask=np.zeros(valid.shape,np.uint8);mask[candidates]=1;mask=mask.reshape(xx.shape)
     interior=cv2.distanceTransform(np.pad(mask,1),cv2.DIST_L2,5)[1:-1,1:-1].ravel()
     order=np.lexsort((dx[candidates]**2+dy[candidates]**2,-interior[candidates]))
     j=int(candidates[order[0]])

@@ -29,3 +29,11 @@ __pycache__/
 !/work/studio/i18n.py
 !/work/studio/ui_performance.py
 !/work/studio/test_ui_performance.py
+
+!/work/studio/session_store.py
+!/work/studio/test_session_store.py
+
+!/work/studio/search_overlay.py
+
+!/work/studio/input_response.py
+!/work/studio/test_input_response.py

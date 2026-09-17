@@ -90,6 +90,7 @@ class ExplorationTests(unittest.TestCase):
     def test_accepted_similarity_keeps_exploring_instead_of_finishing(self):
         game=MagicMock();game.hwnd=1
         frames=[np.full((100,100,3),i*20,np.uint8) for i in range(4)]
+        game.capture_waiting.side_effect=game.capture
         game.capture.side_effect=frames+[Interrupted('test complete')]
         scene=Scene([],[(20,40),(50,50),(80,60)],(0,0,100,100),['#FEFEFE']*3,110,None)
         rules=[dict(enabled=True,colors=['#FFFFFF'],exact=False,tolerance=12)]*3
@@ -118,6 +119,7 @@ class ExplorationTests(unittest.TestCase):
     def run_search(self,candidate,frames_count=6):
         game=MagicMock();game.hwnd=1
         frames=[np.full((100,100,3),(i*20)%256,np.uint8) for i in range(frames_count)]
+        game.capture_waiting.side_effect=game.capture
         game.capture.side_effect=frames+[Interrupted('test complete')]
         scene=Scene([],[(20,40),(50,50),(80,60)],(0,0,100,100),[None]*3,110,None)
         events=[]

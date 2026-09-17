@@ -22,3 +22,17 @@ class ResizeTests(unittest.TestCase):
             width,height=window.minsize.call_args.args
             self.assertAlmostEqual(width/height,1120/900,places=2)
             self.assertEqual(width,round(1120*window._ui_scale))
+
+    def test_overlay_reports_search_and_recovery_without_claiming_unverified_match(self):
+        from search_overlay import SearchOverlay
+        rules=[dict(enabled=True,colors=['#FFFFFF'],exact=False,tolerance=8)]+[dict(enabled=False)]*2
+        overlay=SimpleNamespace(rules=rules,phase='waiting',render=MagicMock(),withdraw=MagicMock())
+        SearchOverlay.handle(overlay,'scene',{'colors':['#FEFEFE',None,None]})
+        self.assertEqual(overlay.phase,'searching')
+        self.assertIn('已达标',overlay.render.call_args.args[0])
+        SearchOverlay.handle(overlay,'scene',{'colors':[None,None,None]})
+        self.assertNotIn('已达标',overlay.render.call_args.args[0])
+        SearchOverlay.handle(overlay,'restoring',{})
+        self.assertEqual(overlay.phase,'restoring')
+        SearchOverlay.handle(overlay,'finished',{})
+        overlay.withdraw.assert_called_once()
