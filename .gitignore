@@ -37,3 +37,6 @@ __pycache__/
 
 !/work/studio/input_response.py
 !/work/studio/test_input_response.py
+
+# Local-only working/validation notes
+VALIDATION.md
