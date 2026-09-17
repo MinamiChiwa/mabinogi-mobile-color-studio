@@ -26,7 +26,7 @@ class ProductTests(unittest.TestCase):
         self.assertIsNone(exact_zoom_candidate(image,scene,rules))
         image[180:187,60:67]=80
         self.assertEqual(candidate_shift(image,scene,rules),(30,70,0.0))
-    def test_zoom_limit_keeps_magnified_view_for_targeting(self):
+    def test_zoom_limit_exits_after_three_failed_attempts(self):
         game=MagicMock();game.hwnd=1
         game.capture.side_effect=[np.full((150,150,3),i*25,np.uint8) for i in range(8)]+[Interrupted('finished')]
         scene=Scene([],[(40,50),(80,70),(120,80)],(0,0,150,150),['#AAAAAA',None,None],110,None)
@@ -34,8 +34,29 @@ class ProductTests(unittest.TestCase):
         motion=dict(matrix=[[1,0,0],[0,1,0]],origin=[0,0],scale=1,angle=0,inliers=30)
         with tempfile.TemporaryDirectory() as folder,patch('engine.Game',return_value=game),patch('engine.configure_ocr'),patch('engine.result_colors',return_value=None),patch('engine.recognize',return_value=scene),patch('engine.candidate_shift',return_value=(12,12,10)),patch('engine.measure_board_motion',return_value=motion),patch('engine.time.sleep'),patch('platform_win.u.GetDpiForWindow',return_value=96):
             Runner(lambda *args:None,folder).launch(rules)
-        self.assertEqual(game.wheel.call_count,1)
-        self.assertGreaterEqual(game.drag.call_count,5)
+        actions=[c for c in game.method_calls if c[0] in ('wheel','drag')]
+        self.assertEqual(actions[0][0],'wheel')
+        self.assertEqual(actions[0].args[1],32)
+        self.assertEqual([c[0] for c in actions[1:4]],['drag']*3)
+        self.assertEqual(actions[4][0],'wheel')
+        self.assertEqual(actions[4].args[1],-32)
+        self.assertEqual([c[0] for c in actions[5:7]],['drag']*2)
+    def test_two_zoom_batches_are_unwound_before_wide_search(self):
+        game=MagicMock();game.hwnd=1
+        game.capture.side_effect=[np.full((150,150,3),i*17,np.uint8) for i in range(11)]+[Interrupted('finished')]
+        scene=Scene([],[(40,50),(80,70),(120,80)],(0,0,150,150),['#AAAAAA',None,None],110,None)
+        rules=[dict(enabled=True,colors=['#FFFFFF'],exact=True,tolerance=0)]+[dict(enabled=False)]*2
+        def motion(*args):
+            actions=[c for c in game.method_calls if c[0] in ('wheel','drag')]
+            action=actions[-1]
+            scale=1.01**action.args[1] if action[0]=='wheel' else 1
+            return dict(matrix=[[scale,0,0],[0,scale,0]],origin=[0,0],scale=scale,angle=0,inliers=30)
+        with tempfile.TemporaryDirectory() as folder,patch('engine.Game',return_value=game),patch('engine.configure_ocr'),patch('engine.result_colors',return_value=None),patch('engine.recognize',return_value=scene),patch('engine.candidate_shift',return_value=(12,12,10)),patch('engine.measure_board_motion',side_effect=motion),patch('engine.time.sleep'),patch('platform_win.u.GetDpiForWindow',return_value=96):
+            Runner(lambda *args:None,folder).launch(rules)
+        actions=[c for c in game.method_calls if c[0] in ('wheel','drag')]
+        self.assertEqual([c[0] for c in actions[:9]],['wheel','wheel','drag','drag','drag','wheel','wheel','drag','drag'])
+        self.assertEqual([actions[i].args[1] for i in (0,1,5,6)],[32,32,-32,-32])
+
     def test_translations_preserve_hex_and_mode_identifiers(self):
         import i18n
         original=i18n.language

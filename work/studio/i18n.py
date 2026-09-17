@@ -4,6 +4,7 @@ from opencc import OpenCC
 language='简体中文'
 traditional=OpenCC('s2twp')
 EN={
+'局部多次未命中，正在缩小色板并重新探索。':'No match after several local attempts. Zooming out to explore a new area.',
 '染色工坊':'Color Studio','瑪奇 Mobile':'Mabinogi Mobile','南千和':'南千和',
 '精准 HEX':'Exact HEX','相似颜色':'Similar',
 '颜色区域':'Color region','匹配此区域':'Match this region','点击选色':'Choose color','屏幕吸管':'Eyedropper',

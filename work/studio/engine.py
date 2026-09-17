@@ -116,6 +116,7 @@ class Runner:
             step=-1; zoom_index=0; last_refine=-20; zoom_blocked_direction=0; pending=None; track_attempts=0; locked=None; lock_steps=0
             local=[];local_at=(0,0);local_cooldown=0
             zoom_burst=0;zoom_cooldown=0;zoom_hold_until=0
+            magnify_started=None;magnify_attempts=0;magnify_ticks=0;zoom_out_remaining=0;wide_explore=0
             while True:
                 step+=1
                 g.check()
@@ -134,6 +135,11 @@ class Runner:
                 # A tolerance hit is a saved candidate, not the end of search.
                 if accepted(scene.colors,rules):
                     pending=None;locked=None;local=[];explore_remaining=max(explore_remaining,1)
+                if magnify_started is not None and (magnify_attempts>=3 or time.monotonic()-magnify_started>=12):
+                    zoom_out_remaining=max(32,magnify_ticks)
+                    magnify_started=None;magnify_attempts=0;magnify_ticks=0
+                    pending=None;locked=None;local=[];visited=[];zoom_hold_until=0
+                    self.event('explore',message='局部多次未命中，正在缩小色板并重新探索。')
                 before=im
                 move=pending if pending is not None else candidate_shift(im,scene,rules,visited)
                 tracking=pending is not None;pending=None
@@ -141,7 +147,7 @@ class Runner:
                 enabled=[i for i,rule in enumerate(rules) if rule['enabled']]
                 plan=None
                 zoom_target=None
-                if not tracking and locked is None and step>=zoom_cooldown and zoom_blocked_direction!=1 and time.monotonic()<deadline-42:
+                if not zoom_out_remaining and not wide_explore and magnify_attempts==0 and zoom_burst<2 and not tracking and locked is None and step>=zoom_cooldown and zoom_blocked_direction!=1 and time.monotonic()<deadline-42:
                     zoom_target=exact_zoom_candidate(im,scene,rules)
                 if accepted(scene.colors,rules):move=None;tracking=False
                 if locked is not None and not local:
@@ -162,20 +168,35 @@ class Runner:
                     explore_remaining=0
                 refine=not tracking and move is not None and 0<move[2]<=threshold and len(enabled)==1 and step-last_refine>=12
                 exact_near=move is not None and len(enabled)==1 and rules[enabled[0]]['exact'] and move[2]*.6<=12
+                if magnify_started is not None and move is not None:explore_remaining=0
                 if exact_near and step<zoom_hold_until:explore_remaining=0
                 promising=move is not None and move[2]<=threshold
                 if plan is not None and plan['score']<=1 and abs(plan['angle'])<=1 and abs(plan['scale']-1)<=.01 and np.hypot(plan['dx'],plan['dy'])<2.5:
                     local=local_offsets(1)[:2];local_at=(0,0);locked=None;pending=None;plan=None
                     self.event('local_refine',message='候选已接近，逐点读取三个实际色码进行微调。')
-                if zoom_target is not None:
+                if zoom_out_remaining:
+                    anchor=safe_anchor(scene.board,scene.markers[enabled[0]])
+                    ticks=-min(32,zoom_out_remaining)
+                    g.wheel(scene.board,ticks,anchor=anchor)
+                    action={'wheel':ticks,'zoom_anchor':anchor,'zoom_reset':True}
+                    zoom_out_remaining+=ticks
+                    if not zoom_out_remaining:
+                        wide_explore=2;zoom_burst=0;zoom_cooldown=step+3
+                    visited=[];pending=None;locked=None;local=[]
+                elif wide_explore:
+                    dx,dy=exploration_shift(scene.board,explore_index)
+                    g.drag(scene.board,dx,dy)
+                    action={'explore':True,'dx':dx,'dy':dy,'wide_search':True}
+                    explore_index+=1;wide_explore-=1;visited=[];pending=None;locked=None;local=[]
+                elif zoom_target is not None:
+                    if magnify_started is None:magnify_started=time.monotonic()
                     _,region,anchor=zoom_target
                     g.wheel(scene.board,32,anchor=anchor)
                     action={'wheel':32,'zoom_anchor':anchor,'exact_magnify':True,'region':region}
                     self.event('magnifying',message=f'发现区域 {region+1} 的接近颜色，正在放大寻找纯色。')
                     visited=[];local=[];pending=None;explore_remaining=0;zoom_burst+=1
                     zoom_hold_until=step+8
-                    if zoom_burst>=6:zoom_cooldown=step+8;zoom_burst=0
-                elif local:
+                elif local and magnify_started is None:
                     if actual_score(scene.colors,rules)<=3:
                         im,scene=self.refine_actual(g,im,scene,rules,min(deadline-30,time.monotonic()+3))
                         local=[];pending=None;locked=None;local_cooldown=step+4;explore_remaining=2
@@ -202,16 +223,16 @@ class Runner:
                         g.drag(scene.board,tx,ty);move=(plan['dx'],plan['dy'],plan['score'])
                         action={'dx':tx,'dy':ty,'predicted_delta':plan['score'],'joint':True}
                     visited=[]
-                elif refine and zoom_blocked_direction!=1:
+                elif refine and zoom_blocked_direction!=1 and magnify_started is None:
                     mx,my=scene.markers[enabled[0]];anchor=(mx-move[0],my-move[1])
                     g.wheel(scene.board,20,anchor=anchor)
                     action={'wheel':20,'zoom_anchor':list(anchor),'refine':True};visited=[];last_refine=step
-                elif step and step%7==0 and not promising and not (exact_near and step<zoom_hold_until):
+                elif magnify_started is None and step and step%7==0 and not promising and not (exact_near and step<zoom_hold_until):
                     angle=30 if (step//7)%2 else -45
                     command=float(np.clip(angle/rotation_gain,-120,120))
                     anchor=safe_anchor(scene.board,scene.markers[enabled[(step//7)%len(enabled)]])
                     g.rotate(scene.board,command,anchor=anchor); action={'rotate':command,'rotation_anchor':list(anchor),'desired_rotation':angle}; visited=[]
-                elif step and step%5==0 and not promising and step>=zoom_hold_until:
+                elif magnify_started is None and step and step%5==0 and not promising and step>=zoom_hold_until:
                     direction=(-20,-20,24,24,-24,20)[zoom_index%6];zoom_index+=1
                     if np.sign(direction)==zoom_blocked_direction:direction=-direction
                     anchor=safe_anchor(scene.board,scene.markers[enabled[zoom_index%len(enabled)]])
@@ -235,6 +256,11 @@ class Runner:
                 time.sleep(.10 if 'wheel' in action else .15); im=g.capture(); Image.fromarray(im).save(self.folder/f'step-{step+1:02d}.png',compress_level=1); next_scene=recognize(im,previous=scene)
                 motion=measure_board_motion(before,im,scene.board)
                 self.best.expect(dict(action,rotation_gain=rotation_gain,measured_motion=motion))
+                if action.get('exact_magnify'):
+                    effective=round(np.log(motion['scale'])/np.log(1.01)) if motion is not None and motion['scale']>0 else 32
+                    magnify_ticks+=max(0,min(32,effective))
+                elif magnify_started is not None:
+                    magnify_attempts+=1
                 l,t,r,b=scene.board; change=float(np.mean(np.abs(im[t:b,l:r].astype(float)-before[t:b,l:r].astype(float))))
                 if action.get('joint') and locked is not None:
                     if motion is None:locked=None
@@ -253,6 +279,8 @@ class Runner:
                         action['rotation_gain']=round(rotation_gain,3)
                 if 'wheel' in action:
                     action['measured_motion']=motion
+                    if action.get('zoom_reset') and motion is not None and abs(motion['scale']-1)<.005:
+                        zoom_out_remaining=0;wide_explore=2;zoom_burst=0;zoom_cooldown=step+3
                     if motion is not None:
                         zoom_blocked_direction=int(np.sign(action['wheel'])) if abs(motion['scale']-1)<.005 else 0
                         if action.get('exact_magnify') and zoom_blocked_direction==1:
