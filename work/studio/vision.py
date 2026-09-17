@@ -69,9 +69,11 @@ def color_cards(image):
         return [(x,y,cw,cw) for x,y,cw,ch in a]
     return None
 
-def read_codes(image,cards,markers=None):
+def read_codes(image,cards,markers=None,enabled=None):
     out=[]
     for index,(x,y,w,h) in enumerate(cards):
+        if enabled is not None and not enabled[index]:
+            out.append(None);continue
         crop=image[y+int(h*.72):y+int(h*.98),x+int(w*.06):x+int(w*.96)]
         tight=image[y+int(h*.77):y+int(h*.94),x+int(w*.08):x+int(w*.94)]
         variants=[tight]
@@ -158,7 +160,7 @@ def result_colors(image):
     else:return None
     return [p[2] for p in pills]
 
-def recognize(image,with_ocr=True,previous=None):
+def recognize(image,with_ocr=True,previous=None,enabled=None):
     cards=color_cards(image)
     if cards is None:raise ValueError('未识别到染色小游戏的三张色码卡片。请先进入限时染色界面。')
     h,w=image.shape[:2]; white=np.min(image,axis=2)>210
@@ -194,7 +196,7 @@ def recognize(image,with_ocr=True,previous=None):
     bottom=min(h-3,top+(right-left))
     # Board interior is square in both portrait and landscape layouts.
     if any(not(top<my<bottom) for mx,my in markers):raise ValueError('色板定位不完整，已停止以避免误操作。')
-    colors=read_codes(image,cards,markers) if with_ocr else [None]*3
+    colors=read_codes(image,cards,markers,enabled=enabled) if with_ocr else [None]*3
     seconds=None
     if with_ocr:
         unit=cards[0][2]
@@ -228,7 +230,7 @@ def measure_board_motion(before,after,board):
             'scale':round(float(np.hypot(matrix[0,0],matrix[1,0])),4),'inliers':int(inliers.sum()),
             'matrix':matrix.tolist(),'origin':[l,t]}
 
-def candidate_shift(image,scene,rules,visited=()):
+def candidate_shift(image,scene,rules,visited=(),excluded=()):
     """Score shared translations using each third's own visible texture."""
     l,t,r,b=scene.board; third=(r-l)/3
     # Native-pixel sampling: a one-pixel pure dye must not fall between grid rows.
@@ -252,6 +254,8 @@ def candidate_shift(image,scene,rules,visited=()):
         radius=max(6,round(third*.055))
         marker=(sx-mx)**2+(sy-my)**2<=(radius+3)**2
         good &= ~(stem|marker)
+        for region,px,py in excluded:
+            if region==i:good &= (sx-px)**2+(sy-py)**2>16
         scores=np.maximum(scores,distances/max(.6 if rule['exact'] else rule['tolerance'],.001)); valid &=good
     valid &= (np.abs(dx)+np.abs(dy)>0)
     for vx,vy in visited:valid &= (dx!=vx)|(dy!=vy)

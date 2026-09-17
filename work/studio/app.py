@@ -242,7 +242,9 @@ class App(ct.CTk):
                     c.enabled.set(True);c.target.set(color);c.alt.set('')
                 self.save()
             elif k in ('scene','match','restore_action'):
-                for c,color in zip(self.cards,d.get('colors',[])):c.current.configure(text='当前颜色  '+(color or '读取失败'))
+                for i,(c,color) in enumerate(zip(self.cards,d.get('colors',[]))):
+                    inactive=self.active_rules is not None and not self.active_rules[i]['enabled']
+                    c.current.configure(text='当前颜色  '+(color or ('未参与匹配' if inactive else '读取失败')))
                 if k=='scene':self.status.configure(text=f'正在寻色 · 游戏剩余 {d.get("seconds") or "—"} 秒')
                 elif k=='restore_action':self.status.configure(text=f'正在恢复最佳颜色 · 游戏剩余 {d.get("seconds") or "—"} 秒')
             elif k=='action':self.detail.configure(text='正在调整色板，持续寻找更接近的颜色…')

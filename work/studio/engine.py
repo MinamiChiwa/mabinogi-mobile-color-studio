@@ -47,17 +47,26 @@ def reconcile_deadline(deadline,seconds,now):
     if seconds is None or abs(seconds-(deadline-now))>4:return deadline
     return min(deadline,now+seconds)
 
-def exact_zoom_candidate(image,scene,rules):
+def exact_zoom_candidate(image,scene,rules,excluded=()):
     """Find a near-color island in its own region, before marker occlusion."""
     options=[]
     for i,rule in enumerate(rules):
         if not rule['enabled'] or not rule['exact']:continue
         isolated=[dict(r,enabled=j==i) for j,r in enumerate(rules)]
-        move=candidate_shift(image,scene,isolated)
+        move=candidate_shift(image,scene,isolated,excluded=excluded)
         if move is not None and 0 < move[2]*.6<=12:
             mx,my=scene.markers[i]
             options.append((move[2],i,[int(mx-move[0]),int(my-move[1])]))
     return min(options,key=lambda p:p[0]) if options else None
+
+def transform_points(points,motion):
+    if motion is None:return []
+    matrix=np.asarray(motion['matrix']);origin=np.asarray(motion['origin'])
+    return [(region,*((np.asarray([x,y])-origin)@matrix[:,:2].T+matrix[:,2]+origin)) for region,x,y in points]
+
+def local_stagnation(previous,current,failures):
+    # Only a meaningful improvement in actual game colors earns another attempt.
+    return 0 if current[0]<previous[0]-.15 else failures+1
 
 class Runner:
     def __init__(self,emit,folder):
@@ -116,6 +125,7 @@ class Runner:
             step=-1; zoom_index=0; last_refine=-20; zoom_blocked_direction=0; pending=None; track_attempts=0; locked=None; lock_steps=0
             local=[];local_at=(0,0);local_cooldown=0
             zoom_burst=0;zoom_cooldown=0;zoom_hold_until=0
+            excluded=[]
             magnify_started=None;magnify_attempts=0;magnify_ticks=0;zoom_out_remaining=0;wide_explore=0
             while True:
                 step+=1
@@ -141,14 +151,14 @@ class Runner:
                     pending=None;locked=None;local=[];visited=[];zoom_hold_until=0
                     self.event('explore',message='局部多次未命中，正在缩小色板并重新探索。')
                 before=im
-                move=pending if pending is not None else candidate_shift(im,scene,rules,visited)
+                move=pending if pending is not None else candidate_shift(im,scene,rules,visited,excluded=excluded)
                 tracking=pending is not None;pending=None
                 threshold=1.0
                 enabled=[i for i,rule in enumerate(rules) if rule['enabled']]
                 plan=None
                 zoom_target=None
                 if not zoom_out_remaining and not wide_explore and magnify_attempts==0 and zoom_burst<2 and not tracking and locked is None and step>=zoom_cooldown and zoom_blocked_direction!=1 and time.monotonic()<deadline-42:
-                    zoom_target=exact_zoom_candidate(im,scene,rules)
+                    zoom_target=exact_zoom_candidate(im,scene,rules,excluded=excluded)
                 if accepted(scene.colors,rules):move=None;tracking=False
                 if locked is not None and not local:
                     targets=np.array([scene.markers[i] for i in enabled],np.float32)
@@ -253,14 +263,22 @@ class Runner:
                     self.event('explore',message='当前范围没有合适候选，正在拖动色板探索新颜色。')
                     g.drag(scene.board,dx,dy);action={'explore':True,'dx':dx,'dy':dy};visited=[];explore_index+=1
                 self.best.expect(dict(action,rotation_gain=rotation_gain))
-                time.sleep(.10 if 'wheel' in action else .15); im=g.capture(); Image.fromarray(im).save(self.folder/f'step-{step+1:02d}.png',compress_level=1); next_scene=recognize(im,previous=scene)
+                time.sleep(.10 if 'wheel' in action else .15); im=g.capture(); Image.fromarray(im).save(self.folder/f'step-{step+1:02d}.png',compress_level=1); next_scene=recognize(im,previous=scene,enabled=[r['enabled'] for r in rules])
                 motion=measure_board_motion(before,im,scene.board)
                 self.best.expect(dict(action,rotation_gain=rotation_gain,measured_motion=motion))
+                excluded=transform_points(excluded,motion)[-24:]
                 if action.get('exact_magnify'):
+                    # Follow the chosen island through zoom, then land it at the
+                    # actual marker center instead of selecting another island.
+                    if len(enabled)==1 and motion is not None:
+                        region=action['region']
+                        source=transform_points([(region,*action['zoom_anchor'])],motion)[0]
+                        residual=np.rint(np.asarray(scene.markers[region])-source[1:]).astype(int)
+                        if np.any(residual):pending=(int(residual[0]),int(residual[1]),zoom_target[0]);track_attempts=0
                     effective=round(np.log(motion['scale'])/np.log(1.01)) if motion is not None and motion['scale']>0 else 32
                     magnify_ticks+=max(0,min(32,effective))
                 elif magnify_started is not None:
-                    magnify_attempts+=1
+                    magnify_attempts=local_stagnation(proximity(scene.colors,rules),proximity(next_scene.colors,rules),magnify_attempts)
                 l,t,r,b=scene.board; change=float(np.mean(np.abs(im[t:b,l:r].astype(float)-before[t:b,l:r].astype(float))))
                 if action.get('joint') and locked is not None:
                     if motion is None:locked=None
@@ -286,7 +304,7 @@ class Runner:
                         if action.get('exact_magnify') and zoom_blocked_direction==1:
                             zoom_cooldown=step+10;zoom_hold_until=step+8;zoom_burst=0
                 if 'predicted_delta' in action:
-                    if motion is not None and not action.get('joint') and move[2]<=1 and track_attempts<2:
+                    if motion is not None and not action.get('joint') and (move[2]<=1 or (len(enabled)==1 and rules[enabled[0]]['exact'] and move[2]*.6<=12)) and track_attempts<2:
                         matrix=np.array(motion['matrix']);origin=np.array(motion['origin'])
                         points=np.array([scene.markers[i] for i in enabled],float)
                         sources=points-np.array(move[:2])
@@ -297,7 +315,11 @@ class Runner:
                             if abs(rx)+abs(ry)>0:
                                 pending=(int(rx),int(ry),move[2]);track_attempts+=1
                                 action['tracked_residual']=[int(rx),int(ry)]
-                    if pending is None:track_attempts=0
+                    if pending is None:
+                        if len(enabled)==1 and not accepted(next_scene.colors,rules) and motion is not None:
+                            region=enabled[0];mx,my=scene.markers[region]
+                            excluded.extend(transform_points([(region,mx-move[0],my-move[1])],motion))
+                        track_attempts=0
                     if pending is None and move[2]<=1 and not action.get('joint') and not accepted(next_scene.colors,rules) and step>=local_cooldown:
                         local=local_offsets(1)[:2];local_at=(0,0)
                         self.event('local_refine',message='平移候选已接近，保留当前范围并验证邻近色码。')

@@ -3,7 +3,7 @@ from pathlib import Path
 from unittest.mock import patch
 import numpy as np
 from palette import allowed_colors,overview,full_atlas
-from engine import exact_zoom_candidate,reconcile_deadline
+from engine import exact_zoom_candidate,reconcile_deadline,transform_points,local_stagnation
 from vision import Scene,lab,rgb,candidate_shift
 from result_history import describe_result,save_result,read_history
 from unittest.mock import MagicMock
@@ -11,6 +11,28 @@ from engine import Runner
 from platform_win import Interrupted
 
 class ProductTests(unittest.TestCase):
+    def test_local_improvement_resets_failures_but_noise_does_not(self):
+        self.assertEqual(local_stagnation((10,10),(8,8),2),0)
+        self.assertEqual(local_stagnation((10,10),(9.95,9.95),2),3)
+        self.assertEqual(local_stagnation((10,10),(12,12),2),3)
+
+    def test_failed_island_memory_moves_with_texture(self):
+        motion=dict(matrix=[[2,0,3],[0,2,-4]],origin=[10,20])
+        self.assertEqual(transform_points([(0,20,30)],motion),[(0,33,36)])
+        self.assertEqual(transform_points([(0,20,30)],None),[])
+        scene=Scene([],[(50,110),(150,110),(250,110)],(0,0,300,300),[None]*3,100,None)
+        rules=[dict(enabled=True,colors=['#FFFFFF'],exact=True,tolerance=0)]+[dict(enabled=False)]*2
+        image=np.full((300,300,3),80,np.uint8);image[181:186,61:66]=255;image[40,20]=255
+        self.assertEqual(candidate_shift(image,scene,rules,excluded=[(0,63,183)])[0:2],(30,70))
+
+    def test_disabled_cards_do_not_run_ocr(self):
+        from vision import read_codes
+        image=np.full((120,300,3),255,np.uint8)
+        cards=[(0,0,80,80),(100,0,80,80),(200,0,80,80)]
+        with patch('vision.pytesseract.image_to_string',return_value='#FFFFFF') as ocr:
+            colors=read_codes(image,cards,[(40,100),(140,100),(240,100)],enabled=[True,False,False])
+        self.assertEqual(colors,['#FFFFFF',None,None]);self.assertEqual(ocr.call_count,1)
+
     def test_timer_digit_loss_does_not_trigger_early_fallback(self):
         self.assertEqual(reconcile_deadline(200,10,90),200)
         self.assertEqual(reconcile_deadline(200,109,90),199)
@@ -41,7 +63,7 @@ class ProductTests(unittest.TestCase):
         self.assertEqual(actions[4][0],'wheel')
         self.assertEqual(actions[4].args[1],-32)
         self.assertEqual([c[0] for c in actions[5:7]],['drag']*2)
-    def test_two_zoom_batches_are_unwound_before_wide_search(self):
+    def test_zoom_tracks_original_island_before_reset_and_wide_search(self):
         game=MagicMock();game.hwnd=1
         game.capture.side_effect=[np.full((150,150,3),i*17,np.uint8) for i in range(11)]+[Interrupted('finished')]
         scene=Scene([],[(40,50),(80,70),(120,80)],(0,0,150,150),['#AAAAAA',None,None],110,None)
@@ -54,8 +76,12 @@ class ProductTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder,patch('engine.Game',return_value=game),patch('engine.configure_ocr'),patch('engine.result_colors',return_value=None),patch('engine.recognize',return_value=scene),patch('engine.candidate_shift',return_value=(12,12,10)),patch('engine.measure_board_motion',side_effect=motion),patch('engine.time.sleep'),patch('platform_win.u.GetDpiForWindow',return_value=96):
             Runner(lambda *args:None,folder).launch(rules)
         actions=[c for c in game.method_calls if c[0] in ('wheel','drag')]
-        self.assertEqual([c[0] for c in actions[:9]],['wheel','wheel','drag','drag','drag','wheel','wheel','drag','drag'])
-        self.assertEqual([actions[i].args[1] for i in (0,1,5,6)],[32,32,-32,-32])
+        self.assertEqual([c[0] for c in actions[:7]],['wheel','drag','drag','drag','wheel','drag','drag'])
+        self.assertEqual([actions[i].args[1] for i in (0,4)],[32,-32])
+        # The original (28,38) island is transformed by the measured zoom,
+        # then aligned to marker (40,50), rather than reusing (12,12).
+        expected=np.rint(np.array([40,50])-np.array([28,38])*1.01**32).astype(int)
+        self.assertEqual(actions[1].args[1:],tuple(expected))
 
     def test_translations_preserve_hex_and_mode_identifiers(self):
         import i18n
