@@ -14,7 +14,9 @@ Download the complete ZIP from Releases, extract it and run `ColorStudio.exe`. K
 
 1. Enable the regions to match. Enter HEX colors, use the color picker or screen eyedropper, and optionally add alternative colors.
 2. Choose Exact HEX or Similar. Try ΔE 8–12 initially for Similar; lower values mean a closer match.
-3. Open a regular dye in the game. After the tutorial, press **F8** to search or **F9** to stop.
+3. Use Auto-detect under Game window, or select a window manually. Click Start or press **F8** to focus the game. Open regular dye and finish the tutorial; searching starts automatically. **F9** stops the tool.
+
+Auto-detection accepts spacing variations in the title and recognizes the game executable. Select manually if multiple candidates exist; select again if that window closes. Borderless fullscreen is supported. Keep the game in the foreground and its geometry unchanged during active searching.
 
 Similar mode continues improving after finding a result within tolerance. Unless every enabled region reaches an exact target or alternative, the final approximately 30 seconds are reserved for returning to the best observed set. The game HEX codes are verified before completion. You decide whether to use a compromise result.
 
@@ -25,7 +27,7 @@ Choose Simplified Chinese, Traditional Chinese or English in the upper-right lan
 ## Preview and history
 
 - Click the ordered color overview to open the complete allowed-color atlas.
-- Zoom, pan, scroll and hover to inspect individual HEX values without pagination.
+- Use +/− to zoom, drag to pan, and hover to inspect individual HEX values without pagination.
 - The last 50 results retain the three colors, per-region ΔE, maximum and mean differences.
 - Automatic verification and apply is off by default. Exact mode disables the tolerance slider.
 - Settings, results and diagnostic screenshots are stored locally in the adjacent `data` folder.
@@ -52,6 +54,6 @@ Output: `outputs/release/ColorStudio`. Previous release data is backed up locall
 
 A timed search cannot guarantee an exact match or a global optimum. Actual game testing does not cover every DPI and monitor configuration.
 
-After F8, the tool waits up to 60 seconds for the dye board and countdown. You can open regular dye from your inventory and finish the tutorial during this time. Waiting sends no mouse input; F9 cancels. A timeout dialog asks you to press F8 again.
+After starting, the tool waits for the dye board and timer until F9 cancels. If Windows prevents game activation, click the game yourself; there is no need to start again. Hotkey registration status appears at the bottom. Close other tool copies or use buttons if a key is unavailable.
 
-The main window keeps three region cards and scales at a fixed 56:45 aspect ratio. The exact-color notice remains visible. Enabled cards have a teal border and background; disabled cards show an explicit label. Wheel input is disabled throughout the tool UI; click or drag to adjust values. During the initial wait, you may return to the game after briefly changing focus. Interruptions and errors display a dialog.
+The main window keeps three region cards with stable font sizes and control heights; resizing adjusts spacing and flexible areas. The exact-color notice remains visible. Enabled cards have a teal border and background; disabled cards show an explicit label. Wheel input is disabled throughout the tool UI; click or drag to adjust values. During the initial wait, you may return to the game after briefly changing focus. Interruptions and errors display a dialog.

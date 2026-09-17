@@ -3,6 +3,7 @@ import ctypes as C, time, math
 from ctypes import wintypes as W
 import numpy as np
 from PIL import ImageGrab
+from window_target import resolve_target,valid_target,WindowUnavailable
 
 u=C.windll.user32
 try:u.SetProcessDpiAwarenessContext(C.c_void_p(-4))
@@ -44,16 +45,19 @@ def rotation_path(board,anchor,angle):
     return points
 
 class Game:
-    def __init__(self,stop):
-        self.stop=stop; self.hwnd=u.FindWindowW(None,'瑪奇 Mobile')
-        if not self.hwnd:raise RuntimeError('未找到瑪奇 Mobile。请先启动台服游戏。')
+    def __init__(self,stop,target=None):
+        self.stop=stop;self.manual_target=target;self.target=resolve_target(target);self.hwnd=self.target.hwnd
         self.initial=None if u.IsIconic(self.hwnd) else self.geometry()
     def geometry(self):
+        if not valid_target(self.target):raise Interrupted('所选窗口已关闭，请重新选择游戏窗口。')
         if u.IsIconic(self.hwnd):raise RuntimeError('游戏窗口已最小化，请恢复后重试。')
         r=W.RECT(); p=W.POINT(0,0)
         if not u.GetClientRect(self.hwnd,C.byref(r)) or not u.ClientToScreen(self.hwnd,C.byref(p)):raise RuntimeError('游戏窗口已关闭。')
         return p.x,p.y,r.right,r.bottom
     def focus(self):
+        if u.IsIconic(self.hwnd):
+            u.ShowWindow.argtypes=[W.HWND,C.c_int];u.ShowWindow(self.hwnd,9)
+        self.initial=self.geometry()
         u.SetForegroundWindow(self.hwnd); time.sleep(.18)
         if u.GetForegroundWindow()!=self.hwnd:raise RuntimeError('无法激活游戏。请点击游戏后按 F8。')
     def check(self):
@@ -65,9 +69,10 @@ class Game:
         self.captured_at=time.monotonic()
         return np.array(ImageGrab.grab(bbox=(x,y,x+w,y+h),all_screens=True).convert('RGB'))
     def capture_waiting(self):
-        if not u.IsWindow(self.hwnd):
-            self.hwnd=u.FindWindowW(None,'瑪奇 Mobile')
-            if not self.hwnd:return None
+        if not valid_target(self.target):
+            if self.manual_target is not None:raise WindowUnavailable('所选窗口已关闭，请重新选择游戏窗口。')
+            try:self.target=resolve_target();self.hwnd=self.target.hwnd
+            except WindowUnavailable:return None
         if self.stop.is_set():raise Interrupted('已停止，鼠标已释放。')
         if u.IsIconic(self.hwnd) or u.GetForegroundWindow()!=self.hwnd:return None
         self.initial=self.geometry()

@@ -8,6 +8,7 @@ from platform_win import Game,Interrupted
 from vision import recognize,accepted,candidate_shift,configure_ocr,green_buttons,result_colors,measure_board_motion,error
 from planner import joint_plan,decompose_gestures
 from best_result import BestResult,proximity,ranking
+from window_target import WindowUnavailable
 from input_response import assess_response,ResponseGuard
 from session_store import SessionStore,cleanup
 
@@ -129,7 +130,7 @@ class Runner:
             except Interrupted:
                 if self.stop.is_set():raise
                 im=None
-    def launch(self,rules,mode='search',auto=False):
+    def launch(self,rules,mode='search',auto=False,activate=False,target=None):
         self.store=SessionStore(self.folder,enabled=mode in ('diagnostic','recovery_test'))
         # Housekeeping is independent of the timed search and ignores legacy/unmarked files.
         threading.Thread(target=self.clean_sessions,daemon=True).start()
@@ -137,15 +138,24 @@ class Runner:
             configure_ocr()
             if mode=='search':
                 self.event('waiting',message='正在等待染色界面，请打开普通染色并完成教学。按 F9 可取消。',seconds=None)
+                last_window_notice=0
                 while True:
                     if self.stop.is_set():raise Interrupted('已停止，鼠标已释放。')
-                    try:g=Game(self.stop);break
-                    except RuntimeError as e:
-                        if not any(t in str(e) for t in ('未找到瑪奇','已最小化','窗口已关闭')):raise
+                    try:g=Game(self.stop,target=target);break
+                    except WindowUnavailable as e:
+                        if target is not None:raise
+                        if time.monotonic()>=last_window_notice:
+                            self.event('waiting',message=str(e),seconds=None);last_window_notice=time.monotonic()+5
                         if self.stop.wait(.5):raise Interrupted('已停止，鼠标已释放。')
+                if activate:
+                    try:g.focus()
+                    except RuntimeError:
+                        self.event('activation',message='未能自动切回游戏。请点击游戏窗口，程序会继续等待识别，无需再次开始。')
                 im=None
             else:
-                g=Game(self.stop);g.focus();im=self.snapshot(g,'start')
+                g=Game(self.stop,target=target);g.focus();im=self.snapshot(g,'start')
+            from window_target import window_title
+            self.event('window_bound',title=window_title(g.hwnd),hwnd=int(g.hwnd))
             self.event('config',rules=rules,auto_apply=auto,dpi=int(__import__('platform_win').u.GetDpiForWindow(g.hwnd)))
             result=result_colors(im) if im is not None and mode!='search' else None
             if result is not None:

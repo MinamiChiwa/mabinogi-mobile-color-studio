@@ -40,3 +40,10 @@ __pycache__/
 
 # Local-only working/validation notes
 VALIDATION.md
+
+!/work/studio/hotkeys.py
+!/work/studio/test_hotkeys.py
+
+!/work/studio/window_target.py
+!/work/studio/window_picker.py
+!/work/studio/test_window_target.py

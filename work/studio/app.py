@@ -11,6 +11,9 @@ from vision import normalize_hex
 from palette import allowed_colors,overview
 from palette_viewer import PaletteViewer
 from search_overlay import SearchOverlay
+from hotkeys import run_hotkeys
+from window_picker import WindowPicker
+from window_target import resolve_target
 from result_history import describe_result,read_history,save_result
 from eyedropper import pick_screen
 from concurrent.futures import ThreadPoolExecutor
@@ -68,7 +71,7 @@ class Card(ct.CTkFrame):
         ct.CTkSegmentedButton(self,values=['精准 HEX','相似颜色'],variable=self.mode,command=self.change_mode,font=(FONT,12),selected_color='#236D62',selected_hover_color='#2C8275').grid(row=7,column=0,padx=20,pady=(8,10),sticky='ew')
         self.slider=DeliberateSlider(self,from_=1,to=35,number_of_steps=34,variable=self.tolerance,command=self.change_mode,progress_color=ACCENT,button_color=ACCENT)
         self.slider.grid(row=8,column=0,padx=20,sticky='ew')
-        self.hint=ct.CTkLabel(self,text='',font=(FONT,11),text_color=MUTED,height=20);self.hint.grid(row=9,column=0,padx=20,pady=(0,6),sticky='w')
+        self.hint=ct.CTkLabel(self,text='',font=(FONT,11),text_color=MUTED,height=34,wraplength=260,justify='left');self.hint.grid(row=9,column=0,padx=20,pady=(0,6),sticky='w')
         self.current=ct.CTkLabel(self,text='当前颜色  —',font=(FONT,12),text_color=MUTED,height=20);self.current.grid(row=10,column=0,padx=20,pady=(0,10),sticky='w')
         self.best_label=ct.CTkLabel(self,text='最佳结果  —',font=(FONT,11),text_color=ACCENT,height=22,corner_radius=5);self.best_label.grid(row=11,column=0,padx=20,pady=(0,8),sticky='ew')
         self.target.trace_add('write',self.preview);self.alt.trace_add('write',self.preview); self.preview();self.change_mode()
@@ -159,13 +162,16 @@ class App(ct.CTk):
     def __init__(self):
         super().__init__();self.title(tr('染色工坊 · 瑪奇 Mobile'));self.geometry('1120x900');self.minsize(784,630);self.wm_aspect(56,45,56,45);self.configure(fg_color=BG)
         self.after(100,self.fit_screen)
-        self.overlay=None;self.active_rules=None;self.history=read_history(DATA/'history.json');self.best_summary=None
+        self.selected_window=None;self.overlay=None;self.active_rules=None;self.history=read_history(DATA/'history.json');self.best_summary=None
         self.q=queue.Queue();self.runner=None;self.busy=False;self.picking=False;self.keys={};self.cards=[];self.auto=tk.BooleanVar(value=False)
         self.grid_columnconfigure(0,weight=1); self.grid_rowconfigure(2,weight=1)
         header=ct.CTkFrame(self,fg_color='transparent');header.grid(row=0,column=0,padx=20,pady=(14,6),sticky='ew')
         ct.CTkLabel(header,text='染色工坊',font=(FONT,28,'bold'),text_color=INK).pack(side='left')
         ct.CTkLabel(header,text='瑪奇 Mobile  /  by 南千和',font=(FONT,12),text_color=MUTED).pack(side='left',padx=18,pady=(10,0))
         toolbar=ct.CTkFrame(self,fg_color='transparent');toolbar.grid(row=1,column=0,padx=20,pady=(0,8),sticky='ew')
+        self.window_button=ct.CTkButton(toolbar,text='游戏窗口 · 自动检测',width=250,height=32,anchor='w',fg_color='#28364A',command=self.pick_window)
+        self.window_button.pack(side='left')
+        self.refresh_window_label()
         self.body_scroll=ct.CTkFrame(self,fg_color=BG,corner_radius=0)
         self.body_scroll.grid(row=2,column=0,padx=12,sticky='nsew');self.body_scroll.grid_columnconfigure(0,weight=1)
         ct.CTkOptionMenu(toolbar,values=['简体中文','繁體中文','English'],width=115,command=self.change_language,variable=tk.StringVar(value=i18n.language)).pack(side='right',padx=(8,0))
@@ -175,13 +181,13 @@ class App(ct.CTk):
         intro=ct.CTkFrame(self.body_scroll,fg_color='transparent');intro.grid(row=0,column=0,padx=8,pady=(0,10),sticky='ew')
         self.intro=intro
         self.intro_labels=[]
-        label=ct.CTkLabel(intro,text='① 设置目标颜色    →    ② 游戏内打开普通染色    →    ③ 教学结束后按 F8',font=(FONT,13),text_color=MUTED,justify='left');label.pack(anchor='w');self.intro_labels.append(label)
+        label=ct.CTkLabel(intro,text='① 设置颜色与窗口    →    ② 点击开始或按 F8    →    ③ 进入普通染色，教学后自动寻色',font=(FONT,13),text_color=MUTED,justify='left');label.pack(anchor='w');self.intro_labels.append(label)
         label=ct.CTkLabel(intro,text='精准色更难寻找  ·  推荐从相似模式 ΔE 8–12 开始，数值越小越接近目标',font=(FONT,13,'bold'),text_color='#FFD18A',fg_color='#342C22',corner_radius=8,height=34,justify='left');label.pack(fill='x',pady=(6,0));self.intro_labels.append(label)
         body=ct.CTkFrame(self.body_scroll,fg_color='transparent');body.grid(row=2,column=0,sticky='ew');self.card_body=body
         for i in range(3):
             body.grid_columnconfigure(i,weight=1,uniform='cards');card=Card(body,i);card.grid(row=0,column=i,padx=6,pady=6,sticky='nsew');self.cards.append(card)
         controls=ct.CTkFrame(self,fg_color='transparent');controls.grid(row=3,column=0,padx=20,pady=(8,4),sticky='ew')
-        self.start=ct.CTkButton(controls,text='开始寻色   F8',height=44,width=165,font=(FONT,14,'bold'),fg_color=ACCENT,text_color='#102A27',hover_color='#80E5CF',command=self.go);self.start.grid(row=0,column=0,padx=(0,8),pady=4,sticky='ew')
+        self.start=ct.CTkButton(controls,text='开始寻色   F8',height=44,width=165,font=(FONT,14,'bold'),fg_color=ACCENT,text_color='#102A27',hover_color='#80E5CF',command=lambda:self.go(activate=True));self.start.grid(row=0,column=0,padx=(0,8),pady=4,sticky='ew')
         self.stop_button=ct.CTkButton(controls,text='停止   F9',height=44,width=100,fg_color='#2B384C',command=self.stop);self.stop_button.grid(row=0,column=1,padx=(0,8),pady=4,sticky='ew')
         self.auto_check=ct.CTkCheckBox(controls,text='达标后自动复核并套用',variable=self.auto,font=(FONT,12),fg_color='#236D62')
         self.diagnostic_button=ct.CTkButton(controls,text='诊断',width=65,height=34,fg_color='#28364A',command=self.diagnostics)
@@ -201,13 +207,33 @@ class App(ct.CTk):
         for label in (self.status,self.detail,self.footer):label.configure(wraplength=1040)
         self.load()
         if self.history:self.display_best(self.history[0])
-        threading.Thread(target=self.hotkey_loop,daemon=True).start()
+        self._hotkeys_stop=threading.Event()
+        self._hotkey_thread=threading.Thread(target=self.hotkey_loop,daemon=True)
+        self._hotkey_thread.start()
         self.after(30,self.tick);self.protocol('WM_DELETE_WINDOW',self.close)
         # Wheel input never changes settings or scrolls this application's UI.
         for sequence in ('<MouseWheel>','<Button-4>','<Button-5>'):
             self.bind_all(sequence,lambda e:'break')
             for tag in ('Scrollbar','TScrollbar','Menu'):
                 self.bind_class(tag,sequence,lambda e:'break')
+    def refresh_window_label(self):
+        target=self.selected_window
+        if target is None:
+            try:title=resolve_target().title
+            except RuntimeError:title=tr('未检测到唯一窗口')
+            text=tr('自动检测')+' · '+title
+        else:text=tr('游戏窗口 · ')+target.title
+        self.window_button.configure(text=text if len(text)<=34 else text[:31]+'…')
+    def pick_window(self):
+        if self.busy:
+            self.status.configure(text='请先按 F9 停止，再更换游戏窗口。');return
+        def selected(target):
+            if self.busy:
+                self.status.configure(text='请先按 F9 停止，再更换游戏窗口。');return
+            self.selected_window=target
+            self.refresh_window_label()
+            self.status.configure(text='窗口选择已更新，下次开始时生效。')
+        WindowPicker(self,self.selected_window,selected)
     def change_language(self,value):
         if self.busy:
             self.status.configure(text=tr('请先停止寻色再切换语言。'));return
@@ -215,6 +241,8 @@ class App(ct.CTk):
         (DATA/'settings.json').write_text(json.dumps({'language':value},ensure_ascii=False),encoding='utf-8')
         import subprocess
         args=[sys.executable] if getattr(sys,'frozen',False) else [sys.executable,str(Path(__file__).resolve())]
+        self._hotkeys_stop.set()
+        if hasattr(self,'_hotkey_thread'):self._hotkey_thread.join(timeout=1)
         self.destroy();subprocess.Popen(args)
         __import__('os')._exit(0)
     def display_best(self,row):
@@ -274,8 +302,10 @@ class App(ct.CTk):
                 for key in ['enabled','target','alt','mode','tolerance']:getattr(c,key).set(d[key])
                 c.change_mode()
         except (OSError,ValueError,KeyError):pass
-    def go(self,mode='search'):
-        if self.busy or self.picking:return
+    def go(self,mode='search',activate=False):
+        if self.busy:
+            self.status.configure(text='任务已启动，正在等待或寻色；按 F9 停止。');return
+        if self.picking:return
         try:
             rules=[c.rule() for c in self.cards]
             if mode=='search' and not any(r['enabled'] for r in rules):raise ValueError('请至少启用一个颜色区域。')
@@ -285,33 +315,43 @@ class App(ct.CTk):
         self.busy=True;self.start.configure(state='disabled');self.status.configure(text='正在识别游戏界面…')
         folder=DATA/'sessions'/datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
         if mode=='search':
-            if self.overlay is None:self.overlay=SearchOverlay(self,self.stop)
-            self.overlay.begin(rules)
+            try:
+                if self.overlay is None:self.overlay=SearchOverlay(self,self.stop)
+                self.overlay.begin(rules)
+            except Exception:
+                self.detail.configure(text='浮窗暂不可用，寻色状态请查看主窗口。')
         self.runner=Runner(lambda k,d:self.q.put((k,d)),folder)
-        threading.Thread(target=self.runner.launch,args=(rules,mode,self.auto.get()),daemon=True).start()
+        threading.Thread(target=self.runner.launch,args=(rules,mode,self.auto.get(),activate,self.selected_window),daemon=True).start()
     def stop(self):
         if self.runner:self.runner.stop.set();self.status.configure(text='正在停止并释放鼠标…')
         if self.overlay is not None:self.overlay.render('正在停止并释放鼠标…','')
     def hotkey_loop(self):
-        registered=[]
         keys=[(1,0x77),(2,0x78),(3,0x79),(4,0x76)]
-        if not getattr(sys,'frozen',False):keys.append((5,0x75)) # Development-only controlled recovery test.
-        for i,vk in keys:
-            if platform_win.u.RegisterHotKey(None,i,0x4000,vk):registered.append(i)
-            else:self.q.put(('error',{'message':'快捷键被其他程序占用，请使用界面按钮。'}))
-        msg=platform_win.W.MSG()
-        while platform_win.u.GetMessageW(ctypes.byref(msg),None,0,0)>0:
-            if msg.message==0x312:self.q.put(('hotkey',{'id':int(msg.wParam)}))
+        if not getattr(sys,'frozen',False):keys.append((5,0x75))
+        def receive(kind,data):
+            if kind=='hotkey' and data['id']==2 and self.runner:self.runner.stop.set()
+            self.q.put((kind,data))
+        run_hotkeys(platform_win.u,ctypes,platform_win.W,self._hotkeys_stop,receive,keys)
     def tick(self):
         while not self.q.empty():
             k,d=self.q.get()
             if self.overlay is not None:self.overlay.handle(k,d)
             if k=='hotkey':
-                if d['id']==1:self.go()
+                if d['id']==1:self.go(activate=True)
                 elif d['id']==2:self.stop()
                 elif d['id']==3:self.go('diagnostic')
                 elif d['id']==4:self.go('capture')
                 elif d['id']==5:self.go('recovery_test')
+            elif k=='hotkey_status':
+                names={1:'F8',2:'F9',3:'F10',4:'F7',5:'F6'}
+                failed=[names[i] for i in d['failed']]
+                text='快捷键已就绪：F8 开始 / F9 停止' if not failed else '快捷键不可用：'+', '.join(failed)+'；请关闭其他工具副本或使用按钮。'
+                self.footer.configure(text=text)
+            elif k=='window_bound':
+                self.detail.configure(text=tr('正在识别窗口：')+d['title'])
+                prefix=tr('自动检测')+' · ' if self.selected_window is None else tr('游戏窗口 · ')
+                label=prefix+d['title']
+                self.window_button.configure(text=label if len(label)<=34 else label[:31]+'…')
             elif k=='targets':
                 for c,color in zip(self.cards,d['colors']):
                     c.enabled.set(True);c.target.set(color);c.alt.set('')
@@ -329,7 +369,7 @@ class App(ct.CTk):
                 self.status.configure(text=tr(d['message']))
                 self.after(100,lambda m=d['message']:messagebox.showinfo(tr('流程已中断'),tr(m),parent=self))
             elif k=='action':self.detail.configure(text='正在调整色板，持续寻找更接近的颜色…')
-            elif k in ('explore','restoring','magnifying','restore_fallback','input_recheck'):self.detail.configure(text=d['message'])
+            elif k in ('explore','restoring','magnifying','restore_fallback','input_recheck','activation'):self.detail.configure(text=d['message'])
             elif k=='best':
                 if self.active_rules:self.display_best(describe_result(d['colors'],self.active_rules))
             elif k in ('error','done'):
@@ -352,7 +392,7 @@ class App(ct.CTk):
     def close(self):
         if self.busy:self.stop();self.after(250,self.close)
         else:
-            for i in (1,2,3,4,5):platform_win.u.UnregisterHotKey(None,i)
+            self._hotkeys_stop.set()
             self.destroy()
 
 if __name__=='__main__':App().mainloop()

@@ -83,7 +83,9 @@ class CapturedSceneTests(unittest.TestCase):
         self.assertEqual(moved.colors[0],'#001346')
 
     def test_white_marker(self):
-        im=np.array(Image.open('work/studio/release-test-data/sessions/20260917-102739/start.png'))
+        fixture=Path('work/studio/release-test-data/sessions/20260917-102739/start.png')
+        if not fixture.exists():self.skipTest('Local private capture fixture is not distributed')
+        im=np.array(Image.open(fixture))
         scene=recognize(im,False)
         self.assertLess(abs(scene.markers[1][1]-623),5)
 

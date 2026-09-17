@@ -10,7 +10,7 @@ class SearchOverlay(ct.CTkToplevel):
         super().__init__(parent)
         self.withdraw();self.overrideredirect(True);self.attributes('-topmost',True)
         self.configure(fg_color='#131F2C');self.rules=[];self.phase='waiting';self._text=None
-        self.geometry(f'390x170+{max(0,self.winfo_screenwidth()-round(390*self._get_window_scaling())-24)}+35')
+        self.geometry(f'390x195+{max(0,self.winfo_screenwidth()-round(390*self._get_window_scaling())-24)}+35')
         self.grid_columnconfigure(0,weight=1)
         self.heading=ct.CTkLabel(self,text='等待染色界面',font=('Microsoft YaHei UI',16,'bold'),anchor='w',text_color='#62D7BD')
         self.heading.grid(row=0,column=0,padx=16,pady=(10,2),sticky='ew')
@@ -44,7 +44,9 @@ class SearchOverlay(ct.CTkToplevel):
         self._text=value;self.heading.configure(text=tr(title));self.copy.configure(text=tr(body))
     def handle(self,kind,data):
         if kind=='waiting':
-            self.phase='waiting';self.render('等待染色界面','可从任意游戏界面进入普通染色并完成教学。\n识别成功后自动寻色；F9 取消等待。')
+            self.phase='waiting';self.render('等待染色界面',data.get('message','可从任意游戏界面进入普通染色并完成教学。\n识别成功后自动寻色；F9 取消等待。'))
+        elif kind=='activation':
+            self.render('请点击游戏窗口',data['message'])
         elif kind in ('restoring','restore_action','restore_fallback'):
             self.phase='restoring';self.render('正在回退 · 随时可按 F9 接管','正在恢复本轮最佳组合，结束前提前停止微调。\n满意当前颜色时，按 F9 保留当前画面。')
         elif kind in ('scene','action') and self.phase!='restoring':

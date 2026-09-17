@@ -50,7 +50,7 @@ class PaletteViewer(ct.CTkToplevel):
         if self._item is None:self._item=self.canvas.create_image(0,0,image=self.photo,anchor='nw')
         else:self.canvas.itemconfigure(self._item,image=self.photo)
         self.canvas.configure(scrollregion=(0,0,*size));self._last_color=None
-        self.note.configure(text=f'{self.scale:.0%} · 色差由中心向外增加 · 放大查看每个颜色，拖动或滚动浏览，悬停查看 HEX')
+        self.note.configure(text=f'{self.scale:.0%} · 色差由中心向外增加 · ＋／－缩放，拖动浏览，悬停查看 HEX')
     def inspect(self,event):
         if self.image is None:return
         now=time.monotonic()
