@@ -1,0 +1,6 @@
+customtkinter==6.0.0
+numpy==2.5.2
+opencv-python==4.14.0.94
+Pillow==11.3.0
+pytesseract==0.3.13
+opencc-python-reimplemented==0.1.7
