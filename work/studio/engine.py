@@ -68,6 +68,12 @@ def local_stagnation(previous,current,failures):
     # Only a meaningful improvement in actual game colors earns another attempt.
     return 0 if current[0]<previous[0]-.15 else failures+1
 
+def bounded_zoom(ticks,current,best):
+    """Keep multi-region exploration within 48 ticks of entry and best pose."""
+    low=max(-48,best-48);high=min(48,best+48)
+    target=np.clip(current+ticks,low,high)
+    return int(np.clip(round(target-current),-32,32))
+
 class Runner:
     def __init__(self,emit,folder):
         self.emit=emit; self.stop=threading.Event(); self.folder=Path(folder); self.trace=[]
@@ -126,12 +132,15 @@ class Runner:
             local=[];local_at=(0,0);local_cooldown=0
             zoom_burst=0;zoom_cooldown=0;zoom_hold_until=0
             excluded=[]
+            multi=sum(bool(r['enabled']) for r in rules)>1
+            search_zoom=0.;best_zoom=0.;joint_stalls=0
             magnify_started=None;magnify_attempts=0;magnify_ticks=0;zoom_out_remaining=0;wide_explore=0
             while True:
                 step+=1
                 g.check()
                 self.event('scene',colors=scene.colors,seconds=scene.seconds)
                 if self.best.observe(im,scene):
+                    best_zoom=search_zoom
                     Image.fromarray(im).save(self.folder/'best-observed.png')
                     self.event('best',colors=scene.colors,delta=self.best.score[0])
                 if perfect_match(scene.colors,rules):
@@ -157,7 +166,7 @@ class Runner:
                 enabled=[i for i,rule in enumerate(rules) if rule['enabled']]
                 plan=None
                 zoom_target=None
-                if not zoom_out_remaining and not wide_explore and magnify_attempts==0 and zoom_burst<2 and not tracking and locked is None and step>=zoom_cooldown and zoom_blocked_direction!=1 and time.monotonic()<deadline-42:
+                if not multi and not zoom_out_remaining and not wide_explore and magnify_attempts==0 and zoom_burst<2 and not tracking and locked is None and step>=zoom_cooldown and zoom_blocked_direction!=1 and time.monotonic()<deadline-42:
                     zoom_target=exact_zoom_candidate(im,scene,rules,excluded=excluded)
                 if accepted(scene.colors,rules):move=None;tracking=False
                 if locked is not None and not local:
@@ -170,6 +179,16 @@ class Runner:
                 elif len(enabled)>1 and not accepted(scene.colors,rules) and not tracking and not local and step>=local_cooldown and (move is None or move[2]>threshold):
                     plan=joint_plan(im,scene,rules)
                     if plan is not None:self.event('plan',**plan)
+                # Planning can be expensive: do not start another gesture after
+                # it consumes the time reserved for restoring the best pose.
+                if time.monotonic()>=deadline-30:
+                    return self.restore_best(g,im,scene,rules,deadline)
+                if multi and plan is not None and plan['score']<=1:
+                    requested=round(np.log(plan['scale'])/np.log(1.01))
+                    remaining=search_zoom+requested
+                    if (remaining < max(-48,best_zoom-48) or remaining > min(48,best_zoom+48)
+                            or (requested and np.sign(requested)==zoom_blocked_direction)):
+                        plan=None;locked=None;local_cooldown=step+4;wide_explore=max(wide_explore,2)
                 misses=misses+1 if move is None or move[2]>threshold else 0
                 if move is None or misses>=2:
                     explore_remaining=max(explore_remaining,3 if misses==2 or move is None else 0)
@@ -225,7 +244,8 @@ class Runner:
                         command=float(np.clip(plan['angle']/rotation_gain,-120,120))
                         g.rotate(scene.board,command,anchor=gestures['rotation_anchor']);action={'rotate':command,'rotation_anchor':gestures['rotation_anchor'],'desired_rotation':plan['angle'],'joint':True}
                     elif abs(plan['scale']-1)>.01:
-                        ticks=round(np.log(plan['scale'])/np.log(1.01))
+                        ticks=int(np.clip(round(np.log(plan['scale'])/np.log(1.01)),-32,32))
+                        if multi:ticks=bounded_zoom(ticks,search_zoom,best_zoom)
                         g.wheel(scene.board,ticks,anchor=gestures['zoom_anchor']);action={'wheel':ticks,'zoom_anchor':gestures['zoom_anchor'],'joint':True}
                     else:
                         tx=round(np.clip(plan['dx']/gain[0],-(scene.board[2]-scene.board[0])*.65,(scene.board[2]-scene.board[0])*.65))
@@ -245,6 +265,9 @@ class Runner:
                 elif magnify_started is None and step and step%5==0 and not promising and step>=zoom_hold_until:
                     direction=(-20,-20,24,24,-24,20)[zoom_index%6];zoom_index+=1
                     if np.sign(direction)==zoom_blocked_direction:direction=-direction
+                    if multi:
+                        limited=bounded_zoom(direction,search_zoom,best_zoom)
+                        direction=limited if limited else bounded_zoom(-direction,search_zoom,best_zoom)
                     anchor=safe_anchor(scene.board,scene.markers[enabled[zoom_index%len(enabled)]])
                     g.wheel(scene.board,direction,anchor=anchor); action={'wheel':direction,'zoom_anchor':list(anchor)}; visited=[]
                 elif explore_remaining:
@@ -265,6 +288,10 @@ class Runner:
                 self.best.expect(dict(action,rotation_gain=rotation_gain))
                 time.sleep(.10 if 'wheel' in action else .15); im=g.capture(); Image.fromarray(im).save(self.folder/f'step-{step+1:02d}.png',compress_level=1); next_scene=recognize(im,previous=scene,enabled=[r['enabled'] for r in rules])
                 motion=measure_board_motion(before,im,scene.board)
+                if multi and 'wheel' in action:
+                    actual_ticks=np.log(motion['scale'])/np.log(1.01) if motion is not None and motion['scale']>0 else action['wheel']
+                    search_zoom+=float(np.clip(actual_ticks,-32,32))
+                    action['search_zoom_ticks']=round(search_zoom,2)
                 self.best.expect(dict(action,rotation_gain=rotation_gain,measured_motion=motion))
                 excluded=transform_points(excluded,motion)[-24:]
                 if action.get('exact_magnify'):
@@ -281,12 +308,15 @@ class Runner:
                     magnify_attempts=local_stagnation(proximity(scene.colors,rules),proximity(next_scene.colors,rules),magnify_attempts)
                 l,t,r,b=scene.board; change=float(np.mean(np.abs(im[t:b,l:r].astype(float)-before[t:b,l:r].astype(float))))
                 if action.get('joint') and locked is not None:
+                    joint_stalls=joint_stalls+1 if motion is None or ('wheel' in action and abs(motion['scale']-1)<.005) or ('rotate' in action and abs(motion['angle'])<.5) else 0
                     if motion is None:locked=None
                     else:
                         matrix=np.array(motion['matrix']);origin=np.array(motion['origin'])
                         locked=(locked-origin)@matrix[:,:2].T+matrix[:,2]+origin;lock_steps+=1
                         action['tracked_candidates']=locked.round(2).tolist()
-                        if lock_steps>=10:locked=None
+                        if lock_steps>=4 or joint_stalls>=2:locked=None
+                    if locked is None:
+                        local_cooldown=step+4;wide_explore=max(wide_explore,2);joint_stalls=0
                 elif locked is not None:locked=None
                 if 'rotate' in action:
                     action['measured_motion']=motion
@@ -384,11 +414,15 @@ class Runner:
             l,t,r,b=scene.board;center=np.array([(l+r)/2,(t+b)/2]);delta=matrix[:2,:2]@center+matrix[:2,2]-center
             plan=dict(angle=float(np.degrees(np.arctan2(matrix[1,0],matrix[0,0]))),scale=float(np.hypot(matrix[0,0],matrix[1,0])),dx=float(delta[0]),dy=float(delta[1]))
             gestures=decompose_gestures(plan,scene.board,scene.markers)
-            if abs(plan['angle'])>.18:
+            zoom_ticks=int(np.clip(round(np.log(plan['scale'])/np.log(1.01)),-32,32))
+            if abs(zoom_ticks)>=3:
+                value=zoom_ticks;g.wheel(scene.board,value,anchor=gestures['zoom_anchor']);kind='zoom'
+                self.best.expect({'wheel':value,'zoom_anchor':gestures['zoom_anchor']})
+            elif abs(plan['angle'])>.5:
                 value=float(np.clip(plan['angle'],-90,90));g.rotate(scene.board,value,anchor=gestures['rotation_anchor']);kind='rotate'
                 self.best.expect({'rotate':value,'rotation_anchor':gestures['rotation_anchor']})
             elif abs(round(np.log(plan['scale'])/np.log(1.01)))>=1:
-                value=round(np.log(plan['scale'])/np.log(1.01));g.wheel(scene.board,value,anchor=gestures['zoom_anchor']);kind='zoom'
+                value=zoom_ticks;g.wheel(scene.board,value,anchor=gestures['zoom_anchor']);kind='zoom'
                 self.best.expect({'wheel':value,'zoom_anchor':gestures['zoom_anchor']})
             else:
                 dx,dy=np.rint(delta).astype(int)

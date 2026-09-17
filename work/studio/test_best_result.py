@@ -8,6 +8,17 @@ from engine import Runner,perfect_match
 from eyedropper import pixel_hex
 
 class BestResultTests(unittest.TestCase):
+    def test_restore_large_scale_before_small_rotation(self):
+        im=np.zeros((120,120,3),np.uint8);game=MagicMock();game.capture.return_value=im
+        angle=np.radians(1);scale=.5
+        matrix=np.eye(3);matrix[:2,:2]=scale*np.array([[np.cos(angle),-np.sin(angle)],[np.sin(angle),np.cos(angle)]])
+        with tempfile.TemporaryDirectory() as folder,patch('engine.time.sleep'),patch('engine.recognize',return_value=self.scene('#FEFEFE')):
+            runner=Runner(lambda *args:None,folder);runner.best=MagicMock()
+            runner.best.colors=['#FEFEFE',None,None];runner.best.score=proximity(runner.best.colors,self.rules())
+            runner.best.restoration.return_value=matrix
+            runner.restore_best(game,im,self.scene('#AAAAAA'),self.rules(),time.monotonic()+30)
+        self.assertEqual(game.wheel.call_args.args[1],-32)
+        game.rotate.assert_not_called();game.click.assert_not_called()
     def test_cached_motion_updates_pose_without_recomputing(self):
         tracker=BestResult(self.rules());a=np.zeros((120,120,3),np.uint8)
         tracker.observe(a,self.scene('#FEFEFE'))

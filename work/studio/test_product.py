@@ -3,7 +3,7 @@ from pathlib import Path
 from unittest.mock import patch
 import numpy as np
 from palette import allowed_colors,overview,full_atlas
-from engine import exact_zoom_candidate,reconcile_deadline,transform_points,local_stagnation
+from engine import exact_zoom_candidate,reconcile_deadline,transform_points,local_stagnation,bounded_zoom
 from vision import Scene,lab,rgb,candidate_shift
 from result_history import describe_result,save_result,read_history
 from unittest.mock import MagicMock
@@ -11,6 +11,27 @@ from engine import Runner
 from platform_win import Interrupted
 
 class ProductTests(unittest.TestCase):
+    def test_multi_zoom_stays_close_to_entry_and_best(self):
+        self.assertEqual(bounded_zoom(32,40,0),8)
+        self.assertEqual(bounded_zoom(32,48,0),0)
+        self.assertEqual(bounded_zoom(-32,-40,0),-8)
+        self.assertEqual(bounded_zoom(32,0,-40),8)
+        self.assertEqual(bounded_zoom(-32,48,0),-32)
+
+    def test_multi_search_does_not_repeat_unresponsive_joint_zoom(self):
+        game=MagicMock();game.hwnd=1
+        game.capture.side_effect=[np.full((150,150,3),i*20,np.uint8) for i in range(9)]+[Interrupted('finished')]
+        scene=Scene([],[(40,50),(80,70),(120,80)],(0,0,150,150),['#AAAAAA']*3,110,None)
+        rules=[dict(enabled=True,colors=['#FFFFFF'],exact=True,tolerance=0) for _ in range(3)]
+        motion=dict(matrix=[[1,0,0],[0,1,0]],origin=[0,0],scale=1,angle=0,inliers=30)
+        plan=dict(score=.5,dx=0,dy=0,angle=0,scale=1.2)
+        with tempfile.TemporaryDirectory() as folder,patch('engine.Game',return_value=game),patch('engine.configure_ocr'),patch('engine.result_colors',return_value=None),patch('engine.recognize',return_value=scene),patch('engine.candidate_shift',return_value=None),patch('engine.joint_plan',return_value=plan),patch('engine.exact_zoom_candidate') as single_zoom,patch('engine.measure_board_motion',return_value=motion),patch('engine.time.sleep'),patch('platform_win.u.GetDpiForWindow',return_value=96):
+            runner=Runner(lambda *args:None,folder);runner.launch(rules)
+            single_zoom.assert_not_called()
+        actions=[c for c in game.method_calls if c[0] in ('wheel','drag','rotate')]
+        self.assertEqual(actions[0][0],'wheel')
+        self.assertEqual([c[0] for c in actions[1:3]],['drag','drag'])
+        self.assertFalse(any(e['kind']=='error' for e in runner.trace))
     def test_local_improvement_resets_failures_but_noise_does_not(self):
         self.assertEqual(local_stagnation((10,10),(8,8),2),0)
         self.assertEqual(local_stagnation((10,10),(9.95,9.95),2),3)
