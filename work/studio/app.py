@@ -130,35 +130,44 @@ class Card(ct.CTkFrame):
 
 class App(ct.CTk):
     def __init__(self):
-        super().__init__();self.title(tr('染色工坊 · 瑪奇 Mobile'));self.geometry('1060x900');self.minsize(960,740);self.configure(fg_color=BG)
+        super().__init__();self.title(tr('染色工坊 · 瑪奇 Mobile'));self.geometry('1060x900');self.minsize(540,480);self.configure(fg_color=BG)
         self.after(100,self.fit_screen)
         self.active_rules=None;self.history=read_history(DATA/'history.json');self.best_summary=None
         self.q=queue.Queue();self.runner=None;self.busy=False;self.picking=False;self.keys={};self.cards=[];self.auto=tk.BooleanVar(value=False)
         self.grid_columnconfigure(0,weight=1); self.grid_rowconfigure(2,weight=1)
-        header=ct.CTkFrame(self,fg_color='transparent');header.grid(row=0,column=0,padx=32,pady=(24,8),sticky='ew')
+        header=ct.CTkFrame(self,fg_color='transparent');header.grid(row=0,column=0,padx=20,pady=(14,6),sticky='ew')
         ct.CTkLabel(header,text='染色工坊',font=(FONT,28,'bold'),text_color=INK).pack(side='left')
         ct.CTkLabel(header,text='瑪奇 Mobile  /  by 南千和',font=(FONT,12),text_color=MUTED).pack(side='left',padx=18,pady=(10,0))
-        ct.CTkOptionMenu(header,values=['简体中文','繁體中文','English'],width=115,command=self.change_language,variable=tk.StringVar(value=i18n.language)).pack(side='right',padx=(8,0))
-        ct.CTkButton(header,text='保存方案',width=90,height=32,fg_color='#28364A',command=self.save).pack(side='right')
-        ct.CTkButton(header,text='♥  支持作者',width=110,height=32,fg_color='#694C91',hover_color='#8260AE',command=lambda:webbrowser.open('https://afdian.com/a/minamichiwa')).pack(side='right',padx=8)
-        ct.CTkButton(header,text='寻色记录',width=90,height=32,fg_color='#28364A',command=self.show_history).pack(side='right')
-        intro=ct.CTkFrame(self,fg_color='transparent');intro.grid(row=1,column=0,padx=32,pady=(0,10),sticky='ew')
-        ct.CTkLabel(intro,text='① 设置目标颜色    →    ② 游戏内打开普通染色    →    ③ 教学结束后按 F8',font=(FONT,13),text_color=MUTED).pack(anchor='w')
-        ct.CTkLabel(intro,text='精准色更难寻找  ·  推荐从相似模式 ΔE 8–12 开始，数值越小越接近目标',font=(FONT,13,'bold'),text_color='#FFD18A',fg_color='#342C22',corner_radius=8,height=34).pack(fill='x',pady=(6,0))
-        body=ct.CTkFrame(self,fg_color='transparent');body.grid(row=2,column=0,padx=24,sticky='nsew');body.grid_rowconfigure(0,weight=1)
+        toolbar=ct.CTkFrame(self,fg_color='transparent');toolbar.grid(row=1,column=0,padx=20,pady=(0,8),sticky='ew')
+        self.body_scroll=ct.CTkScrollableFrame(self,fg_color=BG,corner_radius=0)
+        self.body_scroll.grid(row=2,column=0,padx=12,sticky='nsew');self.body_scroll.grid_columnconfigure(0,weight=1)
+        self.body_scroll.bind('<Configure>',lambda e:self.after_idle(self.sync_scroll_region),add='+')
+        ct.CTkOptionMenu(toolbar,values=['简体中文','繁體中文','English'],width=115,command=self.change_language,variable=tk.StringVar(value=i18n.language)).pack(side='right',padx=(8,0))
+        ct.CTkButton(toolbar,text='保存方案',width=90,height=32,fg_color='#28364A',command=self.save).pack(side='right')
+        ct.CTkButton(toolbar,text='♥  支持作者',width=110,height=32,fg_color='#694C91',hover_color='#8260AE',command=lambda:webbrowser.open('https://afdian.com/a/minamichiwa')).pack(side='right',padx=4)
+        ct.CTkButton(toolbar,text='寻色记录',width=90,height=32,fg_color='#28364A',command=self.show_history).pack(side='right')
+        intro=ct.CTkFrame(self.body_scroll,fg_color='transparent');intro.grid(row=0,column=0,padx=8,pady=(0,10),sticky='ew')
+        self.intro_labels=[]
+        label=ct.CTkLabel(intro,text='① 设置目标颜色    →    ② 游戏内打开普通染色    →    ③ 教学结束后按 F8',font=(FONT,13),text_color=MUTED,justify='left');label.pack(anchor='w');self.intro_labels.append(label)
+        label=ct.CTkLabel(intro,text='精准色更难寻找  ·  推荐从相似模式 ΔE 8–12 开始，数值越小越接近目标',font=(FONT,13,'bold'),text_color='#FFD18A',fg_color='#342C22',corner_radius=8,height=34,justify='left');label.pack(fill='x',pady=(6,0));self.intro_labels.append(label)
+        body=ct.CTkFrame(self.body_scroll,fg_color='transparent');body.grid(row=1,column=0,sticky='ew');self.card_body=body
         for i in range(3):
-            body.grid_columnconfigure(i,weight=1,uniform='cards');card=Card(body,i);card.grid(row=0,column=i,padx=8,sticky='nsew');self.cards.append(card)
-        controls=ct.CTkFrame(self,fg_color='transparent');controls.grid(row=3,column=0,padx=32,pady=(18,8),sticky='ew')
-        self.start=ct.CTkButton(controls,text='开始寻色   F8',height=44,width=165,font=(FONT,14,'bold'),fg_color=ACCENT,text_color='#102A27',hover_color='#80E5CF',command=self.go);self.start.pack(side='left')
-        ct.CTkButton(controls,text='停止   F9',height=44,width=100,fg_color='#2B384C',command=self.stop).pack(side='left',padx=10)
-        ct.CTkCheckBox(controls,text='达标后自动复核并套用',variable=self.auto,font=(FONT,12),fg_color='#236D62').pack(side='left',padx=12)
-        ct.CTkButton(controls,text='诊断',width=65,height=34,fg_color='#28364A',command=self.diagnostics).pack(side='right')
-        ct.CTkButton(controls,text='取当前色 F7',width=100,height=34,fg_color='#28364A',command=lambda:self.go('capture')).pack(side='right',padx=8)
-        status=ct.CTkFrame(self,fg_color=PANEL,corner_radius=14);status.grid(row=4,column=0,padx=32,pady=(8,10),sticky='ew');status.grid_columnconfigure(0,weight=1)
+            body.grid_columnconfigure(i,weight=1,uniform='cards');card=Card(body,i);card.grid(row=0,column=i,padx=6,pady=6,sticky='nsew');self.cards.append(card)
+        controls=ct.CTkFrame(self,fg_color='transparent');controls.grid(row=3,column=0,padx=20,pady=(8,4),sticky='ew')
+        self.start=ct.CTkButton(controls,text='开始寻色   F8',height=44,width=165,font=(FONT,14,'bold'),fg_color=ACCENT,text_color='#102A27',hover_color='#80E5CF',command=self.go);self.start.grid(row=0,column=0,padx=(0,8),pady=4,sticky='ew')
+        self.stop_button=ct.CTkButton(controls,text='停止   F9',height=44,width=100,fg_color='#2B384C',command=self.stop);self.stop_button.grid(row=0,column=1,padx=(0,8),pady=4,sticky='ew')
+        self.auto_check=ct.CTkCheckBox(controls,text='达标后自动复核并套用',variable=self.auto,font=(FONT,12),fg_color='#236D62')
+        self.diagnostic_button=ct.CTkButton(controls,text='诊断',width=65,height=34,fg_color='#28364A',command=self.diagnostics)
+        self.capture_button=ct.CTkButton(controls,text='取当前色 F7',width=100,height=34,fg_color='#28364A',command=lambda:self.go('capture'))
+        self.controls=controls;controls.grid_columnconfigure(0,weight=1);controls.grid_columnconfigure(1,weight=1)
+        status=ct.CTkFrame(self,fg_color=PANEL,corner_radius=14);status.grid(row=4,column=0,padx=20,pady=(4,8),sticky='ew');status.grid_columnconfigure(0,weight=1)
         self.status=ct.CTkLabel(status,text='就绪 · 支持横屏与竖屏识别',font=(FONT,14),anchor='w',wraplength=920,text_color=INK);self.status.grid(row=0,column=0,padx=18,pady=(12,5),sticky='ew')
         self.detail=ct.CTkLabel(status,text='持续寻找更接近的颜色，剩余约 30 秒返回本轮最佳组合，由你确认是否使用。',font=(FONT,11),text_color=MUTED,wraplength=920,anchor='w');self.detail.grid(row=1,column=0,padx=18,pady=(0,12),sticky='ew')
-        ct.CTkLabel(intro,text='适用于港澳台服瑪奇Mobile。游戏中使用本程序存在风险，请自行斟酌。',font=(FONT,11),text_color=MUTED,wraplength=940).pack(fill='x',pady=(3,0))
-        ct.CTkLabel(self,text='F9 随时停止并释放鼠标  ·  切换窗口停止寻色  ·  不自动开启下一瓶染色剂',font=(FONT,11),text_color=MUTED).grid(row=5,column=0,pady=(0,14))
+        label=ct.CTkLabel(intro,text='适用于港澳台服瑪奇Mobile。游戏中使用本程序存在风险，请自行斟酌。',font=(FONT,11),text_color=MUTED,wraplength=940,justify='left');label.pack(fill='x',pady=(3,0));self.intro_labels.append(label)
+        self.footer=ct.CTkLabel(self,text='F9 随时停止并释放鼠标  ·  切换窗口停止寻色  ·  不自动开启下一瓶染色剂',font=(FONT,11),text_color=MUTED);self.footer.grid(row=5,column=0,padx=20,pady=(0,8))
+        self._layout_job=None;self._layout_columns=None;self._layout_width=None
+        self.bind('<Configure>',self.schedule_layout,add='+')
+        self.after_idle(self.layout_cards)
         self.load()
         if self.history:self.display_best(self.history[0])
         threading.Thread(target=self.hotkey_loop,daemon=True).start()
@@ -199,12 +208,44 @@ class App(ct.CTk):
                 ct.CTkLabel(line,text=text,width=205,height=52,corner_radius=8,fg_color=color or '#28364A',text_color='#17202B' if color and sum(rgb(color))>430 else 'white').pack(side='left',expand=True,fill='x',padx=3)
     def diagnostics(self):
         if messagebox.askyesno(tr('输入诊断'),tr('请先进入游戏限时染色界面。\n将依次测试左键平移、右键圆弧和滚轮缩放，记录前后色码与截图，不套用结果。\n\n是否开始？'),parent=self):self.go('diagnostic')
+    def schedule_layout(self,event):
+        if event.widget is self and self._layout_job is None:
+            self._layout_job=self.after(60,self.layout_cards)
+    def sync_scroll_region(self):
+        canvas=self.body_scroll._parent_canvas
+        canvas.configure(scrollregion=(0,0,canvas.winfo_width(),self.body_scroll.winfo_reqheight()))
+    def layout_cards(self):
+        self._layout_job=None
+        width=round(self.winfo_width()/self.body_scroll._get_widget_scaling())
+        if width==self._layout_width:return
+        self._layout_width=width
+        columns=3 if width>=1040 else 2 if width>=740 else 1
+        if columns!=self._layout_columns:
+            self._layout_columns=columns
+            for i in range(3):self.card_body.grid_columnconfigure(i,weight=1 if i<columns else 0,uniform='cards' if i<columns else '')
+            for i,card in enumerate(self.cards):card.grid(row=i//columns,column=i%columns,sticky='nsew')
+            self.body_scroll._parent_canvas.yview_moveto(0)
+            self.after(100,self.sync_scroll_region)
+        for label in self.intro_labels:label.configure(wraplength=max(300,width-90))
+        for label in (self.status,self.detail,self.footer):label.configure(wraplength=max(300,width-80))
+        compact=width<900
+        if getattr(self,"_compact_controls",None)==compact:return
+        self._compact_controls=compact
+        for widget in (self.auto_check,self.capture_button,self.diagnostic_button):widget.grid_forget()
+        if width>=900:
+            self.auto_check.grid(row=0,column=2,padx=8,sticky='w')
+            self.capture_button.grid(row=0,column=3,padx=4)
+            self.diagnostic_button.grid(row=0,column=4,padx=4)
+        else:
+            self.auto_check.grid(row=1,column=0,columnspan=2,pady=(4,2),sticky='w')
+            self.capture_button.grid(row=0,column=2,padx=4)
+            self.diagnostic_button.grid(row=1,column=2,padx=4,pady=2)
     def fit_screen(self):
-        # Keep footer and emergency controls inside the monitor work area at high DPI.
+        # Fit the initial window without globally shrinking widgets or fonts.
         scale=self._get_window_scaling()
-        h=min(900,int((self.winfo_screenheight()-85)/scale))
-        if h<900:ct.set_widget_scaling(max(.65,h/900));ct.set_window_scaling(max(.65,h/900));h=900
-        self.geometry(f'1060x{h}+40+30')
+        width=max(540,min(1120,int((self.winfo_screenwidth()-80)/scale)))
+        height=max(480,min(900,int((self.winfo_screenheight()-100)/scale)))
+        self.geometry(f'{width}x{height}+20+20')
     def save(self):
         try:
             data=[{'enabled':c.enabled.get(),'target':c.target.get(),'alt':c.alt.get(),'mode':c.mode.get(),'tolerance':c.tolerance.get()} for c in self.cards]
