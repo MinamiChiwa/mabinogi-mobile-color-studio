@@ -4,6 +4,10 @@ from opencc import OpenCC
 language='简体中文'
 traditional=OpenCC('s2twp')
 EN={
+'等待染色界面 · 剩余 ':'Waiting for dye screen · Time left: ',
+'等待超时':'Waiting timed out',
+'正在等待染色界面，请打开普通染色并完成教学。按 F9 可取消。':'Open regular dye and finish the tutorial. Press F9 to cancel waiting.',
+'等待染色界面超时，尚未开始寻色。请打开染色界面、完成教学后再按 F8。':'Waiting timed out; color search has not started. Open the dye screen, finish the tutorial, then press F8 again.',
 '局部多次未命中，正在缩小色板并重新探索。':'No match after several local attempts. Zooming out to explore a new area.',
 '染色工坊':'Color Studio','瑪奇 Mobile':'Mabinogi Mobile','南千和':'南千和',
 '精准 HEX':'Exact HEX','相似颜色':'Similar',

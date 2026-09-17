@@ -17,6 +17,12 @@ import numpy as np
 from vision import rgb
 PALETTE_POOL=ThreadPoolExecutor(max_workers=1)
 from PIL import Image,ImageDraw
+from ui_performance import install_resize_coalescing
+install_resize_coalescing()
+
+def build_preview(target,tolerance):
+    pixels=allowed_colors(target,tolerance)
+    return pixels,overview(pixels)
 
 ct.set_appearance_mode('dark'); ct.set_default_color_theme('blue')
 BG='#10151F'; PANEL='#192230'; INK='#EDF3FA'; MUTED='#94A4B8'; ACCENT='#62D7BD'
@@ -60,7 +66,10 @@ class Card(ct.CTkFrame):
         self.best_label=ct.CTkLabel(self,text='最佳结果  —',font=(FONT,11),text_color=ACCENT,height=22,corner_radius=5);self.best_label.grid(row=11,column=0,padx=20,pady=(0,8),sticky='ew')
         self.target.trace_add('write',self.preview);self.alt.trace_add('write',self.preview); self.preview();self.change_mode()
     def change_mode(self,*_):
-        exact=self.mode.get()=='精准 HEX'; self.slider.configure(state='disabled' if exact else 'normal',progress_color='#45505F' if exact else ACCENT,button_color='#596273' if exact else ACCENT,button_hover_color='#596273' if exact else '#80E5CF',fg_color='#303947' if exact else '#3A485D')
+        exact=self.mode.get()=='精准 HEX'
+        if getattr(self,'_last_exact',None)!=exact:
+            self.slider.configure(state='disabled' if exact else 'normal',progress_color='#45505F' if exact else ACCENT,button_color='#596273' if exact else ACCENT,button_hover_color='#596273' if exact else '#80E5CF',fg_color='#303947' if exact else '#3A485D')
+            self._last_exact=exact
         self.hint.configure(text='六位色码必须完全一致' if exact else f'感知色差 ΔE ≤ {self.tolerance.get():.0f} · 数值越小越严格')
         self.schedule_palette()
     def preview(self,*_):
@@ -79,25 +88,28 @@ class Card(ct.CTkFrame):
         self._preview_job=None
         try:target=normalize_hex(self.target.get())
         except ValueError:
+            self._palette_key=None
             self.palette.configure(image=None,text='请输入有效 HEX');self.palette_note.configure(text='颜色未设置完整');return
         exact=self.mode.get()=='精准 HEX'
         key=(target,0 if exact else float(self.tolerance.get()))
+        if key==self._palette_key:return
         self._palette_key=key
         if self._palette_future:self._palette_future.cancel()
         if exact:
             self._palette_pixels=np.array([rgb(target)],np.uint8);self.render_palette();return
-        self.palette.configure(image=None,text='正在计算允许的颜色…')
+        # Keep the existing preview visible while its replacement is prepared.
         self.palette_note.configure(text='正在准备颜色预览…')
-        future=PALETTE_POOL.submit(allowed_colors,*key);self._palette_future=future
+        future=PALETTE_POOL.submit(build_preview,*key);self._palette_future=future
         self.after(100,lambda:self.poll_palette(future,key))
     def poll_palette(self,future,key):
         if key!=self._palette_key or future is not self._palette_future:return
         if not future.done():self.after(100,lambda:self.poll_palette(future,key));return
-        try:self._palette_pixels=future.result()
+        try:self._palette_pixels,im=future.result()
         except Exception:self.palette_note.configure(text='预览计算失败，请重新选择颜色');return
-        self.render_palette()
-    def render_palette(self):
-        im=overview(self._palette_pixels)
+        self.render_palette(im)
+    def render_palette(self,im=None):
+        if im is None:im=overview(self._palette_pixels)
+        self._display_key=self._palette_key
         new_image=ct.CTkImage(light_image=im,dark_image=im,size=(240,64))
         self.palette.configure(image=new_image,text='')
         self.palette_image=new_image
@@ -106,8 +118,8 @@ class Card(ct.CTkFrame):
         note+=' · 点击查看全部'
         self.palette_note.configure(text=note)
     def open_palette(self,event=None):
-        if self._palette_pixels is not None and self._palette_key:
-            PaletteViewer(self.winfo_toplevel(),self._palette_pixels,self._palette_key[0],PALETTE_POOL)
+        if self._palette_pixels is not None and getattr(self,'_display_key',None):
+            PaletteViewer(self.winfo_toplevel(),self._palette_pixels,self._display_key[0],PALETTE_POOL)
     def pick(self):
         v=colorchooser.askcolor(parent=self,title=tr(f'区域 {self.index+1} · 选择目标颜色'))[1]
         if v:self.target.set(v.upper())
@@ -247,6 +259,12 @@ class App(ct.CTk):
                     c.current.configure(text='当前颜色  '+(color or ('未参与匹配' if inactive else '读取失败')))
                 if k=='scene':self.status.configure(text=f'正在寻色 · 游戏剩余 {d.get("seconds") or "—"} 秒')
                 elif k=='restore_action':self.status.configure(text=f'正在恢复最佳颜色 · 游戏剩余 {d.get("seconds") or "—"} 秒')
+            elif k=='waiting':
+                self.status.configure(text=tr('等待染色界面 · 剩余 ')+str(d['seconds'])+tr(' 秒'))
+                self.detail.configure(text=tr(d['message']))
+            elif k=='wait_timeout':
+                self.status.configure(text=tr(d['message']))
+                self.after(100,lambda m=d['message']:messagebox.showinfo(tr('等待超时'),tr(m),parent=self))
             elif k=='action':self.detail.configure(text='正在调整色板，持续寻找更接近的颜色…')
             elif k in ('explore','restoring','magnifying'):self.detail.configure(text=d['message'])
             elif k=='best':

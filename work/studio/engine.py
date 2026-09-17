@@ -84,6 +84,23 @@ class Runner:
             log.write(json.dumps(entry,ensure_ascii=False)+'\n')
     def snapshot(self,g,label):
         im=g.capture(); Image.fromarray(im).save(self.folder/f'{label}.png'); return im
+    def wait_for_board(self,g,im,require_timer=True,timeout=60):
+        deadline=time.monotonic()+timeout;next_notice=0
+        while True:
+            g.check()
+            try:
+                scene=recognize(im)
+                if not require_timer or scene.seconds is not None:return im,scene
+            except ValueError:
+                pass
+            now=time.monotonic()
+            if now>=deadline:
+                raise TimeoutError('等待染色界面超时，尚未开始寻色。请打开染色界面、完成教学后再按 F8。')
+            if now>=next_notice:
+                self.event('waiting',message='正在等待染色界面，请打开普通染色并完成教学。按 F9 可取消。',seconds=max(1,int(np.ceil(deadline-now))))
+                next_notice=now+5
+            if self.stop.wait(min(.5,deadline-now)):raise Interrupted('已停止，鼠标已释放。')
+            im=g.capture()
     def launch(self,rules,mode='search',auto=False):
         self.folder.mkdir(parents=True,exist_ok=True)
         try:
@@ -93,15 +110,8 @@ class Runner:
             if result is not None:
                 if mode=='search' and auto and accepted(result,rules):return self.apply_result(g,im,result)
                 return self.event('done',message='当前在结果页，颜色未满足目标或自动套用已关闭，未操作。',colors=result)
-            # The entry animation can briefly hide cards after F8. No input while waiting.
-            for attempt in range(13):
-                try:
-                    scene=recognize(im)
-                    break
-                except ValueError:
-                    if attempt==12:raise
-                    if attempt==0:self.event('waiting',message='正在等待染色色板显示……')
-                    time.sleep(.25);im=g.capture()
+            # Wait without mouse input; the dye countdown starts independently.
+            im,scene=self.wait_for_board(g,im,require_timer=mode not in ('read','capture'))
             self.event('scene',colors=scene.colors,seconds=scene.seconds,board=scene.board,markers=scene.markers,size=list(im.shape[:2]))
             if mode=='read':return self.event('done',message='已读取当前色码。',colors=scene.colors)
             if mode in ('capture','recovery_test'):
@@ -370,6 +380,7 @@ class Runner:
                 if no_change>=2:raise RuntimeError('连续两次输入后色板未变化。已停止，请检查游戏是否接受模拟鼠标输入。')
                 deadline=reconcile_deadline(deadline,next_scene.seconds,time.monotonic())
                 scene=next_scene
+        except TimeoutError as e:self.event('wait_timeout',message=str(e))
         except Interrupted as e:self.event('done',message=str(e))
         except Exception as e:self.event('error',message=str(e),detail=traceback.format_exc())
         finally:

@@ -11,6 +11,31 @@ from engine import Runner
 from platform_win import Interrupted
 
 class ProductTests(unittest.TestCase):
+    def test_wait_accepts_delayed_board_only_after_timer_appears(self):
+        game=MagicMock();image=np.zeros((150,150,3),np.uint8);game.capture.return_value=image
+        tutorial=Scene([],[],(0,0,150,150),[None]*3,None,None)
+        ready=Scene([],[],(0,0,150,150),[None]*3,110,None)
+        with tempfile.TemporaryDirectory() as folder,patch('engine.recognize',side_effect=[ValueError('inventory')]*20+[tutorial,ready]):
+            runner=Runner(lambda *args:None,folder)
+            with patch.object(runner.stop,'wait',return_value=False):
+                _,scene=runner.wait_for_board(game,image)
+        self.assertIs(scene,ready);self.assertEqual(game.capture.call_count,21)
+        self.assertTrue(any(e['kind']=='waiting' for e in runner.trace))
+        game.drag.assert_not_called();game.wheel.assert_not_called();game.click.assert_not_called()
+
+    def test_wait_timeout_is_explicit_and_sends_no_input(self):
+        game=MagicMock()
+        with tempfile.TemporaryDirectory() as folder,patch('engine.recognize',side_effect=ValueError('inventory')),patch('engine.time.monotonic',side_effect=[0,61]):
+            runner=Runner(lambda *args:None,folder)
+            with self.assertRaisesRegex(TimeoutError,'尚未开始寻色'):runner.wait_for_board(game,None)
+        game.drag.assert_not_called();game.click.assert_not_called()
+
+    def test_wait_can_be_cancelled_with_stop_event(self):
+        with tempfile.TemporaryDirectory() as folder,patch('engine.recognize',side_effect=ValueError('inventory')):
+            runner=Runner(lambda *args:None,folder)
+            with patch.object(runner.stop,'wait',return_value=True),self.assertRaises(Interrupted):
+                runner.wait_for_board(MagicMock(),None)
+
     def test_multi_zoom_stays_close_to_entry_and_best(self):
         self.assertEqual(bounded_zoom(32,40,0),8)
         self.assertEqual(bounded_zoom(32,48,0),0)
