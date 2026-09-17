@@ -19,7 +19,7 @@ class ProductTests(unittest.TestCase):
             runner=Runner(lambda *args:None,folder)
             with patch.object(runner.stop,'wait',return_value=False):
                 _,scene=runner.wait_for_board(game,image)
-        self.assertIs(scene,ready);self.assertEqual(game.capture.call_count,21)
+        self.assertIs(scene,ready);self.assertEqual(game.capture_waiting.call_count,21)
         self.assertTrue(any(e['kind']=='waiting' for e in runner.trace))
         game.drag.assert_not_called();game.wheel.assert_not_called();game.click.assert_not_called()
 
@@ -28,6 +28,17 @@ class ProductTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder,patch('engine.recognize',side_effect=ValueError('inventory')),patch('engine.time.monotonic',side_effect=[0,61]):
             runner=Runner(lambda *args:None,folder)
             with self.assertRaisesRegex(TimeoutError,'尚未开始寻色'):runner.wait_for_board(game,None)
+        game.drag.assert_not_called();game.click.assert_not_called()
+
+    def test_wait_survives_hidden_window_and_ocr_timeout(self):
+        image=np.zeros((150,150,3),np.uint8);game=MagicMock()
+        game.capture_waiting.side_effect=[None,image,image]
+        ready=Scene([],[],(0,0,150,150),[None]*3,110,None)
+        with tempfile.TemporaryDirectory() as folder,patch('engine.recognize',side_effect=[ValueError('inventory'),RuntimeError('Tesseract process timeout'),ready]):
+            runner=Runner(lambda *args:None,folder)
+            with patch.object(runner.stop,'wait',return_value=False):
+                _,scene=runner.wait_for_board(game,image)
+        self.assertIs(scene,ready);self.assertEqual(game.capture_waiting.call_count,3)
         game.drag.assert_not_called();game.click.assert_not_called()
 
     def test_wait_can_be_cancelled_with_stop_event(self):

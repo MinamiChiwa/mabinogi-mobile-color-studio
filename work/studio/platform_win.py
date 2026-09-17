@@ -63,6 +63,11 @@ class Game:
     def capture(self):
         self.check(); x,y,w,h=self.geometry()
         return np.array(ImageGrab.grab(bbox=(x,y,x+w,y+h),all_screens=True).convert('RGB'))
+    def capture_waiting(self):
+        if self.stop.is_set():raise Interrupted('已停止，鼠标已释放。')
+        if u.IsIconic(self.hwnd) or u.GetForegroundWindow()!=self.hwnd:return None
+        self.initial=self.geometry()
+        return self.capture()
     def send(self,flags,dx=0,dy=0,data=0):
         event=Input(type=0,mi=Mouse(dx,dy,data&0xffffffff,flags,0,0))
         if u.SendInput(1,C.byref(event),C.sizeof(Input))!=1:raise RuntimeError('Windows 未接受鼠标输入。请检查游戏与工具是否使用相同权限运行。')

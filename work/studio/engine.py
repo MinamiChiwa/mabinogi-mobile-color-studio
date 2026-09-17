@@ -87,12 +87,19 @@ class Runner:
     def wait_for_board(self,g,im,require_timer=True,timeout=60):
         deadline=time.monotonic()+timeout;next_notice=0
         while True:
-            g.check()
+            if self.stop.is_set():raise Interrupted('已停止，鼠标已释放。')
             try:
-                scene=recognize(im)
-                if not require_timer or scene.seconds is not None:return im,scene
+                if im is not None:
+                    scene=recognize(im)
+                    if not require_timer or scene.seconds is not None:
+                        g.check()
+                        return im,scene
             except ValueError:
                 pass
+            except Interrupted:
+                if self.stop.is_set():raise
+            except RuntimeError as e:
+                if 'timeout' not in str(e).lower():raise
             now=time.monotonic()
             if now>=deadline:
                 raise TimeoutError('等待染色界面超时，尚未开始寻色。请打开染色界面、完成教学后再按 F8。')
@@ -100,7 +107,10 @@ class Runner:
                 self.event('waiting',message='正在等待染色界面，请打开普通染色并完成教学。按 F9 可取消。',seconds=max(1,int(np.ceil(deadline-now))))
                 next_notice=now+5
             if self.stop.wait(min(.5,deadline-now)):raise Interrupted('已停止，鼠标已释放。')
-            im=g.capture()
+            try:im=g.capture_waiting()
+            except Interrupted:
+                if self.stop.is_set():raise
+                im=None
     def launch(self,rules,mode='search',auto=False):
         self.folder.mkdir(parents=True,exist_ok=True)
         try:
@@ -381,7 +391,7 @@ class Runner:
                 deadline=reconcile_deadline(deadline,next_scene.seconds,time.monotonic())
                 scene=next_scene
         except TimeoutError as e:self.event('wait_timeout',message=str(e))
-        except Interrupted as e:self.event('done',message=str(e))
+        except Interrupted as e:self.event('interrupted',message=str(e))
         except Exception as e:self.event('error',message=str(e),detail=traceback.format_exc())
         finally:
             (self.folder/'trace.json').write_text(json.dumps(self.trace,ensure_ascii=False,indent=2),encoding='utf-8')

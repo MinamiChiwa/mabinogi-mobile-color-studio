@@ -54,4 +54,4 @@ See [VALIDATION.md](VALIDATION.md). A timed search cannot guarantee an exact mat
 
 After F8, the tool waits up to 60 seconds for the dye board and countdown. You can open regular dye from your inventory and finish the tutorial during this time. Waiting sends no mouse input; F9 cancels. A timeout dialog asks you to press F8 again.
 
-The layout adapts to the window: three regions side by side in wide windows, region tabs in narrow windows. Mouse-wheel input is disabled throughout the tool UI. Click or drag to adjust values; drag the scrollbar if a very small window cannot show all settings.
+The main window keeps three region cards and scales at a fixed 56:45 aspect ratio. The exact-color notice remains visible. Enabled cards have a teal border and background; disabled cards show an explicit label. Wheel input is disabled throughout the tool UI; click or drag to adjust values. During the initial wait, you may return to the game after briefly changing focus. Interruptions and errors display a dialog.

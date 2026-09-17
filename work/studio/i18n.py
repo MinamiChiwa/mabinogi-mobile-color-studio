@@ -4,6 +4,9 @@ from opencc import OpenCC
 language='简体中文'
 traditional=OpenCC('s2twp')
 EN={
+'流程已中断':'Process interrupted',
+'已启用':'Enabled',
+'未启用':'Disabled',
 '等待染色界面 · 剩余 ':'Waiting for dye screen · Time left: ',
 '等待超时':'Waiting timed out',
 '正在等待染色界面，请打开普通染色并完成教学。按 F9 可取消。':'Open regular dye and finish the tutorial. Press F9 to cancel waiting.',

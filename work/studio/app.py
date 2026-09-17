@@ -42,7 +42,8 @@ class Card(ct.CTkFrame):
         heading=ct.CTkFrame(self,fg_color='transparent')
         heading.grid(row=0,column=0,padx=20,pady=(12,6),sticky='ew')
         ct.CTkLabel(heading,text=f'0{index+1}  /  颜色区域',font=(FONT,16,'bold'),text_color=INK,height=22).pack(side='left')
-        ct.CTkSwitch(heading,text='',width=42,variable=self.enabled,progress_color=ACCENT).pack(side='right')
+        self.enable_switch=ct.CTkSwitch(heading,text='已启用' if self.enabled.get() else '未启用',width=95,variable=self.enabled,progress_color=ACCENT,font=(FONT,11))
+        self.enable_switch.pack(side='right')
         self.preview_frame=ct.CTkFrame(self,fg_color='transparent')
         self.preview_frame.grid(row=2,column=0,padx=20,pady=(8,6),sticky='ew')
         self.swatch=ct.CTkButton(self.preview_frame,text='点击选色',height=34,corner_radius=10,command=self.pick,font=(FONT,13),fg_color='#202020',hover_color='#35445B')
@@ -72,6 +73,15 @@ class Card(ct.CTkFrame):
         self.target.trace_add('write',self.preview);self.alt.trace_add('write',self.preview); self.preview();self.change_mode()
         self._normal_padding=[(w,w.grid_info()['pady']) for w in self.winfo_children() if w.winfo_manager()=='grid']
         self._compact=None
+        self.enabled.trace_add('write',self.update_enabled)
+        self.update_enabled()
+    def update_enabled(self,*_):
+        enabled=self.enabled.get()
+        background='#192D35' if enabled else '#151B25'
+        self.configure(fg_color=background,border_color=ACCENT if enabled else '#303A48',border_width=2 if enabled else 1)
+        self.enable_switch.configure(text='已启用' if enabled else '未启用',text_color=ACCENT if enabled else MUTED)
+        self.preview_frame.configure(fg_color=background)
+        self.swatch.configure(text='点击选色' if enabled else '未启用')
     def set_compact(self,compact):
         if self._compact==compact:return
         self._compact=compact
@@ -146,7 +156,7 @@ class Card(ct.CTkFrame):
 
 class App(ct.CTk):
     def __init__(self):
-        super().__init__();self.title(tr('染色工坊 · 瑪奇 Mobile'));self.geometry('1060x900');self.minsize(540,480);self.configure(fg_color=BG)
+        super().__init__();self.title(tr('染色工坊 · 瑪奇 Mobile'));self.geometry('1120x900');self.minsize(784,630);self.wm_aspect(56,45,56,45);self.configure(fg_color=BG)
         self.after(100,self.fit_screen)
         self.active_rules=None;self.history=read_history(DATA/'history.json');self.best_summary=None
         self.q=queue.Queue();self.runner=None;self.busy=False;self.picking=False;self.keys={};self.cards=[];self.auto=tk.BooleanVar(value=False)
@@ -253,46 +263,38 @@ class App(ct.CTk):
             self.after(80,self.sync_scroll_region)
     def layout_cards(self):
         self._layout_job=None
-        width=round(self.winfo_width()/self.body_scroll._get_widget_scaling())
-        height=round(self.winfo_height()/self.body_scroll._get_widget_scaling())
-        if (width,height)==self._layout_width:return
-        self._layout_width=(width,height)
-        compact=height<960
-        columns=3 if width>=1040 else 1
-        for card in self.cards:card.set_compact(compact)
-        if height<780:self.intro.grid_remove()
-        else:self.intro.grid()
-        if columns!=self._layout_columns:
-            self._layout_columns=columns
-            for i in range(3):self.card_body.grid_columnconfigure(i,weight=1 if i<columns else 0,uniform='cards' if i<columns else '')
-            for i,card in enumerate(self.cards):
-                if columns==3 or i==self.selected_region:card.grid(row=0,column=i if columns==3 else 0,sticky='nsew')
-                else:card.grid_remove()
-            if columns==1:self.region_tabs.grid(row=1,column=0,padx=8,pady=(0,6),sticky='ew')
-            else:self.region_tabs.grid_remove()
-            self.body_scroll._parent_canvas.yview_moveto(0)
-            self.after(100,self.sync_scroll_region)
-        for label in self.intro_labels:label.configure(wraplength=max(300,width-90))
-        for label in (self.status,self.detail,self.footer):label.configure(wraplength=max(300,width-80))
-        self.after(80,self.sync_scroll_region)
-        compact=width<900
-        if getattr(self,"_compact_controls",None)==compact:return
-        self._compact_controls=compact
-        for widget in (self.auto_check,self.capture_button,self.diagnostic_button):widget.grid_forget()
-        if width>=900:
+        dpi=self._get_window_scaling()
+        width=round(self.winfo_width()/dpi);height=round(self.winfo_height()/dpi)
+        if width<100 or height<100:return
+        previous=getattr(self,'_last_window_size',(1120,900))
+        if abs(width/1120-height/900)>.003:
+            if abs(width-previous[0])/1120>=abs(height-previous[1])/900:
+                height=round(width*900/1120)
+            else:width=round(height*1120/900)
+            width=max(784,width);height=round(width*900/1120)
+            self.geometry(f'{width}x{height}')
+        self._last_window_size=(width,height)
+        factor=max(.7,min(width/1120,height/900))
+        if abs(factor-getattr(self,'_ui_scale',1.))>.005:
+            self._ui_scale=factor;ct.set_widget_scaling(factor)
+        self._layout_columns=3
+        self.region_tabs.grid_remove();self.intro.grid()
+        for i,card in enumerate(self.cards):
+            self.card_body.grid_columnconfigure(i,weight=1,uniform='cards')
+            card.grid(row=0,column=i,sticky='nsew');card.set_compact(True)
+        for label in self.intro_labels:label.configure(wraplength=1030)
+        for label in (self.status,self.detail,self.footer):label.configure(wraplength=1040)
+        if not getattr(self,'_fixed_controls',False):
+            self._fixed_controls=True
             self.auto_check.grid(row=0,column=2,padx=8,sticky='w')
             self.capture_button.grid(row=0,column=3,padx=4)
             self.diagnostic_button.grid(row=0,column=4,padx=4)
-        else:
-            self.auto_check.grid(row=1,column=0,columnspan=2,pady=(4,2),sticky='w')
-            self.capture_button.grid(row=0,column=2,padx=4)
-            self.diagnostic_button.grid(row=1,column=2,padx=4,pady=2)
+        self.after(80,self.sync_scroll_region)
     def fit_screen(self):
-        # Fit the initial window without globally shrinking widgets or fonts.
-        scale=self._get_window_scaling()
-        width=max(540,min(1120,int((self.winfo_screenwidth()-80)/scale)))
-        height=max(480,min(900,int((self.winfo_screenheight()-100)/scale)))
-        self.geometry(f'{width}x{height}+20+20')
+        dpi=self._get_window_scaling()
+        factor=min(1.,(self.winfo_screenwidth()-80)/dpi/1120,(self.winfo_screenheight()-100)/dpi/900)
+        factor=max(.7,factor)
+        self.geometry(f'{round(1120*factor)}x{round(900*factor)}+20+20')
     def save(self):
         try:
             data=[{'enabled':c.enabled.get(),'target':c.target.get(),'alt':c.alt.get(),'mode':c.mode.get(),'tolerance':c.tolerance.get()} for c in self.cards]
@@ -312,6 +314,7 @@ class App(ct.CTk):
             if mode=='search' and not any(r['enabled'] for r in rules):raise ValueError('请至少启用一个颜色区域。')
         except ValueError as e:self.status.configure(text=str(e));return
         self.active_rules=rules
+        self.active_mode=mode
         self.busy=True;self.start.configure(state='disabled');self.status.configure(text='正在识别游戏界面…')
         folder=DATA/'sessions'/datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
         self.runner=Runner(lambda k,d:self.q.put((k,d)),folder)
@@ -350,15 +353,19 @@ class App(ct.CTk):
             elif k=='waiting':
                 self.status.configure(text=tr('等待染色界面 · 剩余 ')+str(d['seconds'])+tr(' 秒'))
                 self.detail.configure(text=tr(d['message']))
-            elif k=='wait_timeout':
+            elif k in ('wait_timeout','interrupted'):
                 self.status.configure(text=tr(d['message']))
-                self.after(100,lambda m=d['message']:messagebox.showinfo(tr('等待超时'),tr(m),parent=self))
+                self.after(100,lambda m=d['message']:messagebox.showinfo(tr('流程已中断'),tr(m),parent=self))
             elif k=='action':self.detail.configure(text='正在调整色板，持续寻找更接近的颜色…')
             elif k in ('explore','restoring','magnifying'):self.detail.configure(text=d['message'])
             elif k=='best':
                 if self.active_rules:self.display_best(describe_result(d['colors'],self.active_rules))
             elif k in ('error','done'):
                 self.status.configure(text=d.get('message',''))
+                if k=='error':
+                    self.after(100,lambda m=d.get('message',''):messagebox.showerror(tr('流程已中断'),tr(m),parent=self))
+                elif not d.get('popup') and getattr(self,'active_mode','search')=='search':
+                    self.after(100,lambda m=d.get('message',''):messagebox.showinfo(tr('流程已中断'),tr(m),parent=self))
                 for c,color in zip(self.cards,d.get('colors',[])):c.current.configure(text='当前颜色  '+(color or '读取失败'))
                 if d.get('popup'):
                     if self.active_rules:
