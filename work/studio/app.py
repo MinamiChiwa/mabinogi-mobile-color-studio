@@ -125,7 +125,7 @@ class App(ct.CTk):
         self.grid_columnconfigure(0,weight=1); self.grid_rowconfigure(2,weight=1)
         header=ct.CTkFrame(self,fg_color='transparent');header.grid(row=0,column=0,padx=32,pady=(24,8),sticky='ew')
         ct.CTkLabel(header,text='染色工坊',font=(FONT,28,'bold'),text_color=INK).pack(side='left')
-        ct.CTkLabel(header,text='瑪奇 Mobile  /  南千和',font=(FONT,12),text_color=MUTED).pack(side='left',padx=18,pady=(10,0))
+        ct.CTkLabel(header,text='瑪奇 Mobile  /  by 南千和',font=(FONT,12),text_color=MUTED).pack(side='left',padx=18,pady=(10,0))
         ct.CTkOptionMenu(header,values=['简体中文','繁體中文','English'],width=115,command=self.change_language,variable=tk.StringVar(value=i18n.language)).pack(side='right',padx=(8,0))
         ct.CTkButton(header,text='保存方案',width=90,height=32,fg_color='#28364A',command=self.save).pack(side='right')
         ct.CTkButton(header,text='♥  支持作者',width=110,height=32,fg_color='#694C91',hover_color='#8260AE',command=lambda:webbrowser.open('https://afdian.com/a/minamichiwa')).pack(side='right',padx=8)
@@ -169,7 +169,7 @@ class App(ct.CTk):
         if row['maximum'] is not None:
             self.detail.configure(text=f'{"本次结果" if row.get("outcome") else "最佳组合"} · 最大色差 ΔE {row["maximum"]:.2f} / 平均 {row["average"]:.2f} · 色差越小越接近目标')
     def show_history(self):
-        win=ct.CTkToplevel(self);win.title(tr('寻色记录 · 南千和'));win.geometry('820x620');win.transient(self);win.configure(fg_color=BG)
+        win=ct.CTkToplevel(self);win.title(tr('寻色记录 · by 南千和'));win.geometry('820x620');win.transient(self);win.configure(fg_color=BG)
         ct.CTkLabel(win,text='寻色记录',font=(FONT,24,'bold')).pack(anchor='w',padx=24,pady=(20,4))
         ct.CTkLabel(win,text='记录最近 50 次结果 · ΔE 越小越接近目标，0 表示目标原色',text_color=MUTED).pack(anchor='w',padx=24,pady=(0,12))
         area=ct.CTkScrollableFrame(win,fg_color=BG);area.pack(fill='both',expand=True,padx=16,pady=(0,16))

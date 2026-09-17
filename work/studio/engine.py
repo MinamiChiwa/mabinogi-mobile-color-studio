@@ -42,6 +42,11 @@ def perfect_match(colors,rules):
     enabled=[(c,r) for c,r in zip(colors,rules) if r['enabled']]
     return bool(enabled) and all(c is not None and c.upper() in [v.upper() for v in r['colors']] for c,r in enabled)
 
+def reconcile_deadline(deadline,seconds,now):
+    """Reject OCR digit loss; the monotonic countdown remains authoritative."""
+    if seconds is None or abs(seconds-(deadline-now))>4:return deadline
+    return min(deadline,now+seconds)
+
 def exact_zoom_candidate(image,scene,rules):
     """Find a near-color island in its own region, before marker occlusion."""
     options=[]
@@ -49,7 +54,7 @@ def exact_zoom_candidate(image,scene,rules):
         if not rule['enabled'] or not rule['exact']:continue
         isolated=[dict(r,enabled=j==i) for j,r in enumerate(rules)]
         move=candidate_shift(image,scene,isolated)
-        if move is not None and move[2]*.6<=12:
+        if move is not None and 0 < move[2]*.6<=12:
             mx,my=scene.markers[i]
             options.append((move[2],i,[int(mx-move[0]),int(my-move[1])]))
     return min(options,key=lambda p:p[0]) if options else None
@@ -155,7 +160,7 @@ class Runner:
                     misses=0
                 if move is not None and move[2]<=threshold:
                     explore_remaining=0
-                refine=not tracking and move is not None and move[2]<=threshold and len(enabled)==1 and step-last_refine>=12
+                refine=not tracking and move is not None and 0<move[2]<=threshold and len(enabled)==1 and step-last_refine>=12
                 exact_near=move is not None and len(enabled)==1 and rules[enabled[0]]['exact'] and move[2]*.6<=12
                 if exact_near and step<zoom_hold_until:explore_remaining=0
                 promising=move is not None and move[2]<=threshold
@@ -284,7 +289,7 @@ class Runner:
                 no_change=no_change+1 if change<1.5 and substantial else 0
                 self.event('action',step=step+1,change=round(change,2),before=scene.colors,after=next_scene.colors,**action)
                 if no_change>=2:raise RuntimeError('连续两次输入后色板未变化。已停止，请检查游戏是否接受模拟鼠标输入。')
-                if next_scene.seconds is not None:deadline=min(deadline,time.monotonic()+next_scene.seconds)
+                deadline=reconcile_deadline(deadline,next_scene.seconds,time.monotonic())
                 scene=next_scene
         except Interrupted as e:self.event('done',message=str(e))
         except Exception as e:self.event('error',message=str(e),detail=traceback.format_exc())

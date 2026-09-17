@@ -7,6 +7,20 @@ from vision import configure_ocr,recognize,result_colors,measure_board_motion
 
 @unittest.skipUnless(Path('work/studio/data/sessions/20260917-124756/start.png').exists(), 'Private game captures are not distributed')
 class CapturedSceneTests(unittest.TestCase):
+    @unittest.skipUnless(Path('outputs/release/ColorStudio/data/sessions/20260917-161321/start.png').exists() or Path('work/studio/release-test-data/sessions/20260917-161321/start.png').exists(), 'Private game capture is not distributed')
+    def test_small_portrait_cards_separate_from_white_stems(self):
+        path=Path('work/studio/release-test-data/sessions/20260917-161321/start.png')
+        if not path.exists():path=Path('outputs/release/ColorStudio/data/sessions/20260917-161321/start.png')
+        scene=recognize(np.array(Image.open(path)))
+        self.assertEqual(scene.colors,['#5D8264','#534B42','#C28860'])
+        self.assertEqual(scene.seconds,99)
+        self.assertEqual(scene.markers,[(224,533),(347,522),(471,541)])
+    @unittest.skipUnless(Path('work/studio/release-test-data/sessions/20260917-155156/step-01.png').exists(), 'Private game capture is not distributed')
+    def test_maximized_timer_retains_all_three_digits(self):
+        folder=Path('work/studio/release-test-data/sessions/20260917-155156')
+        for name,seconds in [('start.png',112),('step-01.png',108)]:
+            with self.subTest(name=name):
+                self.assertEqual(recognize(np.array(Image.open(folder/name))).seconds,seconds)
     def test_repeated_narrow_hex_glyphs(self):
         im=np.array(Image.open('work/studio/data/sessions/20260917-124756/start.png'))
         self.assertEqual(recognize(im).colors,['#597961','#7F7F7F','#A95C40'])

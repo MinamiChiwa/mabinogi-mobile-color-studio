@@ -4,7 +4,7 @@ By **南千和 (MinamiChiwa)** · [Support on Afdian](https://afdian.com/a/minam
 
 [简体中文](README.md) · [繁體中文](README.zh-TW.md) · [English](README.en.md)
 
-A Windows color-search assistant for **Mabinogi Mobile, Hong Kong / Macau / Taiwan service**. It reads the game screen and uses mouse gestures to search for your selected dye colors across three regions.
+An automatic dyeing tool for **Mabinogi Mobile, Hong Kong / Macau / Taiwan service**, running on Windows. It reads the game screen and uses mouse gestures to search for your selected dye colors across three regions.
 
 > Using this program in-game carries risks. Please consider those risks and use your own judgment.
 

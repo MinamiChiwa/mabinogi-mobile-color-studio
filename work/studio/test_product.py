@@ -3,14 +3,29 @@ from pathlib import Path
 from unittest.mock import patch
 import numpy as np
 from palette import allowed_colors,overview,full_atlas
-from engine import exact_zoom_candidate
-from vision import Scene,lab,rgb
+from engine import exact_zoom_candidate,reconcile_deadline
+from vision import Scene,lab,rgb,candidate_shift
 from result_history import describe_result,save_result,read_history
 from unittest.mock import MagicMock
 from engine import Runner
 from platform_win import Interrupted
 
 class ProductTests(unittest.TestCase):
+    def test_timer_digit_loss_does_not_trigger_early_fallback(self):
+        self.assertEqual(reconcile_deadline(200,10,90),200)
+        self.assertEqual(reconcile_deadline(200,109,90),199)
+        self.assertEqual(reconcile_deadline(200,None,90),200)
+    def test_exact_visible_target_is_moved_before_magnification(self):
+        scene=Scene([],[(50,110),(150,110),(250,110)],(0,0,300,300),[None]*3,100,None)
+        rules=[dict(enabled=True,colors=['#FFFFFF'],exact=True,tolerance=0)]+[dict(enabled=False)]*2
+        image=np.full((300,300,3),80,np.uint8)
+        image[40,20]=255
+        image[180:187,60:67]=255
+        move=candidate_shift(image,scene,rules)
+        self.assertEqual(move,(-13,-73,0.0))
+        self.assertIsNone(exact_zoom_candidate(image,scene,rules))
+        image[180:187,60:67]=80
+        self.assertEqual(candidate_shift(image,scene,rules),(30,70,0.0))
     def test_zoom_limit_keeps_magnified_view_for_targeting(self):
         game=MagicMock();game.hwnd=1
         game.capture.side_effect=[np.full((150,150,3),i*25,np.uint8) for i in range(8)]+[Interrupted('finished')]

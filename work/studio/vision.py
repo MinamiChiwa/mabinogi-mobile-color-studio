@@ -52,7 +52,7 @@ class Scene:
 def color_cards(image):
     h,w=image.shape[:2]
     mask=cv2.inRange(image,np.array([218]*3,np.uint8),np.array([255]*3,np.uint8))
-    k=max(3,round(min(w,h)*.005)); k+=1-k%2
+    k=max(5,round(min(w,h)*.007)); k+=1-k%2
     mask=cv2.morphologyEx(mask,cv2.MORPH_OPEN,np.ones((k,k),np.uint8))
     candidates=[]
     for c in cv2.findContours(mask,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)[0]:
@@ -200,8 +200,12 @@ def recognize(image,with_ocr=True,previous=None):
         unit=cards[0][2]
         # Timer sits at upper-left; keep crop independent of aspect ratio.
         portrait=w<h
-        roi=image[round(h*.05) if portrait else 0:round(h*.095) if portrait else round(unit*.72),round(unit*.68):min(w,round(unit*1.35))]
-        text=ocr(roi,'0123456789',psm=6)
+        if portrait:
+            roi=image[round(h*.05):round(h*.095),round(unit*.68):min(w,round(unit*1.35))]
+        else:
+            # Exclude the hourglass and bar; retain all three timer digits.
+            roi=image[round(unit*.225):round(unit*.675),round(unit*.77):min(w,round(unit*1.49))]
+        text=ocr(roi,'0123456789',psm=7 if not portrait else 6)
         values=[int(v) for v in re.findall(r'\d{1,3}',text) if 0<=int(v)<=120]
         seconds=values[0] if len(values)==1 else None
     buttons=green_buttons(image)
@@ -252,5 +256,12 @@ def candidate_shift(image,scene,rules,visited=()):
     valid &= (np.abs(dx)+np.abs(dy)>0)
     for vx,vy in visited:valid &= (dx!=vx)|(dy!=vy)
     if not active or not valid.any():return None
-    scores[~valid]=np.inf; j=int(np.argmin(scores))
+    scores[~valid]=np.inf
+    best=float(np.min(scores)); candidates=np.flatnonzero(valid & (scores==best))
+    # Equal-color candidates are not equally robust: land inside an island,
+    # away from antialiased edges, before preferring a shorter translation.
+    mask=(valid & (scores==best)).reshape(xx.shape).astype(np.uint8)
+    interior=cv2.distanceTransform(np.pad(mask,1),cv2.DIST_L2,5)[1:-1,1:-1].ravel()
+    order=np.lexsort((dx[candidates]**2+dy[candidates]**2,-interior[candidates]))
+    j=int(candidates[order[0]])
     return int(dx[j]),int(dy[j]),float(scores[j])
