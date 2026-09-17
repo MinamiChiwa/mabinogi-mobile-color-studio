@@ -53,3 +53,5 @@ Output: `outputs/release/ColorStudio`. Previous release data is backed up locall
 See [VALIDATION.md](VALIDATION.md). A timed search cannot guarantee an exact match or a global optimum. Actual game testing does not cover every DPI and monitor configuration.
 
 After F8, the tool waits up to 60 seconds for the dye board and countdown. You can open regular dye from your inventory and finish the tutorial during this time. Waiting sends no mouse input; F9 cancels. A timeout dialog asks you to press F8 again.
+
+The layout adapts to the window: three regions side by side in wide windows, region tabs in narrow windows. Mouse-wheel input is disabled throughout the tool UI. Click or drag to adjust values; drag the scrollbar if a very small window cannot show all settings.

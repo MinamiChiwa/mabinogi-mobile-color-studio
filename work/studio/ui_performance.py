@@ -1,5 +1,11 @@
 """Coalesce resize bursts without changing Tk geometry or DPI calculations."""
 from customtkinter.windows.widgets.core_widget_classes import CTkBaseClass
+from customtkinter import CTkSlider
+
+class DeliberateSlider(CTkSlider):
+    """Adjust by click/drag only; wheel belongs to the surrounding page."""
+    def _mouse_scroll_event(self,event):
+        return None
 
 def install_resize_coalescing():
     if getattr(CTkBaseClass,'_studio_resize_installed',False):return

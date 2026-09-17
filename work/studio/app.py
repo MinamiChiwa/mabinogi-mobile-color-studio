@@ -17,7 +17,7 @@ import numpy as np
 from vision import rgb
 PALETTE_POOL=ThreadPoolExecutor(max_workers=1)
 from PIL import Image,ImageDraw
-from ui_performance import install_resize_coalescing
+from ui_performance import install_resize_coalescing,DeliberateSlider
 install_resize_coalescing()
 
 def build_preview(target,tolerance):
@@ -39,19 +39,24 @@ class Card(ct.CTkFrame):
         self.index=index; self.enabled=tk.BooleanVar(value=index==0); self.mode=tk.StringVar(value='精准 HEX'); self.tolerance=tk.DoubleVar(value=8)
         self.target=tk.StringVar(value='#202020'); self.alt=tk.StringVar(value='')
         self.grid_columnconfigure(0,weight=1)
-        ct.CTkLabel(self,text=f'0{index+1}  /  颜色区域',font=(FONT,16,'bold'),text_color=INK,height=22).grid(row=0,column=0,padx=20,pady=(14,8),sticky='w')
-        ct.CTkSwitch(self,text='匹配此区域',variable=self.enabled,font=(FONT,12),progress_color=ACCENT).grid(row=1,column=0,padx=20,sticky='w')
+        heading=ct.CTkFrame(self,fg_color='transparent')
+        heading.grid(row=0,column=0,padx=20,pady=(12,6),sticky='ew')
+        ct.CTkLabel(heading,text=f'0{index+1}  /  颜色区域',font=(FONT,16,'bold'),text_color=INK,height=22).pack(side='left')
+        ct.CTkSwitch(heading,text='',width=42,variable=self.enabled,progress_color=ACCENT).pack(side='right')
         self.preview_frame=ct.CTkFrame(self,fg_color='transparent')
         self.preview_frame.grid(row=2,column=0,padx=20,pady=(8,6),sticky='ew')
         self.swatch=ct.CTkButton(self.preview_frame,text='点击选色',height=34,corner_radius=10,command=self.pick,font=(FONT,13),fg_color='#202020',hover_color='#35445B')
-        self.swatch.pack(fill='x')
-        ct.CTkButton(self.preview_frame,text='⌖  屏幕吸管',height=26,fg_color='#28364A',hover_color='#364D63',font=(FONT,11),command=lambda:pick_screen(self.winfo_toplevel(),self.target.set)).pack(fill='x',pady=(5,0))
+        self.preview_frame.grid_columnconfigure(0,weight=1)
+        self.preview_frame.grid_columnconfigure(1,weight=1)
+        self.swatch.configure(width=110)
+        self.swatch.grid(row=0,column=0,sticky='ew',padx=(0,4))
+        ct.CTkButton(self.preview_frame,text='⌖  屏幕吸管',width=110,height=34,fg_color='#28364A',hover_color='#364D63',font=(FONT,11),command=lambda:pick_screen(self.winfo_toplevel(),self.target.set)).grid(row=0,column=1,sticky='ew',padx=(4,0))
         self.palette=ct.CTkLabel(self.preview_frame,text='',height=64)
-        self.palette.pack(fill='x',pady=(6,0))
+        self.palette.grid(row=1,column=0,columnspan=2,sticky='ew',pady=(6,0))
         self.palette.bind('<Button-1>',self.open_palette)
         self.palette.configure(cursor='hand2')
         self.palette_note=ct.CTkLabel(self.preview_frame,text='目标色集合',font=(FONT,10),text_color=MUTED,height=14)
-        self.palette_note.pack(anchor='w')
+        self.palette_note.grid(row=2,column=0,columnspan=2,sticky='w')
         self._palette_future=None;self._palette_key=None;self._palette_pixels=None
         self._preview_job=None
         ct.CTkEntry(self,textvariable=self.target,height=36,font=('Consolas',16),border_color='#36445B').grid(row=3,column=0,padx=20,sticky='ew')
@@ -59,12 +64,21 @@ class Card(ct.CTkFrame):
         ct.CTkEntry(self,textvariable=self.alt,height=34,placeholder_text='#FFFFFF, #EAEAEA').grid(row=5,column=0,padx=20,sticky='ew')
         self.alts=ct.CTkFrame(self,fg_color='transparent',height=18); self.alts.grid(row=6,column=0,padx=20,pady=3,sticky='ew');self.alts.pack_propagate(False)
         ct.CTkSegmentedButton(self,values=['精准 HEX','相似颜色'],variable=self.mode,command=self.change_mode,font=(FONT,12),selected_color='#236D62',selected_hover_color='#2C8275').grid(row=7,column=0,padx=20,pady=(8,10),sticky='ew')
-        self.slider=ct.CTkSlider(self,from_=1,to=35,number_of_steps=34,variable=self.tolerance,command=self.change_mode,progress_color=ACCENT,button_color=ACCENT)
+        self.slider=DeliberateSlider(self,from_=1,to=35,number_of_steps=34,variable=self.tolerance,command=self.change_mode,progress_color=ACCENT,button_color=ACCENT)
         self.slider.grid(row=8,column=0,padx=20,sticky='ew')
         self.hint=ct.CTkLabel(self,text='',font=(FONT,11),text_color=MUTED,height=20);self.hint.grid(row=9,column=0,padx=20,pady=(0,6),sticky='w')
         self.current=ct.CTkLabel(self,text='当前颜色  —',font=(FONT,12),text_color=MUTED,height=20);self.current.grid(row=10,column=0,padx=20,pady=(0,10),sticky='w')
         self.best_label=ct.CTkLabel(self,text='最佳结果  —',font=(FONT,11),text_color=ACCENT,height=22,corner_radius=5);self.best_label.grid(row=11,column=0,padx=20,pady=(0,8),sticky='ew')
         self.target.trace_add('write',self.preview);self.alt.trace_add('write',self.preview); self.preview();self.change_mode()
+        self._normal_padding=[(w,w.grid_info()['pady']) for w in self.winfo_children() if w.winfo_manager()=='grid']
+        self._compact=None
+    def set_compact(self,compact):
+        if self._compact==compact:return
+        self._compact=compact
+        for widget,padding in self._normal_padding:widget.grid_configure(pady=2 if compact else padding)
+        if not self.alts.winfo_children():self.alts.grid_remove()
+        self.palette.configure(height=48 if compact else 64)
+        if hasattr(self,'palette_image'):self.palette_image.configure(size=(240,48 if compact else 64))
     def change_mode(self,*_):
         exact=self.mode.get()=='精准 HEX'
         if getattr(self,'_last_exact',None)!=exact:
@@ -80,6 +94,8 @@ class Card(ct.CTkFrame):
         for part in self.alt.get().replace('，',',').split(',')[:6]:
             try:ct.CTkLabel(self.alts,text='',width=20,height=18,corner_radius=4,fg_color=normalize_hex(part)).pack(side='left',padx=(0,5))
             except ValueError:pass
+        if self.alts.winfo_children():self.alts.grid()
+        else:self.alts.grid_remove()
         self.schedule_palette()
     def schedule_palette(self):
         if self._preview_job:self.after_cancel(self._preview_job)
@@ -110,7 +126,7 @@ class Card(ct.CTkFrame):
     def render_palette(self,im=None):
         if im is None:im=overview(self._palette_pixels)
         self._display_key=self._palette_key
-        new_image=ct.CTkImage(light_image=im,dark_image=im,size=(240,64))
+        new_image=ct.CTkImage(light_image=im,dark_image=im,size=(240,48 if getattr(self,'_compact',False) else 64))
         self.palette.configure(image=new_image,text='')
         self.palette_image=new_image
         count=len(self._palette_pixels)
@@ -147,10 +163,14 @@ class App(ct.CTk):
         ct.CTkButton(toolbar,text='♥  支持作者',width=110,height=32,fg_color='#694C91',hover_color='#8260AE',command=lambda:webbrowser.open('https://afdian.com/a/minamichiwa')).pack(side='right',padx=4)
         ct.CTkButton(toolbar,text='寻色记录',width=90,height=32,fg_color='#28364A',command=self.show_history).pack(side='right')
         intro=ct.CTkFrame(self.body_scroll,fg_color='transparent');intro.grid(row=0,column=0,padx=8,pady=(0,10),sticky='ew')
+        self.intro=intro
         self.intro_labels=[]
         label=ct.CTkLabel(intro,text='① 设置目标颜色    →    ② 游戏内打开普通染色    →    ③ 教学结束后按 F8',font=(FONT,13),text_color=MUTED,justify='left');label.pack(anchor='w');self.intro_labels.append(label)
         label=ct.CTkLabel(intro,text='精准色更难寻找  ·  推荐从相似模式 ΔE 8–12 开始，数值越小越接近目标',font=(FONT,13,'bold'),text_color='#FFD18A',fg_color='#342C22',corner_radius=8,height=34,justify='left');label.pack(fill='x',pady=(6,0));self.intro_labels.append(label)
-        body=ct.CTkFrame(self.body_scroll,fg_color='transparent');body.grid(row=1,column=0,sticky='ew');self.card_body=body
+        self.region_names=[tr(f'区域 {i+1}') for i in range(3)];self.selected_region=0
+        self.region_tabs=ct.CTkSegmentedButton(self.body_scroll,values=self.region_names,command=self.select_region,selected_color='#236D62',selected_hover_color='#2C8275',height=32)
+        self.region_tabs.set(self.region_names[0])
+        body=ct.CTkFrame(self.body_scroll,fg_color='transparent');body.grid(row=2,column=0,sticky='ew');self.card_body=body
         for i in range(3):
             body.grid_columnconfigure(i,weight=1,uniform='cards');card=Card(body,i);card.grid(row=0,column=i,padx=6,pady=6,sticky='nsew');self.cards.append(card)
         controls=ct.CTkFrame(self,fg_color='transparent');controls.grid(row=3,column=0,padx=20,pady=(8,4),sticky='ew')
@@ -172,6 +192,11 @@ class App(ct.CTk):
         if self.history:self.display_best(self.history[0])
         threading.Thread(target=self.hotkey_loop,daemon=True).start()
         self.after(30,self.tick);self.protocol('WM_DELETE_WINDOW',self.close)
+        # Wheel input never changes settings or scrolls this application's UI.
+        for sequence in ('<MouseWheel>','<Button-4>','<Button-5>'):
+            self.bind_all(sequence,lambda e:'break')
+            for tag in ('Scrollbar','TScrollbar','Menu'):
+                self.bind_class(tag,sequence,lambda e:'break')
     def change_language(self,value):
         if self.busy:
             self.status.configure(text=tr('请先停止寻色再切换语言。'));return
@@ -213,21 +238,43 @@ class App(ct.CTk):
             self._layout_job=self.after(60,self.layout_cards)
     def sync_scroll_region(self):
         canvas=self.body_scroll._parent_canvas
-        canvas.configure(scrollregion=(0,0,canvas.winfo_width(),self.body_scroll.winfo_reqheight()))
+        height=self.body_scroll.winfo_reqheight()
+        canvas.configure(scrollregion=(0,0,canvas.winfo_width(),height))
+        overflow=height>canvas.winfo_height()+2
+        if overflow:self.body_scroll._scrollbar.grid()
+        else:self.body_scroll._scrollbar.grid_remove();canvas.yview_moveto(0)
+    def select_region(self,value):
+        self.selected_region=self.region_names.index(value)
+        if self._layout_columns==1:
+            for i,card in enumerate(self.cards):
+                if i==self.selected_region:card.grid(row=0,column=0,sticky='nsew')
+                else:card.grid_remove()
+            self.body_scroll._parent_canvas.yview_moveto(0)
+            self.after(80,self.sync_scroll_region)
     def layout_cards(self):
         self._layout_job=None
         width=round(self.winfo_width()/self.body_scroll._get_widget_scaling())
-        if width==self._layout_width:return
-        self._layout_width=width
-        columns=3 if width>=1040 else 2 if width>=740 else 1
+        height=round(self.winfo_height()/self.body_scroll._get_widget_scaling())
+        if (width,height)==self._layout_width:return
+        self._layout_width=(width,height)
+        compact=height<960
+        columns=3 if width>=1040 else 1
+        for card in self.cards:card.set_compact(compact)
+        if height<780:self.intro.grid_remove()
+        else:self.intro.grid()
         if columns!=self._layout_columns:
             self._layout_columns=columns
             for i in range(3):self.card_body.grid_columnconfigure(i,weight=1 if i<columns else 0,uniform='cards' if i<columns else '')
-            for i,card in enumerate(self.cards):card.grid(row=i//columns,column=i%columns,sticky='nsew')
+            for i,card in enumerate(self.cards):
+                if columns==3 or i==self.selected_region:card.grid(row=0,column=i if columns==3 else 0,sticky='nsew')
+                else:card.grid_remove()
+            if columns==1:self.region_tabs.grid(row=1,column=0,padx=8,pady=(0,6),sticky='ew')
+            else:self.region_tabs.grid_remove()
             self.body_scroll._parent_canvas.yview_moveto(0)
             self.after(100,self.sync_scroll_region)
         for label in self.intro_labels:label.configure(wraplength=max(300,width-90))
         for label in (self.status,self.detail,self.footer):label.configure(wraplength=max(300,width-80))
+        self.after(80,self.sync_scroll_region)
         compact=width<900
         if getattr(self,"_compact_controls",None)==compact:return
         self._compact_controls=compact

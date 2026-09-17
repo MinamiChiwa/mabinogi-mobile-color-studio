@@ -25,7 +25,7 @@ class PaletteViewer(ct.CTkToplevel):
         ys=tk.Scrollbar(frame,orient='vertical',command=self.canvas.yview);ys.grid(row=0,column=1,sticky='ns')
         self.canvas.configure(xscrollcommand=xs.set,yscrollcommand=ys.set)
         self.canvas.bind('<Motion>',self.inspect)
-        self.canvas.bind('<MouseWheel>',lambda e:self.canvas.yview_scroll(-int(e.delta/120)*3,'units'))
+        self.canvas.bind('<MouseWheel>',lambda e:'break')
         self.canvas.bind('<ButtonPress-1>',lambda e:self.canvas.scan_mark(e.x,e.y))
         self.canvas.bind('<B1-Motion>',lambda e:self.canvas.scan_dragto(e.x,e.y,gain=1))
         self.bind('<Escape>',lambda e:self.destroy())

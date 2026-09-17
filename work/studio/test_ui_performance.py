@@ -2,9 +2,14 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 from customtkinter.windows.widgets.core_widget_classes import CTkBaseClass
-from ui_performance import install_resize_coalescing
+from ui_performance import install_resize_coalescing,DeliberateSlider
 
 class ResizeTests(unittest.TestCase):
+    def test_wheel_never_changes_slider_or_invokes_callback(self):
+        slider=SimpleNamespace(_update_value=MagicMock())
+        for delta in (-120,120):
+            DeliberateSlider._mouse_scroll_event(slider,SimpleNamespace(delta=delta,num=0))
+        slider._update_value.assert_not_called()
     def test_resize_burst_draws_latest_size_once_at_scaled_dimensions(self):
         install_resize_coalescing()
         widget=SimpleNamespace(_current_width=100,_current_height=80,
