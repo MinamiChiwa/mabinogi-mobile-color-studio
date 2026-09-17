@@ -17,8 +17,8 @@ import numpy as np
 from vision import rgb
 PALETTE_POOL=ThreadPoolExecutor(max_workers=1)
 from PIL import Image,ImageDraw
-from ui_performance import install_resize_coalescing,DeliberateSlider
-install_resize_coalescing()
+from ui_performance import DeliberateSlider
+from customtkinter.windows.widgets.scaling.scaling_base_class import CTkScalingBaseClass
 
 def build_preview(target,tolerance):
     pixels=allowed_colors(target,tolerance)
@@ -165,9 +165,8 @@ class App(ct.CTk):
         ct.CTkLabel(header,text='染色工坊',font=(FONT,28,'bold'),text_color=INK).pack(side='left')
         ct.CTkLabel(header,text='瑪奇 Mobile  /  by 南千和',font=(FONT,12),text_color=MUTED).pack(side='left',padx=18,pady=(10,0))
         toolbar=ct.CTkFrame(self,fg_color='transparent');toolbar.grid(row=1,column=0,padx=20,pady=(0,8),sticky='ew')
-        self.body_scroll=ct.CTkScrollableFrame(self,fg_color=BG,corner_radius=0)
+        self.body_scroll=ct.CTkFrame(self,fg_color=BG,corner_radius=0)
         self.body_scroll.grid(row=2,column=0,padx=12,sticky='nsew');self.body_scroll.grid_columnconfigure(0,weight=1)
-        self.body_scroll.bind('<Configure>',lambda e:self.after_idle(self.sync_scroll_region),add='+')
         ct.CTkOptionMenu(toolbar,values=['简体中文','繁體中文','English'],width=115,command=self.change_language,variable=tk.StringVar(value=i18n.language)).pack(side='right',padx=(8,0))
         ct.CTkButton(toolbar,text='保存方案',width=90,height=32,fg_color='#28364A',command=self.save).pack(side='right')
         ct.CTkButton(toolbar,text='♥  支持作者',width=110,height=32,fg_color='#694C91',hover_color='#8260AE',command=lambda:webbrowser.open('https://afdian.com/a/minamichiwa')).pack(side='right',padx=4)
@@ -177,9 +176,6 @@ class App(ct.CTk):
         self.intro_labels=[]
         label=ct.CTkLabel(intro,text='① 设置目标颜色    →    ② 游戏内打开普通染色    →    ③ 教学结束后按 F8',font=(FONT,13),text_color=MUTED,justify='left');label.pack(anchor='w');self.intro_labels.append(label)
         label=ct.CTkLabel(intro,text='精准色更难寻找  ·  推荐从相似模式 ΔE 8–12 开始，数值越小越接近目标',font=(FONT,13,'bold'),text_color='#FFD18A',fg_color='#342C22',corner_radius=8,height=34,justify='left');label.pack(fill='x',pady=(6,0));self.intro_labels.append(label)
-        self.region_names=[tr(f'区域 {i+1}') for i in range(3)];self.selected_region=0
-        self.region_tabs=ct.CTkSegmentedButton(self.body_scroll,values=self.region_names,command=self.select_region,selected_color='#236D62',selected_hover_color='#2C8275',height=32)
-        self.region_tabs.set(self.region_names[0])
         body=ct.CTkFrame(self.body_scroll,fg_color='transparent');body.grid(row=2,column=0,sticky='ew');self.card_body=body
         for i in range(3):
             body.grid_columnconfigure(i,weight=1,uniform='cards');card=Card(body,i);card.grid(row=0,column=i,padx=6,pady=6,sticky='nsew');self.cards.append(card)
@@ -195,9 +191,13 @@ class App(ct.CTk):
         self.detail=ct.CTkLabel(status,text='持续寻找更接近的颜色，剩余约 30 秒返回本轮最佳组合，由你确认是否使用。',font=(FONT,11),text_color=MUTED,wraplength=920,anchor='w');self.detail.grid(row=1,column=0,padx=18,pady=(0,12),sticky='ew')
         label=ct.CTkLabel(intro,text='适用于港澳台服瑪奇Mobile。游戏中使用本程序存在风险，请自行斟酌。',font=(FONT,11),text_color=MUTED,wraplength=940,justify='left');label.pack(fill='x',pady=(3,0));self.intro_labels.append(label)
         self.footer=ct.CTkLabel(self,text='F9 随时停止并释放鼠标  ·  切换窗口停止寻色  ·  不自动开启下一瓶染色剂',font=(FONT,11),text_color=MUTED);self.footer.grid(row=5,column=0,padx=20,pady=(0,8))
-        self._layout_job=None;self._layout_columns=None;self._layout_width=None
-        self.bind('<Configure>',self.schedule_layout,add='+')
-        self.after_idle(self.layout_cards)
+        self._layout_job=None;self._layout_columns=3;self._layout_width=None;self._configured_size=None
+        self.auto_check.grid(row=0,column=2,padx=8,sticky='w')
+        self.capture_button.grid(row=0,column=3,padx=4)
+        self.diagnostic_button.grid(row=0,column=4,padx=4)
+        for card in self.cards:card.set_compact(True)
+        for label in self.intro_labels:label.configure(wraplength=1030)
+        for label in (self.status,self.detail,self.footer):label.configure(wraplength=1040)
         self.load()
         if self.history:self.display_best(self.history[0])
         threading.Thread(target=self.hotkey_loop,daemon=True).start()
@@ -243,58 +243,24 @@ class App(ct.CTk):
                 ct.CTkLabel(line,text=text,width=205,height=52,corner_radius=8,fg_color=color or '#28364A',text_color='#17202B' if color and sum(rgb(color))>430 else 'white').pack(side='left',expand=True,fill='x',padx=3)
     def diagnostics(self):
         if messagebox.askyesno(tr('输入诊断'),tr('请先进入游戏限时染色界面。\n将依次测试左键平移、右键圆弧和滚轮缩放，记录前后色码与截图，不套用结果。\n\n是否开始？'),parent=self):self.go('diagnostic')
-    def schedule_layout(self,event):
-        if event.widget is self and self._layout_job is None:
-            self._layout_job=self.after(60,self.layout_cards)
-    def sync_scroll_region(self):
-        canvas=self.body_scroll._parent_canvas
-        height=self.body_scroll.winfo_reqheight()
-        canvas.configure(scrollregion=(0,0,canvas.winfo_width(),height))
-        overflow=height>canvas.winfo_height()+2
-        if overflow:self.body_scroll._scrollbar.grid()
-        else:self.body_scroll._scrollbar.grid_remove();canvas.yview_moveto(0)
-    def select_region(self,value):
-        self.selected_region=self.region_names.index(value)
-        if self._layout_columns==1:
-            for i,card in enumerate(self.cards):
-                if i==self.selected_region:card.grid(row=0,column=0,sticky='nsew')
-                else:card.grid_remove()
-            self.body_scroll._parent_canvas.yview_moveto(0)
-            self.after(80,self.sync_scroll_region)
-    def layout_cards(self):
-        self._layout_job=None
-        dpi=self._get_window_scaling()
-        width=round(self.winfo_width()/dpi);height=round(self.winfo_height()/dpi)
-        if width<100 or height<100:return
-        previous=getattr(self,'_last_window_size',(1120,900))
-        if abs(width/1120-height/900)>.003:
-            if abs(width-previous[0])/1120>=abs(height-previous[1])/900:
-                height=round(width*900/1120)
-            else:width=round(height*1120/900)
-            width=max(784,width);height=round(width*900/1120)
-            self.geometry(f'{width}x{height}')
-        self._last_window_size=(width,height)
-        factor=max(.7,min(width/1120,height/900))
-        if abs(factor-getattr(self,'_ui_scale',1.))>.005:
-            self._ui_scale=factor;ct.set_widget_scaling(factor)
-        self._layout_columns=3
-        self.region_tabs.grid_remove();self.intro.grid()
-        for i,card in enumerate(self.cards):
-            self.card_body.grid_columnconfigure(i,weight=1,uniform='cards')
-            card.grid(row=0,column=i,sticky='nsew');card.set_compact(True)
-        for label in self.intro_labels:label.configure(wraplength=1030)
-        for label in (self.status,self.detail,self.footer):label.configure(wraplength=1040)
-        if not getattr(self,'_fixed_controls',False):
-            self._fixed_controls=True
-            self.auto_check.grid(row=0,column=2,padx=8,sticky='w')
-            self.capture_button.grid(row=0,column=3,padx=4)
-            self.diagnostic_button.grid(row=0,column=4,padx=4)
-        self.after(80,self.sync_scroll_region)
+    def _set_scaling(self,new_widget_scaling,new_window_scaling):
+        # CTk otherwise pins min/max size for one second even when only font /
+        # widget scaling changes. Never re-enter window geometry for that case.
+        if abs(new_window_scaling-self._get_window_scaling())<.001:
+            CTkScalingBaseClass._set_scaling(self,new_widget_scaling,new_window_scaling)
+        else:super()._set_scaling(new_widget_scaling,new_window_scaling)
     def fit_screen(self):
+        # Choose density once. Window gestures must never change widget/font
+        # scaling: CTk scaling recursively redraws and reconfigures every child.
         dpi=self._get_window_scaling()
-        factor=min(1.,(self.winfo_screenwidth()-80)/dpi/1120,(self.winfo_screenheight()-100)/dpi/900)
+        factor=min(1.,(self.winfo_screenwidth()-80)/dpi/1120,
+                   (self.winfo_screenheight()-100)/dpi/900)
         factor=max(.7,factor)
-        self.geometry(f'{round(1120*factor)}x{round(900*factor)}+20+20')
+        self._ui_scale=factor
+        ct.set_widget_scaling(factor)
+        width,height=round(1120*factor),round(900*factor)
+        self.minsize(width,height)
+        self.geometry(f'{width}x{height}+20+20')
     def save(self):
         try:
             data=[{'enabled':c.enabled.get(),'target':c.target.get(),'alt':c.alt.get(),'mode':c.mode.get(),'tolerance':c.tolerance.get()} for c in self.cards]
