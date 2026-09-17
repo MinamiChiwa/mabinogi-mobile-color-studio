@@ -106,8 +106,8 @@ class Game:
         self.move_to(point)
         # Separate notches so the game receives each tick; cancellable during bursts.
         for _ in range(min(32,abs(int(steps)))):
-            self.check();self.send(0x800,data=(1 if steps>0 else -1)*120);time.sleep(.045)
-        time.sleep(.18)
+            self.check();self.send(0x800,data=(1 if steps>0 else -1)*120);time.sleep(.018)
+        time.sleep(.10)
     def click(self,p):
         self.check(); self.move_to(p); time.sleep(.06); self.send(2)
         try:time.sleep(.09)

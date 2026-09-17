@@ -232,10 +232,11 @@ class Runner:
                     self.event('explore',message='当前范围没有合适候选，正在拖动色板探索新颜色。')
                     g.drag(scene.board,dx,dy);action={'explore':True,'dx':dx,'dy':dy};visited=[];explore_index+=1
                 self.best.expect(dict(action,rotation_gain=rotation_gain))
-                time.sleep(.20); im=g.capture(); Image.fromarray(im).save(self.folder/f'step-{step+1:02d}.png'); next_scene=recognize(im,previous=scene)
+                time.sleep(.10 if 'wheel' in action else .15); im=g.capture(); Image.fromarray(im).save(self.folder/f'step-{step+1:02d}.png',compress_level=1); next_scene=recognize(im,previous=scene)
+                motion=measure_board_motion(before,im,scene.board)
+                self.best.expect(dict(action,rotation_gain=rotation_gain,measured_motion=motion))
                 l,t,r,b=scene.board; change=float(np.mean(np.abs(im[t:b,l:r].astype(float)-before[t:b,l:r].astype(float))))
                 if action.get('joint') and locked is not None:
-                    motion=measure_board_motion(before,im,scene.board)
                     if motion is None:locked=None
                     else:
                         matrix=np.array(motion['matrix']);origin=np.array(motion['origin'])
@@ -244,7 +245,6 @@ class Runner:
                         if lock_steps>=10:locked=None
                 elif locked is not None:locked=None
                 if 'rotate' in action:
-                    motion=measure_board_motion(before,im,scene.board)
                     action['measured_motion']=motion
                     if motion is None or abs(motion['angle'])<2 or abs(motion['scale']-1)>.08:
                         self.event('rotation_unverified',message='本次右键动作未能证实有效旋转，继续平移搜索。')
@@ -252,13 +252,12 @@ class Runner:
                         rotation_gain=.3*rotation_gain+.7*motion['angle']/action['rotate']
                         action['rotation_gain']=round(rotation_gain,3)
                 if 'wheel' in action:
-                    motion=measure_board_motion(before,im,scene.board);action['measured_motion']=motion
+                    action['measured_motion']=motion
                     if motion is not None:
                         zoom_blocked_direction=int(np.sign(action['wheel'])) if abs(motion['scale']-1)<.005 else 0
                         if action.get('exact_magnify') and zoom_blocked_direction==1:
                             zoom_cooldown=step+10;zoom_hold_until=step+8;zoom_burst=0
                 if 'predicted_delta' in action:
-                    motion=measure_board_motion(before,im,scene.board)
                     if motion is not None and not action.get('joint') and move[2]<=1 and track_attempts<2:
                         matrix=np.array(motion['matrix']);origin=np.array(motion['origin'])
                         points=np.array([scene.markers[i] for i in enabled],float)

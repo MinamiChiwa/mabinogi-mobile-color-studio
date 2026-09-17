@@ -40,7 +40,7 @@ class BestResult:
     def expect(self,action):self.action=dict(action)
     def observe(self,image,scene):
         if self.previous is not None and image is not self.previous:
-            motion=measure_board_motion(self.previous,image,scene.board)
+            motion=self.action['measured_motion'] if self.action is not None and 'measured_motion' in self.action else measure_board_motion(self.previous,image,scene.board)
             transform=global_matrix(motion) if motion is not None else commanded_matrix(self.action,scene.board) if self.action is not None else None
             if motion is None and transform is not None:self.estimated_steps+=1
             self.pose=transform@self.pose if transform is not None and self.pose is not None else None

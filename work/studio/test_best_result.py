@@ -8,6 +8,14 @@ from engine import Runner,perfect_match
 from eyedropper import pixel_hex
 
 class BestResultTests(unittest.TestCase):
+    def test_cached_motion_updates_pose_without_recomputing(self):
+        tracker=BestResult(self.rules());a=np.zeros((120,120,3),np.uint8)
+        tracker.observe(a,self.scene('#FEFEFE'))
+        tracker.expect({'dx':30,'dy':0,'measured_motion':{'matrix':[[1,0,28],[0,1,2]],'origin':[0,0]}})
+        with patch('best_result.measure_board_motion') as estimate:
+            tracker.observe(a.copy(),self.scene('#AAAAAA'))
+            estimate.assert_not_called()
+        np.testing.assert_allclose(tracker.pose[:2,2],[28,2])
     def test_similarity_hit_does_not_end_optimization(self):
         rules=[dict(enabled=True,colors=['#FFFFFF','#000000'],exact=False,tolerance=12),dict(enabled=False)]
         self.assertFalse(perfect_match(['#FEFEFE',None],rules))

@@ -17,7 +17,7 @@ while todo:
  pe.close()
 (ocr/'tessdata').mkdir(exist_ok=True)
 shutil.copy2(source/'tessdata/eng.traineddata',ocr/'tessdata/eng.traineddata')
-out=workspace/'outputs/release'
+out=Path(__import__('os').environ.get('COLOR_STUDIO_DIST',str(workspace/'outputs/release')))
 saved=out/'ColorStudio/data'
 if saved.exists():shutil.copytree(saved,root/'release-test-data',dirs_exist_ok=True)
 subprocess.run([sys.executable,'-m','PyInstaller','--noconfirm','--onedir','--windowed','--name','ColorStudio','--distpath',str(out),'--workpath',str(root/'build'),'--specpath',str(root),'--collect-data','customtkinter','--collect-data','opencc','--add-data',str(ocr)+';ocr','--exclude-module','PySide6','--exclude-module','pandas','--exclude-module','matplotlib',str(root/'app.py')],check=True)

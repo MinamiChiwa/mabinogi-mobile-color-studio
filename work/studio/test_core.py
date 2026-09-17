@@ -6,6 +6,15 @@ from platform_win import Game,Interrupted
 from vision import accepted,normalize_hex,candidate_shift,Scene
 
 class MatchingTests(unittest.TestCase):
+    def test_fast_zoom_keeps_individual_ticks_and_anchor(self):
+        game=Game.__new__(Game);events=[];positions=[]
+        game.check=lambda:None;game.move_to=positions.append
+        game.send=lambda flags,**kw:events.append((flags,kw['data']))
+        with patch('platform_win.time.sleep') as sleep:
+            game.wheel((0,0,300,300),32,anchor=(70,80))
+        self.assertEqual(positions,[(70,80)])
+        self.assertEqual(events,[(0x800,120)]*32)
+        self.assertLess(sum(c.args[0] for c in sleep.call_args_list),.7)
     def rule(self,colors,exact=True,tolerance=8):return {'enabled':True,'colors':colors,'exact':exact,'tolerance':tolerance}
     def test_exact_rejects_one_channel_difference(self):
         rules=[self.rule(['#202020'])]*3
