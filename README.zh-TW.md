@@ -1,6 +1,6 @@
 # 染色工坊 · 瑪奇 Mobile
 
-作者：**南千和** · [愛發電](https://afdian.com/a/minamichiwa) · [Patreon](https://patreon.com/chiwaminami?utm_medium=unknown&utm_source=join_link&utm_campaign=creatorshare_creator&utm_content=copyLink) · [GitHub](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio)
+作者：**南千和** · [愛發電](https://afdian.com/a/minamichiwa) · [Patreon](https://patreon.com/chiwaminami?utm_medium=unknown&utm_source=join_link&utm_campaign=creatorshare_creator&utm_content=copyLink)
 
 適用於**港澳臺服瑪奇Mobile**的自動染色工具。於 Windows 執行，透過遊戲畫面識別與滑鼠操作，尋找三個染色區域的目標顏色。
 
