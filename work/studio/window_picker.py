@@ -1,23 +1,32 @@
 """Explicit selection by window identity; titles are display data only."""
 import customtkinter as ct
-from i18n import tr
+from i18n import tr,on_language
 from window_target import list_windows,choose_auto,WindowUnavailable,valid_target
+from ui_typography import TITLE_FONT,BODY_FONT
 
 class WindowPicker(ct.CTkToplevel):
     def __init__(self,parent,current,selected):
-        super().__init__(parent);self.title(tr('选择游戏窗口'));self.geometry('680x350');self.resizable(False,False)
+        super().__init__(parent);self.title(tr('选择游戏窗口'));self.geometry('680x350');self.minsize(520,350)
         self.transient(parent);self.selected=selected;self.current=current;self.choices={}
         self.grid_columnconfigure(0,weight=1)
-        ct.CTkLabel(self,text='选择游戏窗口',font=('Microsoft YaHei UI',22,'bold')).grid(row=0,column=0,padx=24,pady=(20,8),sticky='w')
-        ct.CTkLabel(self,text='默认自动识别瑪奇Mobile，也可选择标题不同的游戏窗口。',wraplength=620,justify='left').grid(row=1,column=0,padx=24,pady=4,sticky='w')
-        self.menu=ct.CTkOptionMenu(self,values=[tr('自动检测')],width=610,dynamic_resizing=False)
+        ct.CTkLabel(self,text='选择游戏窗口',font=TITLE_FONT).grid(row=0,column=0,padx=24,pady=(20,8),sticky='w')
+        ct.CTkLabel(self,text='默认自动识别瑪奇Mobile，也可选择标题不同的游戏窗口。',font=BODY_FONT,wraplength=620,justify='left').grid(row=1,column=0,padx=24,pady=4,sticky='w')
+        self.menu=ct.CTkOptionMenu(self,values=[tr('自动检测')],width=420,font=BODY_FONT,dynamic_resizing=False)
         self.menu.grid(row=2,column=0,padx=24,pady=12,sticky='ew')
-        self.notice=ct.CTkLabel(self,text='',wraplength=620,justify='left',anchor='w',height=60)
+        self.notice=ct.CTkLabel(self,text='',font=BODY_FONT,wraplength=620,justify='left',anchor='w',height=60)
         self.notice.grid(row=3,column=0,padx=24,pady=4,sticky='ew')
         bar=ct.CTkFrame(self,fg_color='transparent');bar.grid(row=4,column=0,padx=24,pady=16,sticky='ew')
-        ct.CTkButton(bar,text='刷新窗口',command=self.refresh).pack(side='left')
-        ct.CTkButton(bar,text='使用此窗口',command=self.apply).pack(side='right')
-        self.refresh();self.after(80,self.lift)
+        ct.CTkButton(bar,text='刷新窗口',font=BODY_FONT,command=self.refresh).pack(side='left')
+        ct.CTkButton(bar,text='使用此窗口',font=BODY_FONT,command=self.apply).pack(side='right')
+        self.refresh();self.after(80,self.lift);on_language(self,self.refresh_language)
+        self.bind('<Configure>',self.resize,add='+')
+    def resize(self,event):
+        if event.widget!=self:return
+        width=max(300,int(event.width/self._get_widget_scaling())-55)
+        for child in self.winfo_children():
+            if isinstance(child,ct.CTkLabel):child.configure(wraplength=width)
+    def refresh_language(self):
+        self.current=self.choices.get(self.menu.get(),self.current);self.refresh()
     def refresh(self):
         auto=tr('自动检测');self.choices={}
         try:

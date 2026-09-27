@@ -5,6 +5,48 @@ from PIL import Image
 
 LIMIT=200*1024*1024
 MARKER='.color-studio-diagnostics'
+SESSION_RETENTION_DAYS=30
+SESSION_RETENTION_COUNT=20
+SESSION_RETENTION_BYTES=512*1024*1024
+
+def cleanup_sessions(root, now=None, keep_days=SESSION_RETENTION_DAYS,
+                     keep_count=SESSION_RETENTION_COUNT,
+                     max_bytes=SESSION_RETENTION_BYTES):
+    """Bound normal atlas session storage without touching unrelated files.
+
+    Only timestamp-named child directories created by the studio are eligible.
+    The newest sessions and any directory modified in the last five minutes are
+    retained; older sessions are removed when they exceed the age or total-size
+    budget. Unexpected files make the directory stay in place.
+    """
+    root=Path(root)
+    if root.is_symlink() or not root.is_dir():return dict(removed=0,bytes=0)
+    now=time.time() if now is None else float(now)
+    entries=[]
+    for folder in root.iterdir():
+        if (folder.is_symlink() or not folder.is_dir() or
+                not re.fullmatch(r'\d{8}-\d{6}',folder.name)):continue
+        try:
+            files=[p for p in folder.rglob('*') if p.is_file() and not p.is_symlink()]
+            entries.append((folder.stat().st_mtime,folder,files,
+                            sum(p.stat().st_size for p in files)))
+        except OSError:continue
+    newest={id(item[1]) for item in sorted(entries,key=lambda item:item[0],reverse=True)[:keep_count]}
+    entries.sort(key=lambda item:item[0])
+    total=sum(item[3] for item in entries);removed=removed_bytes=0
+    for stamp,folder,files,size in entries:
+        recent=now-stamp<300
+        over_size=total>max_bytes
+        old=now-stamp>keep_days*86400
+        if recent or id(folder) in newest or not (old or over_size):continue
+        try:
+            for path in files:path.unlink(missing_ok=True)
+            for child in sorted(folder.rglob('*'),key=lambda p:len(p.parts),reverse=True):
+                if child.is_dir() and not child.is_symlink():child.rmdir()
+            folder.rmdir()
+            total-=size;removed+=1;removed_bytes+=size
+        except OSError:continue
+    return dict(removed=removed,bytes=removed_bytes)
 
 def cleanup(root,now=None,limit=LIMIT):
     now=time.time() if now is None else now

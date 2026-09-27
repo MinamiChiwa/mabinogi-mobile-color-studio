@@ -110,7 +110,7 @@ class ProductTests(unittest.TestCase):
         from vision import read_codes
         image=np.full((120,300,3),255,np.uint8)
         cards=[(0,0,80,80),(100,0,80,80),(200,0,80,80)]
-        with patch('vision.pytesseract.image_to_string',return_value='#FFFFFF') as ocr:
+        with patch('vision.OCR_AVAILABLE',True), patch('vision.pytesseract.image_to_string',return_value='#FFFFFF') as ocr:
             colors=read_codes(image,cards,[(40,100),(140,100),(240,100)],enabled=[True,False,False])
         self.assertEqual(colors,['#FFFFFF',None,None]);self.assertEqual(ocr.call_count,1)
 

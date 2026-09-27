@@ -50,7 +50,7 @@ class WindowTargetTests(unittest.TestCase):
         from pathlib import Path
         original=i18n.language;i18n.language='English'
         try:
-            for name in ('app.py','engine.py','search_overlay.py','window_picker.py','platform_win.py','palette_viewer.py','eyedropper.py'):
+            for name in ('app.py','engine.py','search_overlay.py','entry_picker.py','window_picker.py','platform_win.py','palette_viewer.py','eyedropper.py'):
                 for node in ast.walk(ast.parse((Path(__file__).parent/name).read_text(encoding='utf-8'))):
                     if not isinstance(node,ast.Constant) or not isinstance(node.value,str):continue
                     if node.value in ('简体中文','繁體中文'):continue

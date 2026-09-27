@@ -5,18 +5,21 @@ from i18n import tr
 import customtkinter as ct
 from PIL import Image,ImageTk
 from palette import full_atlas
+from ui_typography import SECTION_FONT,SMALL_FONT
 
 class PaletteViewer(ct.CTkToplevel):
     def __init__(self,parent,colors,target,pool):
         super().__init__(parent);self.title(tr('允许颜色 · 完整色图'));self.configure(fg_color='#10151F')
         self.geometry(f'{min(1000,self.winfo_screenwidth()-100)}x{min(740,self.winfo_screenheight()-100)}+40+40')
+        self.minsize(600,420)
         self.image=None;self.scale=1.;self.target=target;self.transient(parent)
         self._render_job=None;self._item=None;self._last_inspect=0.;self._last_color=None
         top=ct.CTkFrame(self,fg_color='transparent');top.pack(fill='x',padx=20,pady=(16,8))
-        ct.CTkLabel(top,text=f'{target} · {len(colors):,} 种允许颜色',font=('Microsoft YaHei UI',18,'bold')).pack(side='left')
+        ct.CTkLabel(top,text=f'{target} · {len(colors):,} 种允许颜色',font=SECTION_FONT).pack(anchor='w')
+        actions=ct.CTkFrame(top,fg_color='transparent');actions.pack(fill='x',pady=(8,0))
         for label,fn in [('适合窗口',self.fit),('原始尺寸',lambda:self.render(1)),('＋',lambda:self.render(self.scale*2)),('－',lambda:self.render(self.scale/2))]:
-            ct.CTkButton(top,text=label,width=78,command=fn).pack(side='right',padx=3)
-        self.note=ct.CTkLabel(self,text='正在生成完整色图…',anchor='w');self.note.pack(fill='x',padx=20,pady=(0,8))
+            ct.CTkButton(actions,text=label,width=100,font=BODY_FONT,command=fn).pack(side='left',padx=3)
+        self.note=ct.CTkLabel(self,text='正在生成完整色图…',font=SMALL_FONT,anchor='w');self.note.pack(fill='x',padx=20,pady=(0,8))
         frame=tk.Frame(self,bg='#192230');frame.pack(fill='both',expand=True,padx=20,pady=(0,20))
         frame.grid_rowconfigure(0,weight=1);frame.grid_columnconfigure(0,weight=1)
         self.canvas=tk.Canvas(frame,bg='#192230',highlightthickness=0)

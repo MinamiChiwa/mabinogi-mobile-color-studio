@@ -1,4 +1,8 @@
-"""Message hotkeys with registered-key polling fallback and edge deduplication."""
+"""Message hotkeys with registered-key polling fallback and edge deduplication.
+
+F9 is polled even if its global registration fails. Other unregistered keys
+are not polled, so a conflict cannot unexpectedly start a second workflow.
+"""
 import time
 
 class KeyEdges:
@@ -27,7 +31,9 @@ def run_hotkeys(user,ctypes,types,stop,emit,keys):
             while user.PeekMessageW(ctypes.byref(msg),None,0x312,0x312,1):
                 key=int(msg.wParam)
                 if key in registered and edges.accept(key,time.monotonic()):emit('hotkey',{'id':key})
-            for key,vk in registered.items():
+            # Keep an emergency stop even if another utility owns F9.
+            for key,vk in keys:
+                if key not in registered and vk != 0x78:continue
                 if edges.poll(key,bool(user.GetAsyncKeyState(vk)&0x8000),time.monotonic()):emit('hotkey',{'id':key})
             stop.wait(.025)
     except Exception as exc:

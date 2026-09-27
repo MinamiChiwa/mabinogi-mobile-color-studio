@@ -1,18 +1,56 @@
 """Visual recognition only. Coordinates are physical client-image pixels."""
 from dataclasses import dataclass
 from pathlib import Path
-import itertools, re, sys, os
+import itertools, re, sys, os, shutil
 import cv2
 import numpy as np
 import pytesseract
 from PIL import Image
 
-def configure_ocr():
+OCR_AVAILABLE = None
+
+def configure_ocr(strict=False):
+    """Check the OCR executable and English data before a timed capture."""
+    global OCR_AVAILABLE
     root=Path(getattr(sys,'_MEIPASS',Path(__file__).parent))
-    for exe in [root/'ocr/tesseract.exe',Path('C:/Program Files/Tesseract-OCR/tesseract.exe')]:
-        if exe.exists():
-            pytesseract.pytesseract.tesseract_cmd=str(exe); return
-    raise RuntimeError('文字识别组件缺失，请使用完整安装包。')
+    candidates=[root/'ocr/tesseract.exe',
+                Path(__file__).resolve().parents[2]/'outputs/dependencies/ocr/tesseract.exe']
+    if os.environ.get('TESSERACT_HOME'):
+        candidates.append(Path(os.environ['TESSERACT_HOME'])/'tesseract.exe')
+    candidates.append(Path('C:/Program Files/Tesseract-OCR/tesseract.exe'))
+    found=shutil.which('tesseract')
+    if found:candidates.append(Path(found))
+    for exe in candidates:
+        if exe.is_file():
+            pytesseract.pytesseract.tesseract_cmd=str(exe)
+            try:
+                pytesseract.get_tesseract_version()
+                if 'eng' not in pytesseract.get_languages(config=''):
+                    raise OSError('English OCR data is missing')
+            except (pytesseract.TesseractNotFoundError, pytesseract.TesseractError, OSError):
+                OCR_AVAILABLE = False
+                if strict:
+                    raise RuntimeError('文字识别组件不可用，请修复 Tesseract 后再开始染色采样。')
+                return False
+            OCR_AVAILABLE = True
+            return True
+    OCR_AVAILABLE = False
+    if strict:
+        raise RuntimeError('文字识别组件缺失，请使用完整安装包。')
+    return False
+
+def _tesseract(image, config, timeout=2):
+    """Return OCR text, degrading to an empty result when Tesseract is absent."""
+    global OCR_AVAILABLE
+    if OCR_AVAILABLE is False:
+        return ''
+    try:
+        text = pytesseract.image_to_string(image, config=config, timeout=timeout).strip()
+        OCR_AVAILABLE = True
+        return text
+    except (pytesseract.TesseractNotFoundError, pytesseract.TesseractError, OSError):
+        OCR_AVAILABLE = False
+        return ''
 
 def normalize_hex(value):
     s=value.strip().upper().lstrip('#')
@@ -38,7 +76,7 @@ def ocr(im,whitelist,psm=7):
     if im.size==0:return ''
     h,w=im.shape[:2]; scale=max(2,40/max(h,1))
     im=cv2.resize(im,None,fx=scale,fy=scale,interpolation=cv2.INTER_CUBIC)
-    return pytesseract.image_to_string(Image.fromarray(im),config=f'--psm {psm} -c tessedit_char_whitelist={whitelist}',timeout=2).strip()
+    return _tesseract(Image.fromarray(im), config=f'--psm {psm} -c tessedit_char_whitelist={whitelist}')
 
 @dataclass
 class Scene:
@@ -69,6 +107,22 @@ def color_cards(image):
         return [(x,y,cw,cw) for x,y,cw,ch in a]
     return None
 
+def _swatch_distance(value,samples):
+    """Validate OCR text against direct or quantized linear-light rendering.
+
+    Dark sRGB values can change several levels in an 8-bit linear render
+    target (e.g. #080803 is displayed near #0D0D00). This is validation only:
+    the swatch never supplies or corrects the returned text.
+    """
+    if samples is None:return 0.
+    code=np.asarray(rgb(value),float)
+    srgb=code/255
+    linear=np.where(srgb<=.04045,srgb/12.92,((srgb+.055)/1.055)**2.4)
+    linear=np.rint(linear*255)/255
+    rendered=np.rint(255*np.where(linear<=.0031308,linear*12.92,1.055*linear**(1/2.4)-.055))
+    return float(min(np.linalg.norm(code-samples),np.linalg.norm(rendered-samples)))
+
+
 def read_codes(image,cards,markers=None,enabled=None):
     out=[]
     for index,(x,y,w,h) in enumerate(cards):
@@ -89,19 +143,35 @@ def read_codes(image,cards,markers=None,enabled=None):
         for var in variants:
             var=cv2.resize(var,None,fx=4,fy=4,interpolation=cv2.INTER_CUBIC)
             var=cv2.copyMakeBorder(var,15,15,15,15,cv2.BORDER_CONSTANT,value=255 if var.ndim==2 else (255,255,255))
-            text=pytesseract.image_to_string(var,config='--psm 7 -c tessedit_char_whitelist=#0123456789ABCDEF',timeout=2).strip()
+            text=_tesseract(var, config='--psm 7 -c tessedit_char_whitelist=#0123456789ABCDEF')
             m=re.fullmatch(r'#?([0-9A-F]{6})',text.replace(' ',''))
             if not m:continue
-            value='#'+m.group(1); distance=float(np.linalg.norm(np.array(rgb(value))-samples)) if samples is not None else 0
+            value='#'+m.group(1); distance=_swatch_distance(value,samples)
             candidates.append((distance,value))
-            if samples is not None and distance<12:break
-        if not candidates or min(c[0] for c in candidates)>=18:
+            if samples is not None and distance<3:break
+        if not candidates or min(c[0] for c in candidates)>=3:
+            # Small antialiased glyphs may merge before enlargement (6/E,
+            # missing 0). Threshold AFTER enlarging as a bounded fallback.
+            # These are still independently read text, never swatch-derived
+            # replacement digits, and the same <3 swatch gate applies.
+            gray=cv2.cvtColor(tight,cv2.COLOR_RGB2GRAY)
+            for factor,threshold,psm in ((6,170,8),(3,200,7),(4,200,8),(4,None,8)):
+                enlarged=cv2.resize(gray,None,fx=factor,fy=factor,interpolation=cv2.INTER_CUBIC)
+                var=enlarged if threshold is None else np.uint8(enlarged>=threshold)*255
+                var=cv2.copyMakeBorder(var,15,15,15,15,cv2.BORDER_CONSTANT,value=255)
+                text=_tesseract(var,config=f'--psm {psm} -c tessedit_char_whitelist=#0123456789ABCDEF')
+                m=re.fullmatch(r'#?([0-9A-F]{6})',text.replace(' ',''))
+                if m:
+                    value='#'+m.group(1);distance=_swatch_distance(value,samples)
+                    candidates.append((distance,value))
+                    if distance<3:break
+        if not candidates or min(c[0] for c in candidates)>=3:
             text=ocr(crop,'#0123456789ABCDEF')
             m=re.fullmatch(r'#?([0-9A-F]{6})',text.replace(' ',''))
             if m:
-                value='#'+m.group(1); distance=float(np.linalg.norm(np.array(rgb(value))-samples)) if samples is not None else 0
+                value='#'+m.group(1); distance=_swatch_distance(value,samples)
                 candidates.append((distance,value))
-        if not candidates or min(c[0] for c in candidates)>=18:
+        if not candidates or min(c[0] for c in candidates)>=3:
             # Tesseract merges repeated narrow glyphs (e.g. 7F7F7F).
             # Segment only when six complete glyph components are unambiguous.
             region=image[y+round(h*.76):y+round(h*.96),x+round(w*.10):x+round(w*.94)]
@@ -117,17 +187,12 @@ def read_codes(image,cards,markers=None,enabled=None):
                         cache[key]=ocr(cv2.copyMakeBorder(glyph,5,5,5,5,cv2.BORDER_CONSTANT,value=255),'0123456789ABCDEF',10)
                     chars.append(cache[key])
                 if all(re.fullmatch('[0-9A-F]',c) for c in chars):
-                    value='#'+''.join(chars);distance=float(np.linalg.norm(np.array(rgb(value))-samples)) if samples is not None else 0
+                    value='#'+''.join(chars);distance=_swatch_distance(value,samples)
                     candidates.append((distance,value))
         candidates.sort()
-        value=candidates[0][1] if candidates and candidates[0][0]<18 else None
-        # Do not trust a plausible E/6 misread when point pixels contradict it.
-        if value and samples is not None:
-            for pos,char in enumerate(value):
-                if char not in 'E6':continue
-                alternative=value[:pos]+('6' if char=='E' else 'E')+value[pos+1:]
-                alt_distance=float(np.linalg.norm(np.array(rgb(alternative))-samples))
-                if alt_distance+4<candidates[0][0]:value=None;break
+        # Require a close swatch match; a plausible six-digit OCR string alone
+        # must not turn a low-nibble misread into a successful HEX check.
+        value=candidates[0][1] if candidates and candidates[0][0]<3 else None
         out.append(value)
     return out
 
@@ -213,13 +278,27 @@ def recognize(image,with_ocr=True,previous=None,enabled=None):
     buttons=green_buttons(image)
     return Scene(cards,markers,(left,top,right,bottom),colors,seconds,buttons[0][:2] if buttons else None)
 
-def measure_board_motion(before,after,board):
+def measure_board_motion(before,after,board,feature_cache=None,texture_mask=None):
     """Fit texture motion, rejecting weak matches and static UI features."""
     l,t,r,b=board
+    if texture_mask is not None:
+        texture_mask=(np.asarray(texture_mask,dtype=bool)*255).astype(np.uint8)
+        if texture_mask.shape!=(b-t,r-l):
+            raise ValueError('Texture mask must match the board crop')
+    mask_key=None if texture_mask is None else texture_mask.tobytes()
     detector=cv2.SIFT_create(nfeatures=1800)
-    a=before[t:b,l:r];bim=after[t:b,l:r]
-    ka,da=detector.detectAndCompute(cv2.cvtColor(a,cv2.COLOR_RGB2GRAY) if a.ndim==3 else a,None)
-    kb,db=detector.detectAndCompute(cv2.cvtColor(bim,cv2.COLOR_RGB2GRAY) if bim.ndim==3 else bim,None)
+    def features(image):
+        key=(id(image),tuple(board),mask_key)
+        if feature_cache is not None and key in feature_cache:
+            return feature_cache[key][1]
+        crop=image[t:b,l:r]
+        found=detector.detectAndCompute(cv2.cvtColor(crop,cv2.COLOR_RGB2GRAY) if crop.ndim==3 else crop,texture_mask)
+        if feature_cache is not None:
+            # Keep the image alive so object IDs cannot be reused in this cache.
+            # The caller owns a per-analysis cache of immutable captured frames.
+            feature_cache[key]=(image,found)
+        return found
+    ka,da=features(before);kb,db=features(after)
     if da is None or db is None or len(db)<2:return None
     pairs=cv2.BFMatcher().knnMatch(da,db,k=2)
     good=[p[0] for p in pairs if len(p)==2 and p[0].distance<.7*p[1].distance]

@@ -1,9 +1,81 @@
 """Local, offline UI translations. Profile mode identifiers stay stable."""
 import re
+import weakref
+from functools import lru_cache
 from opencc import OpenCC
 language='简体中文'
 traditional=OpenCC('s2twp')
 EN={
+'本轮候选实测未达标；当前颜色如下，尚不能判断色板无解。':'The tested candidates did not meet the targets. Current colors are shown below; this does not prove the board has no solution.',
+'当前候选实测未达标':'The current candidate did not meet the targets',
+'正在检查剩余候选和游戏时间；F9随时停止。':'Checking other candidates and remaining game time. F9 stops at any time.',
+'正在定位预测达标且剩余时间允许的方案。\n完成后仍可选择其他方案，最终染色由你确认。':'Positioning a predicted match that fits the remaining game time.\nYou can choose another option afterward and confirm the final dye yourself.',
+'当前候选实测未达标，正在定位并复核下一候选。':'The current candidate did not meet the targets. Positioning and checking the next candidate.',
+'自动定位最接近方案':'Positioning the closest available combination',
+'已到达最接近方案':'Closest available combination reached',
+'这是当前可测量的妥协方案；可选择其他方案，最终染色由你确认。':'This is the closest measurable compromise. You may choose another option and confirm the final dye yourself.',
+'缺少当前姿态测量，未执行切换，保持当前颜色。':'Current pose measurement is missing. No switch was made; current colors are kept.',
+'已停止自动染色，可重新开始。':'Automatic dyeing stopped. You can start again.',
+'快捷键已就绪：F8 开始 / F9 停止':'Hotkeys ready: F8 starts and F9 stops.',
+'全局注册不可用：':'Some hotkeys failed to register; ',
+'；F9 仍通过轮询停止，其他操作请使用按钮。':'F9 polling remains available. Use the buttons for the other actions.',
+'大图重建校验未通过':'Atlas reconstruction validation failed',
+'当前搜索未得到可执行方案':'The current search found no executable plan',
+'请先启动工具，再手动进入染色倒计时界面；识别成功后自动采样和定位，由你确认结果。':'Start the tool, then manually enter the timed dye screen. Sampling and positioning begin after recognition; you confirm the result.',
+'旧版策略':'Legacy strategy',
+'周期图板实验':'Periodic atlas experiment',
+'设置染色入口位置':'Set dye-entry point',
+'入口点':'Entry point',
+'染色入口已记录；启动实验会消耗一瓶染色剂，不会自动确认或套用。':'Dye entry saved. Starting the experiment uses one dye; it will not confirm or apply the result.',
+'请先设置染色入口位置。':'Set the dye-entry point first.',
+'目标游戏窗口已变化，请重新设置染色入口位置。':'The game window changed. Set the dye-entry point again.',
+'游戏窗口尺寸已变化，请重新设置染色入口位置。':'The game window size changed. Set the dye-entry point again.',
+'游戏窗口位置或尺寸已变化，请重新设置染色入口位置。':'The game window moved or changed size. Set the dye-entry point again.',
+'染色入口位置已超出游戏窗口，请重新设置。':'The dye-entry point is outside the game window. Set it again.',
+'周期图板实验会开始一局普通染色并消耗染色剂；只采集和定位，不会自动确认或套用。':'The periodic-atlas experiment starts a regular dye round and uses one dye. It only captures and positions colors; it will not confirm or apply them.',
+'冻结画面：单击普通染色入口位置；Esc 取消':'Frozen screenshot: click the regular-dye entry point; Esc cancels',
+'客户区坐标 (':'Client point (',
+') · 单击设置 / Esc 取消':') · Click to set / Esc to cancel',
+'请在游戏窗口内选择 · Esc 取消':'Select inside the game window · Esc cancels',
+'染色入口选择失败：':'Could not set dye-entry point: ',
+'周期图板实验 · 正在采集本局颜色板':'Periodic-atlas experiment · Capturing this round',
+'本局颜色板质量门槛通过，正在准备自动最佳方案。':'Board quality checks passed. Preparing the automatic best combination.',
+'自动最佳方案已复核，请查看浮窗并自行确认染色。':'The automatic best combination is verified. Review the overlay and confirm the dye yourself.',
+'剩余时间不足，未发送定位操作。':'Not enough time; no positioning input was sent.',
+'颜色板质量未达标，未发布候选。':'Board quality checks failed; no candidates were published.',
+'剩余时间不足，保持自动最佳方案。':'Not enough time; keeping the automatic best combination.',
+'未选择其他方案，保持自动最佳方案。':'No other combination selected; keeping the automatic best combination.',
+'自动方案实测色码':'Measured game HEX for the automatic combination',
+'最大实测色差':'Maximum measured color difference',
+'已停止，请查看游戏当前颜色。':'Stopped. Check the current colors in-game.',
+'候选选择已结束。':'Candidate selection has ended.',
+'游戏色码已复核':'Game HEX verified',
+'全部目标达标，请由你确认最终染色。':'All targets met. Confirm the final dye yourself.',
+'当前为妥协结果，请检查实测色差后自行决定。':'Compromise result. Review measured differences before deciding.',
+'正在定位所选方案':'Positioning selected combination',
+'根据图像实测位移校正；F9随时停止。':'Correcting measured texture motion. F9 stops at any time.',
+'预测 ':'Predicted ',
+'实测 ':'Measured ',
+'选择颜色方案 · 尚未执行':'Choose a color combination · Not executed',
+'自动定位最佳方案':'Positioning the automatic best combination',
+'正在先移动到预测色差最小的方案。\n完成后仍可选择其他方案，最终染色由你确认。':'Moving to the predicted lowest-difference combination first.\nYou can still choose another option afterward. You confirm the final dye.',
+'自动方案（当前）':'Automatic combination (current)',
+'已到达自动最佳方案':'Automatic best combination reached',
+'可选择其他方案；剩余时间不足时将保持当前自动方案。':'You may choose another option; if time is insufficient, the automatic combination is kept.',
+'已保持自动最佳方案':'Automatic best combination kept',
+'剩余时间不足，未移动到所选方案。':'Not enough time to move to the selected combination.',
+'剩余时间不足':'Not enough time',
+'无法安全定位并复核自动最佳方案。':'Not enough time to safely position and verify the automatic best combination.',
+'未选择其他方案':'No other option selected',
+'已保持自动最佳方案。':'The automatic best combination was kept.',
+'以下为截图预测，ΔE 76 越小越接近。\n选择后仍需游戏色码复核，最终染色由你确认。':'Screenshot predictions; lower Delta E 76 is closer.\nGame HEX verification is still required. You confirm the final dye.',
+'有效覆盖不足，暂无可计算方案。':'Insufficient valid coverage; no candidates available.',
+'预测达标':'Predicted within tolerance',
+'妥协方案':'Compromise',
+'选择此方案':'Select this combination',
+'颜色方案已失效':'Color combinations expired',
+'最大 ':'Maximum ',
+' / 平均 ':' / Mean ',
 '请点击游戏窗口':'Click the game window',
 '画面变化暂不明显，正在等待更新并复查；按 F9 可接管。':'Waiting for a fresh frame to recheck movement. Press F9 to take over.',
 '正在复查画面变化':'Rechecking board response',
@@ -45,9 +117,8 @@ EN={
 '选择目标颜色':'Choose target color','区域':'Region',
 '保存方案':'Save preset','寻色记录':'Results','♥  支持作者':'♥  Support',
 '① 设置目标颜色    →    ② 游戏内打开普通染色    →    ③ 教学结束后按 F8':'1 Set colors   →   2 Open regular dye in game   →   3 Press F8 after the tutorial',
-'精准色更难寻找  ·  推荐从相似模式 ΔE 8–12 开始，数值越小越接近目标':'Exact colors are harder to find · Try Similar with ΔE 8–12; lower means closer',
 '开始寻色   F8':'Start   F8','停止   F9':'Stop   F9','达标后自动复核并套用':'Verify & apply automatically',
-'诊断':'Diagnostics','取当前色 F7':'Read colors F7',
+'诊断':'Diagnostics',
 '就绪 · 支持横屏与竖屏识别':'Ready · Landscape and portrait supported',
 '持续寻找更接近的颜色，剩余约 30 秒返回本轮最佳组合，由你确认是否使用。':'Keeps improving colors, then returns to the best observed set with about 30 seconds left.',
 'F9 随时停止并释放鼠标  ·  切换窗口停止寻色  ·  不自动开启下一瓶染色剂':'F9 stops input · Switching windows stops search · One dye per session',
@@ -91,8 +162,6 @@ EN={
 '未能可靠读取倒计时，已停止。请在教学结束后再按 F8。':'Timer unreadable. Press F8 after the tutorial ends.',
 '正在等待染色色板显示……':'Waiting for the dye board…',
 '当前在结果页，颜色未满足目标或自动套用已关闭，未操作。':'Result screen detected. Automatic apply is off or targets are not met.',
-'已读取当前色码。':'Current colors read.',
-'已将当前三色设为目标，保留各区匹配模式与容差。':'Current colors set as targets. Match modes and tolerances preserved.',
 '三个色码尚未完整识别，未替换目标。':'Could not read all three colors. Targets unchanged.',
 '色码复核不一致，未替换目标。':'Color verification differed. Targets unchanged.',
 '颜色请输入六位 HEX，例如 #202020':'Enter a six-digit HEX color, e.g. #202020',
@@ -104,7 +173,7 @@ EN={
 '游戏窗口已关闭。':'Game window closed.','游戏窗口已最小化，请恢复后再试。':'Restore the minimized game window.',
 '无法激活游戏，请在游戏按 F8。':'Could not focus game. Press F8 from the game.',
 '连续两次输入后色板未变化。已停止，请检查游戏是否接受模拟鼠标输入。':'Board did not respond to input. Check whether the game accepts mouse input.',
-'使用提示':'Usage notice','适用于港澳台服瑪奇Mobile。游戏中使用本程序存在风险，请自行斟酌。':'For the Hong Kong/Macau/Taiwan service of Mabinogi Mobile. Using this tool in-game carries risks; use your own judgment.',
+'使用提示':'Usage notice','适用于港澳台服瑪奇Mobile。游戏中使用本工具可能存在风险，建议谨慎使用。':'For the Hong Kong/Macau/Taiwan service of Mabinogi Mobile. Please note that using this tool in-game may carry some risk.',
 }
 
 EN.update({'请先停止寻色再切换语言。': 'Stop the search before switching language.', 'Windows 未接受鼠标输入。请检查游戏与工具是否使用相同权限运行。': 'Windows rejected mouse input. Run game and tool with matching privileges.', '候选已接近，逐点读取三个实际色码进行微调。': 'Refining a nearby candidate using actual game colors.', '剩余时间不足，停止输入校准。': 'Not enough time for input diagnostics.', '取消确认窗口未能可靠识别，请手动取消。': 'Cancel dialog unreadable. Please cancel manually.', '右键动作未能证实色板旋转，不能判定旋转校准通过。': 'Could not verify right-button rotation.', '已匹配，但未识别到游戏确认按钮。请手动确认。': 'Colors matched. Confirm manually; the button was not detected.', '已提交，但结果页未能可靠识别，未点击套用。请在游戏中确认。': 'Submitted, but the result is unreadable. Confirm in the game.', '已暂停：游戏失去焦点。返回游戏后按 F8 重新开始。': 'Game lost focus. Return and press F8 to restart.', '平移候选已接近，保留当前范围并验证邻近色码。': 'Checking nearby colors around the candidate.', '旋转按下点距离色板边缘太近。': 'Rotation pivot is too close to the board edge.', '无法可靠识别颜色点位。请放大游戏窗口后重试。': 'Cannot detect color markers. Enlarge the game window and retry.', '无法激活游戏。请点击游戏后按 F8。': 'Click the game and press F8.', '未找到瑪奇 Mobile。请先启动台服游戏。': 'Open the Hong Kong/Macau/Taiwan client of Mabinogi Mobile first.', '未找到目标且无法定位结束按钮，请手动选择不使用。': 'Target not found. Please select Cancel in the game.', '未测得明确缩放倍率，不能判定缩放校准通过。': 'Could not verify the zoom scale.', '未识别到染色小游戏的三张色码卡片。请先进入限时染色界面。': 'Open the timed dye screen before starting.', '未识别到结果页，请手动选择不使用本次染色。': 'Result page unreadable. Please cancel this dye manually.', '本次右键动作未能证实有效旋转，继续平移搜索。': 'Rotation unverified. Continuing with translation.', '本轮未找到全部目标，已取消结果并保留原色。本次消耗 1 个染色剂。': 'Targets not found. Result canceled; original colors kept. One dye consumed.', '游戏窗口已最小化，请恢复后重试。': 'Restore the game window and retry.', '确认点击后结果页仍在，未确认套用成功。': 'Result page is still visible. Apply could not be confirmed.', '窗口位置或尺寸已变化。已停止，请按 F8 重新识别。': 'Game window changed. Press F8 to detect it again.', '结果色码与目标不符，已停止套用。请取消本次结果。': 'Result does not meet the targets. Please cancel it.', '结果页按钮在等待后仍无法可靠定位，未套用。': 'Apply button unreadable. No colors applied.', '缩放中心必须位于色板内。': 'Zoom pivot must be inside the board.', '色板定位不完整，已停止以避免误操作。': 'Board detection incomplete. Search stopped.', '色码卡片下方点位尚不可见，可能正在显示教学或结果窗口。': 'Markers not visible. Wait for the tutorial or close the result screen.', '输入校准完成：平移、旋转、缩放均引起画面变化；未套用颜色。': 'Diagnostics complete: drag, rotate and zoom changed the board. Nothing applied.', '键盘输入被 Windows 拒绝。': 'Windows rejected keyboard input.', ' 输入后色板没有可确认的变化，校准未通过。': ' input produced no verified change. Diagnostics failed.'})
@@ -116,21 +185,73 @@ TW={
 '默认自动识别瑪奇Mobile，也可选择标题不同的游戏窗口。':'預設自動辨識瑪奇Mobile，也可選擇標題不同的遊戲視窗。',
 }
 
-def tr(text):
-    if not isinstance(text,str) or language=='简体中文':return text
+from ui_strings import EN as UI_EN, TW as UI_TW
+EN.update(UI_EN);TW.update(UI_TW)
+_english_parts=sorted(EN,key=len,reverse=True)
+_widgets=weakref.WeakSet()
+_refreshers=weakref.WeakKeyDictionary()
+
+
+class DisplayText(str):
+    """Retain source text for live language changes, including concatenation."""
+    def __new__(cls,value,source):
+        obj=super().__new__(cls,value);obj.source=source;return obj
+    def __add__(self,other):return tr(self.source+getattr(other,'source',str(other)))
+    def __radd__(self,other):return tr(getattr(other,'source',str(other))+self.source)
+
+
+@lru_cache(maxsize=4096)
+def _translate(text,language):
+    if language=='简体中文':return text
     if language=='繁體中文':return TW.get(text,traditional.convert(text).replace('玛奇','瑪奇'))
     if text in EN:return EN[text]
-    for source in sorted(EN,key=len,reverse=True):text=text.replace(source,EN[source])
+    for source in _english_parts:text=text.replace(source,EN[source])
     return text
+
+
+def tr(text):
+    if not isinstance(text,str):return text
+    source=getattr(text,'source',text)
+    return DisplayText(_translate(source,language),source)
+
+
+def on_language(widget,callback):
+    _refreshers[widget]=callback.__name__
+
+
+def set_language(value):
+    global language
+    if value not in ('简体中文','繁體中文','English'):raise ValueError('Unknown language')
+    language=value
+    for widget in list(_widgets):
+        if not widget.winfo_exists():continue
+        if hasattr(widget,'_i18n_text'):widget.configure(text=widget._i18n_text)
+        if hasattr(widget,'_i18n_title'):widget.title(widget._i18n_title)
+    for widget,name in list(_refreshers.items()):
+        if widget.winfo_exists():getattr(widget,name)()
 
 def install_widgets(ct):
     """Translate display text only; identifiers and HEX values are never changed."""
+    if getattr(ct,'_studio_i18n',False):return
+    ct._studio_i18n=True
     for cls in (ct.CTkLabel,ct.CTkButton,ct.CTkCheckBox,ct.CTkSwitch):
         original_init=cls.__init__;original_config=cls.configure
         def init(self,*args,_original=original_init,**kwargs):
-            if 'text' in kwargs:kwargs['text']=tr(kwargs['text'])
+            if 'text' in kwargs:
+                self._i18n_text=getattr(kwargs['text'],'source',kwargs['text'])
+                kwargs['text']=tr(kwargs['text'])
             _original(self,*args,**kwargs)
+            _widgets.add(self)
         def configure(self,*args,_original=original_config,**kwargs):
-            if 'text' in kwargs:kwargs['text']=tr(kwargs['text'])
+            if 'text' in kwargs:
+                self._i18n_text=getattr(kwargs['text'],'source',kwargs['text'])
+                kwargs['text']=tr(kwargs['text'])
             return _original(self,*args,**kwargs)
         cls.__init__=init;cls.configure=configure
+    for cls in (ct.CTk,ct.CTkToplevel):
+        original=cls.title
+        def title(self,string=None,_original=original):
+            if string is None:return _original(self)
+            self._i18n_title=getattr(string,'source',string);_widgets.add(self)
+            return _original(self,tr(string))
+        cls.title=title

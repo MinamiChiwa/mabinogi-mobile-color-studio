@@ -1,4 +1,4 @@
-import time,json,threading,traceback
+import time,json,threading,traceback,queue
 from pathlib import Path
 from collections import deque
 import numpy as np
@@ -92,8 +92,20 @@ def bounded_zoom(ticks,current,best):
     return int(np.clip(round(target-current),-32,32))
 
 class Runner:
-    def __init__(self,emit,folder):
+    def __init__(self,emit,folder,atlas_runner=None):
         self.emit=emit; self.stop=threading.Event(); self.folder=Path(folder); self.trace=deque(maxlen=2048);self.store=SessionStore(self.folder)
+        self.atlas_runner=atlas_runner
+        self.candidate_choices=queue.Queue()
+    def choose_candidate(self,batch_id,candidate_id):
+        """Thread-safe UI bridge for the currently published atlas batch."""
+        self.candidate_choices.put((batch_id,candidate_id))
+    def wait_candidate_choice(self,batch_id,deadline):
+        """Wait for one choice without blocking F9 or accepting stale batches."""
+        while not self.stop.is_set() and time.monotonic()<deadline:
+            try:chosen_batch,candidate_id=self.candidate_choices.get(timeout=min(.05,max(.001,deadline-time.monotonic())))
+            except queue.Empty:continue
+            if chosen_batch==batch_id:return candidate_id
+        return None
     def event(self,kind,**data):
         entry={'time':round(time.time(),3),'kind':kind,**data}
         self.trace.append(entry); self.emit(kind,data)
@@ -130,7 +142,37 @@ class Runner:
             except Interrupted:
                 if self.stop.is_set():raise
                 im=None
-    def launch(self,rules,mode='search',auto=False,activate=False,target=None):
+    def launch(self,rules,mode='search',auto=False,activate=False,target=None,strategy='legacy',**strategy_context):
+        if strategy not in ('legacy','atlas'):
+            raise ValueError('Unknown search strategy')
+        if strategy=='atlas':
+            if self.atlas_runner is None:
+                raise RuntimeError('Atlas strategy is not connected to this Runner')
+            try:
+                # Atlas capture performs OCR before entering the legacy loop;
+                # initialize the bundled/system Tesseract path here as well.
+                configure_ocr()
+                self.event('config',rules=rules,strategy=strategy,auto_apply=False)
+                return self.atlas_runner(self,rules,mode=mode,auto=auto,
+                                         activate=activate,target=target,
+                                         **strategy_context)
+            except Interrupted as e:
+                self.event('interrupted',message=str(e))
+            except Exception as e:
+                self.event('error',message=str(e),detail=traceback.format_exc())
+            finally:
+                # Atlas already retains screenshots. Preserve the much smaller
+                # event trail too, so a rejected map is not mistaken for an
+                # unsuccessful search, and F9 receipt can be diagnosed.
+                try:
+                    self.folder.mkdir(parents=True,exist_ok=True)
+                    (self.folder/'run-summary.json').write_text(json.dumps(dict(
+                        stop_requested=self.stop.is_set(),events=list(self.trace)),
+                        ensure_ascii=False,indent=2),encoding='utf-8')
+                except (OSError,TypeError,ValueError):pass
+                self.emit('finished',{})
+                self.trace.clear()
+            return None
         self.store=SessionStore(self.folder,enabled=mode in ('diagnostic','recovery_test'))
         # Housekeeping is independent of the timed search and ignores legacy/unmarked files.
         threading.Thread(target=self.clean_sessions,daemon=True).start()
@@ -162,15 +204,13 @@ class Runner:
                 if mode=='search' and auto and accepted(result,rules):return self.apply_result(g,im,result)
                 return self.event('done',message='当前在结果页，颜色未满足目标或自动套用已关闭，未操作。',colors=result)
             # Wait without mouse input; the dye countdown starts independently.
-            im,scene=self.wait_for_board(g,im,require_timer=mode not in ('read','capture'),timeout=None if mode=='search' else 60)
+            im,scene=self.wait_for_board(g,im,require_timer=True,timeout=None if mode=='search' else 60)
             self.event('scene',colors=scene.colors,seconds=scene.seconds,board=scene.board,markers=scene.markers,size=list(im.shape[:2]))
-            if mode=='read':return self.event('done',message='已读取当前色码。',colors=scene.colors)
-            if mode in ('capture','recovery_test'):
+            if mode=='recovery_test':
                 if any(c is None for c in scene.colors):raise RuntimeError('三个色码尚未完整识别，未替换目标。')
                 verify=recognize(g.capture(),previous=scene)
                 if verify.colors!=scene.colors:raise RuntimeError('色码复核不一致，未替换目标。')
                 self.event('targets',colors=scene.colors)
-                if mode=='capture':return self.event('done',message='已将当前三色设为目标，保留各区匹配模式与容差。')
                 rules=[dict(enabled=True,colors=[c],exact=False,tolerance=4) for c in scene.colors]
                 self.event('test_targets',rules=rules)
                 baseline=self.snapshot(g,'baseline')

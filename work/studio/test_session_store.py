@@ -1,7 +1,7 @@
 import unittest,tempfile,time,os
 from pathlib import Path
 import numpy as np
-from session_store import SessionStore,cleanup,MARKER
+from session_store import SessionStore,cleanup,cleanup_sessions,MARKER
 
 class SessionStoreTests(unittest.TestCase):
     def test_normal_run_creates_no_files(self):
@@ -32,3 +32,16 @@ class SessionStoreTests(unittest.TestCase):
             self.assertTrue((root/'expired'/'profile.json').exists())
             self.assertTrue((root/'user'/'step.png').exists())
             self.assertTrue((root/'active'/'step.png').exists())
+
+    def test_cleanup_sessions_is_age_and_size_bounded(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);now=time.time()
+            for name,age in (('20260101-000000',40*86400),('20260102-000000',2*86400),
+                             ('20260103-000000',60)):
+                folder=root/name;folder.mkdir();(folder/'capture.bin').write_bytes(b'x'*100)
+                os.utime(folder,(now-age,now-age))
+            (root/'notes').mkdir();(root/'notes'/'keep.txt').write_text('keep')
+            result=cleanup_sessions(root,now,keep_days=30,keep_count=1,max_bytes=150)
+            self.assertGreaterEqual(result['removed'],1)
+            self.assertTrue((root/'notes'/'keep.txt').exists())
+            self.assertTrue((root/'20260103-000000').exists())
