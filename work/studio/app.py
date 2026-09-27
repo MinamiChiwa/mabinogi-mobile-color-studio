@@ -546,7 +546,7 @@ class App(ct.CTk):
             elif k in ('atlas_default_verified','atlas_verified'):
                 colors=d.get('actual_colors',d.get('colors',[]))
                 for card,color in zip(self.cards,colors):card.current.configure(text='当前颜色  '+(color or '读取失败'))
-                self.status.configure(text='当前结果已达到所设目标，请在游戏内确认。' if d.get('accepted') else '当前结果未达到全部目标，可查看妥协方案后自行决定。')
+                self.status.configure(text='当前结果已达到所设目标，请在游戏内手动确认。' if d.get('accepted') else '当前结果未达到全部目标；请先查看妥协方案，再在游戏内手动确认是否套用。')
             elif k=='atlas_default_unavailable':self.status.configure(text=tr(d.get('message','剩余时间不足，未发送定位操作。')))
             elif k=='atlas_invalidated':self.status.configure(text=tr(d.get('message','颜色板质量未达标，未发布候选。')))
             elif k=='atlas_choice_rejected':self.status.configure(text=tr(d.get('message','剩余时间不足，保持自动最佳方案。')))

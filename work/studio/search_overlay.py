@@ -139,7 +139,7 @@ class SearchOverlay(ct.CTkToplevel):
             self.render('自动定位最接近方案',data.get('message') or
                         '未找到满足所设目标的组合，正在定位最接近的妥协方案。')
         else:
-            self.render('自动定位最佳方案','正在定位预测达标且剩余时间允许的方案。\n完成后仍可选择其他方案，最终染色由你确认。')
+            self.render('自动定位最佳方案','正在定位预测达标且剩余时间允许的方案。\n完成后仍可选择其他方案，实际染色须在游戏内手动确认。')
         self.results.grid(row=6,column=0,padx=10,pady=(0,10),sticky='nsew')
         self._has_results=True;self._collapsed=False;self.copy.grid();self.activity.grid();self.collapse.configure(text='收起');self.resize_surface()
         self.candidate_container=ct.CTkFrame(self.results,fg_color='transparent')
@@ -184,7 +184,7 @@ class SearchOverlay(ct.CTkToplevel):
     def show_verification(self,data):
         self.clear_candidates();self.phase='verified'
         self.results.grid(row=6,column=0,padx=10,pady=(0,10),sticky='nsew');self._has_results=True;self._collapsed=False;self.copy.grid();self.activity.grid();self.collapse.configure(text='收起');self.resize_surface()
-        self.render('游戏色码已复核','全部目标达标，请由你确认最终染色。' if data['accepted'] else '本轮候选实测未达标；当前颜色如下，尚不能判断色板无解。')
+        self.render('游戏色码已复核','全部目标达标，请在游戏内手动确认是否套用。' if data['accepted'] else '本轮候选实测未达标；当前颜色如下，尚不能判断色板无解。')
         for i in range(3):
             if data['actual_deltas'][i] is None:continue
             text=(f"区域 {i+1}\n预测 {data['predicted_colors'][i]} · ΔE {data['predicted_deltas'][i]:.2f}\n"
@@ -221,7 +221,7 @@ class SearchOverlay(ct.CTkToplevel):
             self.default_candidate_id=data.get('candidate_id',self.default_candidate_id)
             self.phase='choosing'
             if data.get('compromise') or not data.get('accepted',True):
-                self.render('已到达最接近方案','这是当前可测量的妥协方案；可选择其他方案，最终染色由你确认。')
+                self.render('已到达最接近方案','这是当前可测量的妥协方案；可选择其他方案，实际染色须在游戏内手动确认。')
             else:
                 self.render('已到达自动最佳方案','可选择其他方案；剩余时间不足时将保持当前自动方案。')
             self.show_default_verification(data)
@@ -243,14 +243,14 @@ class SearchOverlay(ct.CTkToplevel):
         elif kind=='activation':
             self.render('请点击游戏窗口',data['message'])
         elif kind in ('restoring','restore_action','restore_fallback'):
-            self.phase='restoring';self.render('正在回退 · 随时可按 F9 接管','正在恢复本轮最佳组合，结束前提前停止微调。\n满意当前颜色时，按 F9 保留当前画面。')
+            self.phase='restoring';self.render('正在回退 · 随时可按 F9 接管','正在恢复本轮最佳组合，结束前提前停止微调。\n如需保留当前画面，请按 F9 停止。')
         elif kind in ('scene','action') and self.phase!='restoring':
             self.phase='searching'
             colors=data.get('colors',data.get('after',[]))
             title='当前组合已达标 · 仍在优化' if accepted(colors,self.rules) else '持续搜索最佳颜色组合'
-            self.render(title,'剩余约 30 秒回退最佳方案。\n满意当前颜色时请按 F9 停止，由你确认使用。')
+            self.render(title,'剩余约 30 秒回退最佳方案。\n如需保留当前颜色，请按 F9 停止，并在游戏内手动确认是否套用。')
         elif kind=='input_recheck':
-            self.render('正在复查画面变化','尚未确认输入失败，请稍候。\n满意当前颜色时仍可按 F9 接管。')
+            self.render('正在复查画面变化','尚未确认输入失败，请稍候。\n如需保留当前颜色，仍可按 F9 接管。')
         elif kind in ('done','error','interrupted','wait_timeout','finished'):
             if kind=='finished' and self.phase in ('choosing','positioning'):
                 self.batch_id=None

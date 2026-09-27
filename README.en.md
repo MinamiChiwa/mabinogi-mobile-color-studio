@@ -4,7 +4,7 @@ By **南千和 (MinamiChiwa)** · [Afdian](https://afdian.com/a/minamichiwa) · 
 
 [简体中文](README.md) · [繁體中文](README.zh-TW.md) · [English](README.en.md)
 
-An automatic dyeing tool for **Mabinogi Mobile, Hong Kong / Macau / Taiwan service**, running on Windows. It reads the game screen and uses mouse gestures to search for your selected dye colors across three regions.
+An automatic dyeing tool for **Mabinogi Mobile, Hong Kong / Macau / Taiwan service**, running on Windows. It reads the game screen and uses mouse gestures to search for the selected dye colors across three regions.
 
 > Please note that using this tool in-game may carry some risk.
 
@@ -16,9 +16,9 @@ This tool was developed with AI assistance.
 
 Download the complete ZIP from Releases, extract it and run `ColorStudio.exe`. Keep the adjacent `_internal` folder.
 
-1. Set the game window to 1280 × 960. All three regions are enabled by default; turn off any you do not need. Enter HEX colors, use the color picker or screen eyedropper, and optionally add alternatives.
+1. Set the game window to 1280 × 960. All three regions are enabled by default; turn off any not required. Enter HEX colors, use the color picker or screen eyedropper, and optionally add alternatives.
 2. Choose Exact HEX or Similar independently for each region. Even if only one or two regions use Exact HEX, they take priority over the remaining Similar regions: candidates rank first by exact-match count, then by maximum and average color error across all enabled regions. Exact regions require identical HEX codes.
-3. Similar regions use the Delta E tolerance you set; there is no fixed ΔE 8 ceiling. If no candidate meets every setting, the tool still positions the closest executable compromise using the same priority.
+3. Similar regions use the configured Delta E tolerance; there is no fixed ΔE 8 ceiling. If no candidate meets every setting, the tool still positions the closest executable compromise using the same priority.
 4. Select the game window, then click Start or press **F8**. Open the timed dye screen after the overlay appears. The tool first builds this round’s stitched board, then searches, positions and verifies in-game HEX. Press **F9** to stop.
 
 Auto-detection accepts spacing variations in the title and recognizes the game executable. Select manually if multiple candidates exist; select again if that window closes. Borderless fullscreen is supported. Keep the game in the foreground and its geometry unchanged during active searching.
@@ -60,8 +60,8 @@ Output: `outputs/release/ColorStudio`. Previous release data is backed up locall
 
 A timed search cannot guarantee an exact match or a global optimum. Actual game testing does not cover every DPI and monitor configuration.
 
-After starting, the tool waits for the dye board and timer until F9 cancels. The 60-second figure is a performance reference, not a hard stop: the tool continues to finish a normal build and search even when they take longer. Input stops only when the OCR game countdown reaches its safety deadline, F9 is pressed, focus or window geometry changes, or recognition becomes unreliable. If Windows prevents game activation, click the game yourself; there is no need to start again. Hotkey registration status appears at the bottom. Close other tool copies or use buttons if a key is unavailable.
+After starting, the tool waits for the dye board and timer until F9 cancels. The 60-second figure is a performance reference, not a hard stop: the tool continues to finish a normal build and search even when they take longer. Input stops only when the OCR game countdown reaches its safety deadline, F9 is pressed, focus or window geometry changes, or recognition becomes unreliable. If Windows prevents game activation, activate the game window manually; restarting is unnecessary. Hotkey registration status appears at the bottom. Close other tool copies or use buttons if a key is unavailable.
 
-The main window adapts between three, two and one card columns, and debounces layout work while resizing. Enabled cards have a teal border and background; disabled cards show an explicit label. The overlay can be moved, collapsed and made transparent while showing live progress. Wheel input is disabled throughout the tool UI; click or drag to adjust values. During the initial wait, you may return to the game after briefly changing focus. Interruptions and errors display a dialog.
+The main window adapts between three, two and one card columns, and debounces layout work while resizing. Enabled cards have a teal border and background; disabled cards show an explicit label. The overlay can be moved, collapsed and made transparent while showing live progress. Wheel input is disabled throughout the tool UI; click or drag to adjust values. During the initial wait, the game may be returned to the foreground after focus is changed briefly. Interruptions and errors display a dialog.
 
-Screenshot color predictions can still differ from the game’s actual HEX values in this version. The tool reads the in-game HEX after positioning; if verification misses the target, it leaves the result for your review and never applies it automatically.
+Screenshot color predictions can still differ from the game’s actual HEX values in this version. The tool reads the in-game HEX after positioning; if verification misses the target, it leaves the result for review and never applies it automatically.
