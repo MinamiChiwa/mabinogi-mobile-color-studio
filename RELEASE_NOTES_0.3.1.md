@@ -17,7 +17,7 @@
 
 1. 下载 `ColorStudio-v0.3.1.zip`，退出旧版本并解压到独立文件夹。保留 `ColorStudio.exe` 与 `_internal` 文件夹在同一目录。
 2. 游戏使用 **1280 × 960 窗口模式**。4K 显示器也使用相同游戏设置，无需修改桌面分辨率。选择目标窗口与颜色后，按 F8 或点击开始；浮窗出现后手动进入游戏染色倒计时界面。
-3. 启动后请保持游戏处于前台，并在染色倒计时界面等待程序完成。需要中止时按 F9；如果游戏窗口位置或大小发生变化，请停止后重新开始。程序完成定位后会显示游戏内 HEX，请在游戏中确认结果并手动套用。
+3. 启动后请保持游戏处于前台，并在染色倒计时界面等待程序完成。需要中止时按 F9；如果游戏窗口位置或大小发生变化，请停止后重新开始。程序完成定位后会显示游戏内 HEX，请在游戏中确认结果后手动套用染色。
 4. 候选先按精准命中区域数排序，命中数相同时依次比较所有启用区域的最大色差和平均色差。相似模式使用各区设定的容差；没有全部达标的候选时仍会定位最接近的可执行妥协方案。
 5. 截图预测仍可能与实际游戏 HEX 不同，最终结果以游戏 HEX 复核为准。搜索不保证每次精准命中、满足全部容差或获得全局最优组合。
 
@@ -42,7 +42,7 @@
 
 1. 下載 `ColorStudio-v0.3.1.zip`，結束舊版本後解壓縮至獨立資料夾。請將 `ColorStudio.exe` 與 `_internal` 資料夾保留在同一目錄。
 2. 遊戲使用 **1280 × 960 視窗模式**。4K 螢幕亦使用相同遊戲設定，不必修改桌面解析度。選擇目標視窗與顏色後，按 F8 或點選開始；浮窗出現後手動進入遊戲染色倒數介面。
-3. 啟動後請保持遊戲在前景，並在染色倒數介面等待程式完成。需要中止時按 F9；若遊戲視窗位置或大小發生變更，請停止後重新開始。程式完成定位後會顯示遊戲內 HEX，請在遊戲中確認結果並手動套用。
+3. 啟動後請保持遊戲在前景，並在染色倒數介面等待程式完成。需要中止時按 F9；若遊戲視窗位置或大小發生變更，請停止後重新開始。程式完成定位後會顯示遊戲內 HEX，請在遊戲中確認結果後手動套用染色。
 4. 候選先依精準命中區域數排序，命中數相同時依序比較所有啟用區域的最大色差與平均色差。相似模式使用各區設定的容差；沒有全部達標的候選時，仍會定位最接近且可執行的折衷方案。
 5. 截圖預測仍可能與遊戲實際 HEX 不同，最終結果以遊戲 HEX 複核為準。搜尋不保證每次精準命中、符合所有容差或取得全域最佳組合。
 
@@ -67,7 +67,7 @@ This tool was developed with AI assistance.
 
 1. Download `ColorStudio-v0.3.1.zip`, close the previous version and extract into a separate folder. Keep `ColorStudio.exe` beside the `_internal` folder.
 2. Use **1280 × 960 windowed mode** in the game, including on a 4K display. The desktop resolution does not need to change. Select the game window and target colors, then press F8 or click Start. Open the timed dye screen manually after the overlay appears.
-3. After starting, keep the game in the foreground and wait on the timed dye screen until the tool finishes. Press F9 to stop. If the game window is moved or resized, stop and start again. After positioning, the tool shows the in-game HEX; review the result in the game and apply it manually.
+3. After starting, keep the game in the foreground and wait on the timed dye screen until the tool finishes. Press F9 to stop. If the game window is moved or resized, stop and start again. After positioning, the tool shows the in-game HEX; review the result in the game, then apply the dye manually.
 4. Candidates rank first by exact-match count, then by maximum and average color difference across all enabled regions. Similar mode uses each region's configured tolerance. If no candidate meets every setting, the tool still positions the closest executable compromise.
 5. Screenshot predictions may still differ from actual in-game HEX values. In-game HEX verification determines the reported result. Searches cannot guarantee an exact match, satisfaction of every tolerance or a global optimum.
 
