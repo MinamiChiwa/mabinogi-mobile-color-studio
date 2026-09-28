@@ -37,9 +37,6 @@ if (source/'doc').exists():shutil.copytree(source/'doc',licenses/'tesseract',dir
 for name in ('README.md','README.zh-TW.md','README.en.md'):
  p=workspace/name
  if p.exists():shutil.copy2(p,out/'ColorStudio'/name)
-# Keep relative documentation links usable in the offline distribution.
-for p in workspace.glob('RELEASE_NOTES_*.md'):
- shutil.copy2(p,out/'ColorStudio'/p.name)
 reports=out/'ColorStudio/work/studio';reports.mkdir(parents=True,exist_ok=True)
 for p in root.glob('RELEASE_VALIDATION_*.md'):
  shutil.copy2(p,reports/p.name)

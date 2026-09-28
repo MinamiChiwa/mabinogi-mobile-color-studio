@@ -52,7 +52,7 @@ python -m unittest discover -s work/studio -p "test_*.py"
 
 源码环境可运行 `run_studio.bat`，它使用项目 `.venv`。OCR 也会识别项目内的 `outputs/dependencies/ocr`。`run_preflight.bat` 提供只读预检并将报告写入独立时间戳目录；该脚本需要源码环境，不是正式压缩包的必需步骤。正式入口使用本局拼图、候选定位和游戏 HEX 复核流程。
 
-当前版本的截图颜色预测仍可能与游戏实际 HEX 存在偏差。工具在移动完成后读取并显示游戏 HEX，最终套用须在游戏内手动完成。当前版本说明见 [0.3.2 更新内容](RELEASE_NOTES_0.3.2.md)，验证范围见 [0.3.2 验证报告](work/studio/RELEASE_VALIDATION_0.3.2.md)。
+截图颜色预测仍可能与游戏实际 HEX 存在偏差。工具在移动完成后读取并显示游戏 HEX，最终套用须在游戏内手动完成。验证范围见 [0.3.2 验证报告](work/studio/RELEASE_VALIDATION_0.3.2.md)。版本更新内容请查看 GitHub 发布页。
 
 ```powershell
 python work/studio/build_release.py
