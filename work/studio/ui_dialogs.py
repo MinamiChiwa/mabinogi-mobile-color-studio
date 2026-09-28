@@ -2,6 +2,7 @@
 import webbrowser
 import customtkinter as ct
 from ui_typography import TITLE_FONT,SECTION_FONT,BODY_FONT
+from display_geometry import logical_size
 
 GITHUB='https://github.com/MinamiChiwa/mabinogi-mobile-color-studio'
 AFDIAN='https://afdian.com/a/minamichiwa'
@@ -19,12 +20,27 @@ TUTORIAL=[
 ]
 
 
+def logical_screen_limit(window, preferred, margins=(80, 100)):
+    """Return a logical CTk size that fits the native physical screen.
+
+    CustomTkinter scales geometry width/height by the OS window scale while
+    ``winfo_screenwidth/height`` are native pixels in this DPI-aware process.
+    """
+    return logical_size(window,preferred,margins)
+
+
 class InfoDialog(ct.CTkToplevel):
     def __init__(self,parent,title,sections,links=(),size=(660,650)):
         super().__init__(parent)
         self.title(title);self.configure(fg_color='#10151F');self.transient(parent)
-        self.geometry(f'{min(size[0],self.winfo_screenwidth()-80)}x{min(size[1],self.winfo_screenheight()-100)}')
-        self.minsize(440,330);self.grid_columnconfigure(0,weight=1);self.grid_rowconfigure(1,weight=1)
+        width,height=logical_screen_limit(self,size)
+        # Keep the minimum in logical units so CTk does not create a window
+        # larger than a small high-DPI display can show.
+        self.minsize(min(440,width),min(330,height));self.grid_columnconfigure(0,weight=1);self.grid_rowconfigure(1,weight=1)
+        # CTkToplevel applies minsize to the native window; set the requested
+        # geometry afterward so the window manager does not keep its 200x200
+        # bootstrap size.
+        self.geometry(f'{width}x{height}')
         ct.CTkLabel(self,text=title,font=TITLE_FONT).grid(row=0,column=0,padx=24,pady=(20,12),sticky='w')
         self.area=ct.CTkScrollableFrame(self,fg_color='transparent');self.area.grid(row=1,column=0,padx=16,sticky='nsew')
         self.labels=[]
@@ -42,13 +58,14 @@ class InfoDialog(ct.CTkToplevel):
         self._resize_job=None;self._wrap_width=0
         self.bind('<Configure>',self.schedule_wrap,add='+')
         self.bind('<Escape>',lambda _:self.destroy());self.after(80,self.lift)
+        self.after_idle(lambda:self.geometry(f'{width}x{height}') if self.winfo_exists() else None)
     def schedule_wrap(self,event):
         if event.widget!=self:return
         if self._resize_job:self.after_cancel(self._resize_job)
         self._resize_job=self.after(80,self.wrap)
     def wrap(self):
         self._resize_job=None
-        width=max(280,int(self.winfo_width()/self._get_widget_scaling())-100)
+        width=max(100,int(self.winfo_width()/self.area._get_widget_scaling())-100)
         if abs(width-self._wrap_width)<8:return
         self._wrap_width=width
         for label in self.labels:label.configure(wraplength=width)

@@ -6,9 +6,44 @@ import time
 from ui_settings import read_settings,save_settings
 from ui_progress import progress_text
 from ui_performance import DeliberateSlider
-from i18n import tr
+from i18n import tr,on_language
+from display_geometry import work_area,clamp_position
 from vision import accepted
 from ui_typography import SECTION_FONT,BODY_FONT,SMALL_FONT
+
+
+def clamp_surface_position(position, screen_size, surface_size):
+    """Keep a saved overlay position inside the physical work area.
+
+    ``CTkToplevel.geometry`` accepts logical width/height but native Tk
+    reports ``winfo_*`` and event root coordinates in physical pixels.  The
+    position itself is not scaled by CustomTkinter, so this helper deliberately
+    works only with the native (physical) dimensions.
+    """
+    sw, sh = (max(1, int(value)) for value in screen_size)
+    ww, wh = (max(1, int(value)) for value in surface_size)
+    x, y = (int(value) for value in position[:2])
+    return (min(max(0, x), max(0, sw - ww)),
+            min(max(0, y), max(0, sh - wh)))
+
+
+def clamp_virtual_surface_position(position, virtual_rect, surface_size):
+    """Clamp a native overlay to the complete virtual desktop.
+
+    ``winfo_screen*`` describes the primary monitor.  A saved or dragged
+    overlay can legitimately sit on a monitor to the left/above it, so use
+    SM_XVIRTUALSCREEN/SM_YVIRTUALSCREEN and the virtual width/height instead.
+    """
+    left, top, width, height = (int(value) for value in virtual_rect)
+    ww, wh = (max(1, int(value)) for value in surface_size)
+    x, y = (int(value) for value in position[:2])
+    return (min(max(left, x), left + max(0, width - ww)),
+            min(max(top, y), top + max(0, height - wh)))
+
+
+def virtual_screen_rect(user32=C.windll.user32):
+    """Return the physical virtual-desktop rectangle on Windows."""
+    return tuple(int(user32.GetSystemMetrics(index)) for index in (76, 77, 78, 79))
 
 class SearchOverlay(ct.CTkToplevel):
     def __init__(self,parent,stop,select_candidate=None,settings_path=None):
@@ -19,34 +54,48 @@ class SearchOverlay(ct.CTkToplevel):
         self.default_candidate_id=None
         self.settings_path=settings_path;self.preferences=read_settings(settings_path) if settings_path else {}
         self._collapsed=False;self._has_results=False;self._heartbeat_job=None;self._alpha_job=None
+        self._surface_job=None
         self._started=time.monotonic();self._stage_started=self._started;self._stage=None;self._deadline=None
         self.geometry('410x280+20+100')
         self.attributes('-alpha',max(.65,min(1.,float(self.preferences.get('overlay_alpha',.92)))))
         self.grid_columnconfigure(0,weight=1)
-        self.grid_rowconfigure(6,weight=1)
-        self.heading=ct.CTkLabel(self,text='等待染色界面',font=SECTION_FONT,anchor='w',text_color='#62D7BD')
+        self.grid_rowconfigure(1,weight=1)
+        self.heading=ct.CTkLabel(self,text='等待染色界面',font=SECTION_FONT,anchor='w',text_color='#62D7BD',wraplength=374)
         self.heading.grid(row=0,column=0,padx=16,pady=(10,2),sticky='ew')
-        self.copy=ct.CTkLabel(self,text='',font=BODY_FONT,justify='left',anchor='w',wraplength=374)
-        self.copy.grid(row=1,column=0,padx=16,pady=4,sticky='ew')
+        # Scroll status text and candidates together. The heading and stop
+        # control stay accessible even on a short, highly scaled display.
+        self.content=ct.CTkScrollableFrame(self,fg_color='transparent',corner_radius=0)
+        self.content.grid(row=1,column=0,padx=8,sticky='nsew');self.content.grid_columnconfigure(0,weight=1)
+        self.copy=ct.CTkLabel(self.content,text='',font=BODY_FONT,justify='left',anchor='w',wraplength=350)
+        self.copy.grid(row=0,column=0,padx=8,pady=4,sticky='ew')
         self.stop_button=ct.CTkButton(self,text='停止 F9',height=32,font=BODY_FONT,fg_color='#236D62',command=stop)
-        self.stop_button.grid(row=5,column=0,padx=16,pady=(4,10),sticky='ew')
-        self.activity=ct.CTkProgressBar(self,height=4,mode='indeterminate',progress_color='#62D7BD')
-        self.activity.grid(row=2,column=0,padx=16,pady=6,sticky='ew')
-        self.elapsed=ct.CTkLabel(self,text='',font=SMALL_FONT,anchor='w',text_color='#94A4B8')
-        self.elapsed.grid(row=3,column=0,padx=16,sticky='ew')
-        settings=ct.CTkFrame(self,fg_color='transparent');settings.grid(row=4,column=0,padx=16,pady=5,sticky='ew')
+        self.stop_button.grid(row=2,column=0,padx=16,pady=(4,10),sticky='ew')
+        self.activity=ct.CTkProgressBar(self.content,height=4,mode='indeterminate',progress_color='#62D7BD')
+        self.activity.grid(row=1,column=0,padx=8,pady=6,sticky='ew')
+        self.elapsed=ct.CTkLabel(self.content,text='',font=SMALL_FONT,anchor='w',text_color='#94A4B8',wraplength=350)
+        self.elapsed.grid(row=2,column=0,padx=8,sticky='ew')
+        settings=ct.CTkFrame(self.content,fg_color='transparent');settings.grid(row=3,column=0,padx=8,pady=5,sticky='ew')
         settings.grid_columnconfigure(1,weight=1)
         ct.CTkLabel(settings,text='不透明度',font=SMALL_FONT).grid(row=0,column=0,padx=(0,8))
         self.opacity=DeliberateSlider(settings,from_=.65,to=1,width=130,command=self.set_opacity)
         self.opacity.set(float(self.preferences.get('overlay_alpha',.92)));self.opacity.grid(row=0,column=1,sticky='ew')
         self.collapse=ct.CTkButton(settings,text='收起',width=76,height=26,font=SMALL_FONT,fg_color='#28364A',command=self.toggle_collapse)
         self.collapse.grid(row=0,column=2,padx=(10,0))
-        self.results=ct.CTkScrollableFrame(self,height=260,fg_color='#131F2C')
+        self.results=ct.CTkFrame(self.content,fg_color='#131F2C')
         self.heading.bind('<Button-1>',self._drag_start)
         self.heading.bind('<B1-Motion>',self._drag)
         self.heading.bind('<ButtonRelease-1>',self.save_position)
         self.update_idletasks()
         self._prepare_native()
+        on_language(self,self.schedule_surface_resize)
+    def schedule_surface_resize(self):
+        if self._surface_job is None:self._surface_job=self.after_idle(self.resize_surface)
+    def _set_scaling(self,new_widget_scaling,new_window_scaling):
+        super()._set_scaling(new_widget_scaling,new_window_scaling)
+        if hasattr(self,'_surface_job'):self.schedule_surface_resize()
+    def _set_scaled_min_max(self):
+        super()._set_scaled_min_max()
+        if hasattr(self,'_surface_job'):self.schedule_surface_resize()
     def _prepare_native(self):
         user=C.windll.user32
         user.GetAncestor.argtypes=[W.HWND,W.UINT];user.GetAncestor.restype=W.HWND
@@ -61,8 +110,9 @@ class SearchOverlay(ct.CTkToplevel):
         self._drag_offset=(event.x_root-self.winfo_x(),event.y_root-self.winfo_y())
     def _drag(self,event):
         x,y=self._drag_offset
-        px=min(max(0,event.x_root-x),max(0,self.winfo_screenwidth()-self.winfo_width()))
-        py=min(max(0,event.y_root-y),max(0,self.winfo_screenheight()-self.winfo_height()))
+        position=(event.x_root-x,event.y_root-y)
+        px,py=clamp_position(position,work_area(self,position),
+                             (self.winfo_width(),self.winfo_height()))
         self.geometry(f'+{px}+{py}')
     def save_position(self,event=None):
         if self.settings_path:save_settings(self.settings_path,overlay_position=[self.winfo_x(),self.winfo_y()])
@@ -71,9 +121,18 @@ class SearchOverlay(ct.CTkToplevel):
         if self._alpha_job:self.after_cancel(self._alpha_job)
         if self.settings_path:self._alpha_job=self.after(250,lambda:save_settings(self.settings_path,overlay_alpha=float(value)))
     def resize_surface(self):
+        if self._surface_job is not None:self.after_cancel(self._surface_job);self._surface_job=None
+        area=work_area(self);scale=self._get_window_scaling()
         height=175 if self._collapsed else 580 if self._has_results else 280
-        height=min(height,int((self.winfo_screenheight()-80)/self._get_window_scaling()))
-        self.geometry(f'410x{height}')
+        width=max(1,min(410,int(area[2]/scale)))
+        height=max(1,min(height,int(area[3]/scale)))
+        x,y=clamp_position((self.winfo_x(),self.winfo_y()),area,
+                           (round(width*scale),round(height*scale)))
+        self.geometry(f'{width}x{height}+{x}+{y}')
+        wrap=max(80,int(width*scale/self.copy._get_widget_scaling())-60)
+        for label in (self.heading,self.copy,self.elapsed):label.configure(wraplength=wrap)
+        if getattr(self,'default_result_label',None) is not None:
+            self.default_result_label.configure(wraplength=wrap)
     def toggle_collapse(self):
         self._collapsed=not self._collapsed
         self.collapse.configure(text='展开' if self._collapsed else '收起')
@@ -102,12 +161,17 @@ class SearchOverlay(ct.CTkToplevel):
         self._dismissed=False
         self._started=time.monotonic();self._stage_started=self._started;self._stage=None;self._deadline=None
         position=self.preferences.get('overlay_position',[20,100])
-        x=min(max(0,int(position[0])),max(0,self.winfo_screenwidth()-430))
-        y=min(max(0,int(position[1])),max(0,self.winfo_screenheight()-320))
+        # Width/height returned by winfo are native physical pixels.  Using
+        # fixed logical constants here put the overlay off-screen at 125%+
+        # DPI because CTk scales the 410x280 geometry.
+        self.update_idletasks()
+        x,y=clamp_position(position,work_area(self,position),
+                            (self.winfo_width(),self.winfo_height()))
         self.geometry(f'+{x}+{y}')
         self.clear_candidates()
         self.rules=rules;self.phase='waiting';self.render('等待染色界面','可从任意游戏界面进入普通染色并完成教学。\n识别成功后自动寻色；F9 取消等待。')
         self._prepare_native();self.deiconify()
+        self.schedule_surface_resize()
         self.update_activity({'stage':'waiting'})
         if self._heartbeat_job:self.after_cancel(self._heartbeat_job)
         self.heartbeat()
@@ -140,7 +204,7 @@ class SearchOverlay(ct.CTkToplevel):
                         '未找到满足所设目标的组合，正在定位最接近的妥协方案。')
         else:
             self.render('自动定位最佳方案','正在定位预测达标且剩余时间允许的方案。\n完成后仍可选择其他方案，实际染色须在游戏内手动确认。')
-        self.results.grid(row=6,column=0,padx=10,pady=(0,10),sticky='nsew')
+        self.results.grid(row=4,column=0,padx=2,pady=(0,10),sticky='ew')
         self._has_results=True;self._collapsed=False;self.copy.grid();self.activity.grid();self.collapse.configure(text='收起');self.resize_surface()
         self.candidate_container=ct.CTkFrame(self.results,fg_color='transparent')
         self.candidate_container.pack(fill='x')
@@ -183,7 +247,7 @@ class SearchOverlay(ct.CTkToplevel):
         self.select_candidate(batch_id,candidate_id)
     def show_verification(self,data):
         self.clear_candidates();self.phase='verified'
-        self.results.grid(row=6,column=0,padx=10,pady=(0,10),sticky='nsew');self._has_results=True;self._collapsed=False;self.copy.grid();self.activity.grid();self.collapse.configure(text='收起');self.resize_surface()
+        self.results.grid(row=4,column=0,padx=2,pady=(0,10),sticky='ew');self._has_results=True;self._collapsed=False;self.copy.grid();self.activity.grid();self.collapse.configure(text='收起');self.resize_surface()
         self.render('游戏色码已复核','全部目标达标，请在游戏内手动确认是否套用。' if data['accepted'] else '本轮候选实测未达标；当前颜色如下，尚不能判断色板无解。')
         for i in range(3):
             if data['actual_deltas'][i] is None:continue

@@ -3,6 +3,7 @@ from i18n import tr
 import tkinter as tk
 from PIL import ImageGrab,ImageTk
 import platform_win
+from screen_mapping import image_point
 
 def pixel_hex(image,x,y):
     x=max(0,min(image.width-1,int(x)));y=max(0,min(image.height-1,int(y)))
@@ -25,10 +26,12 @@ def pick_screen(root,callback):
                 overlay.destroy();root.picking=False;root.deiconify();root.lift()
                 if color:callback(color)
             def preview(event):
-                color=pixel_hex(screen,event.x,event.y)
+                point=image_point(event.x,event.y,(canvas.winfo_width(),canvas.winfo_height()),screen.size)
+                color=pixel_hex(screen,*point)
                 label.configure(text=tr(f'{color}   单击取色 · Esc 取消'),bg=color,fg='black' if sum(int(color[i:i+2],16) for i in (1,3,5))>400 else 'white')
-                label.place(x=min(max(0,event.x+20),max(0,screen.width-320)),y=min(max(0,event.y+20),max(0,screen.height-60)))
-            canvas.bind('<Motion>',preview);canvas.bind('<Button-1>',lambda e:finish(pixel_hex(screen,e.x,e.y)))
+                label.place(x=min(max(0,event.x+20),max(0,canvas.winfo_width()-320)),y=min(max(0,event.y+20),max(0,canvas.winfo_height()-60)))
+            canvas.bind('<Motion>',preview)
+            canvas.bind('<Button-1>',lambda e:finish(pixel_hex(screen,*image_point(e.x,e.y,(canvas.winfo_width(),canvas.winfo_height()),screen.size))))
             overlay.bind('<Escape>',lambda e:finish());overlay.bind('<Button-3>',lambda e:finish())
             overlay.update_idletasks()
             hwnd=platform_win.u.GetParent(overlay.winfo_id()) or overlay.winfo_id()

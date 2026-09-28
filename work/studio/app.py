@@ -3,7 +3,8 @@ import customtkinter as ct
 import tkinter as tk
 from tkinter import colorchooser,messagebox
 from pathlib import Path
-import sys,json,threading,queue,datetime,ctypes,webbrowser
+import sys,json,threading,queue,ctypes,webbrowser
+from app_data import resolve_data_directory
 from engine import Runner
 import i18n
 from i18n import tr
@@ -27,9 +28,10 @@ from ui_performance import DeliberateSlider
 from customtkinter.windows.widgets.scaling.scaling_base_class import CTkScalingBaseClass
 from ui_dialogs import support_dialog,tutorial_dialog,GITHUB
 from ui_settings import read_settings,save_settings
-from session_store import cleanup_sessions
+from session_store import new_session_path,start_session_cleanup
 from ui_typography import FONT_FAMILY,TITLE_FONT,SECTION_FONT,BODY_FONT,SMALL_FONT,ICON_FONT,HEX_FONT
 from resize_rendering import TopLevelResizeRedrawOptimization
+from display_geometry import logical_size,work_area
 
 CARD_WIDTH=344
 CARD_HEIGHT=400
@@ -104,8 +106,10 @@ def build_runner(emit,folder,strategy='atlas',entry=None,entry_size=None):
 ct.set_appearance_mode('dark'); ct.set_default_color_theme('blue')
 BG='#10151F'; PANEL='#192230'; INK='#EDF3FA'; MUTED='#94A4B8'; ACCENT='#62D7BD'
 FONT=FONT_FAMILY
-DATA=Path(__file__).resolve().parent/'data' if not getattr(sys,'frozen',False) else Path(sys.executable).parent/'data'
-DATA.mkdir(exist_ok=True)
+DATA=resolve_data_directory(
+    (Path(sys.executable).resolve().parent if getattr(sys,'frozen',False)
+     else Path(__file__).resolve().parent)/'data'
+)
 try:i18n.language=json.loads((DATA/'settings.json').read_text(encoding='utf-8')).get('language','简体中文')
 except (OSError,ValueError):pass
 i18n.install_widgets(ct)
@@ -310,7 +314,7 @@ class App(ct.CTk):
         self.after(150,self.reflow)
     def schedule_layout(self,event):
         if event.widget!=self:return
-        try:scaling=self._get_widget_scaling()
+        try:scaling=self.page._get_widget_scaling()
         except (AttributeError,tk.TclError):return
         width=int(event.width/scaling)
         columns=columns_for_width(width)
@@ -360,7 +364,7 @@ class App(ct.CTk):
             self.header.grid_columnconfigure(1,weight=1,uniform='top')
         self._topbars_compact=compact
     def reflow(self,width=None):
-        if width is None:width=int(self.winfo_width()/self._get_widget_scaling())
+        if width is None:width=int(self.winfo_width()/self.page._get_widget_scaling())
         columns=columns_for_width(width)
         self.apply_card_layout(columns)
         self.apply_topbar_layout(columns==1)
@@ -408,10 +412,13 @@ class App(ct.CTk):
         if text:self.detail.grid()
         else:self.detail.grid_remove()
     def show_history(self):
-        win=ct.CTkToplevel(self);win.title(tr('寻色记录 · by 南千和'));win.geometry('820x620');win.minsize(620,400);win.transient(self);win.configure(fg_color=BG)
+        win=ct.CTkToplevel(self);win.title(tr('寻色记录 · by 南千和'))
+        width,height=logical_size(win,(820,620));win.minsize(min(620,width),min(400,height));win.geometry(f'{width}x{height}')
+        win.transient(self);win.configure(fg_color=BG)
         ct.CTkLabel(win,text='寻色记录',font=TITLE_FONT).pack(anchor='w',padx=24,pady=(20,4))
         ct.CTkLabel(win,text='记录最近 50 次结果 · ΔE 越小越接近目标，0 表示目标原色',font=BODY_FONT,text_color=MUTED,wraplength=560,justify='left').pack(anchor='w',padx=24,pady=(0,12))
         area=ct.CTkScrollableFrame(win,fg_color=BG);area.pack(fill='both',expand=True,padx=16,pady=(0,16))
+        win.after_idle(lambda:win.geometry(f'{width}x{height}') if win.winfo_exists() else None)
         if not self.history:ct.CTkLabel(area,text='完成一次寻色后，颜色组合会自动保存在这里。',font=BODY_FONT).pack(pady=40)
         names={'matched':'目标达标','compromise':'妥协结果','applied':'已套用'}
         for row in self.history:
@@ -435,14 +442,18 @@ class App(ct.CTk):
         # Choose density once. Window gestures must never change widget/font
         # scaling: CTk scaling recursively redraws and reconfigures every child.
         dpi=self._get_window_scaling()
-        available_height=int(self.winfo_screenheight()/dpi)-100
+        _,_,screen_width,screen_height=work_area(self)
+        available_width=max(1,int(screen_width/dpi)-80)
+        available_height=max(1,int(screen_height/dpi)-100)
         self._ui_scale=min(1.,max(.7,available_height/860))
         ct.set_widget_scaling(self._ui_scale)
         self.update_idletasks()
-        minimum_height=max(560,self.page.winfo_reqheight()+round(COMPACT_HEADER_EXTRA_HEIGHT*self._ui_scale))
-        self.minsize(MIN_WINDOW_WIDTH,minimum_height)
+        minimum_width=min(MIN_WINDOW_WIDTH,available_width)
+        minimum_height=min(max(560,self.page.winfo_reqheight()+round(COMPACT_HEADER_EXTRA_HEIGHT*self._ui_scale)),available_height)
+        self.minsize(minimum_width,minimum_height)
+        width=max(minimum_width,min(1120,available_width))
         height=max(minimum_height,min(860,available_height))
-        self.geometry(f'{min(1120,int(self.winfo_screenwidth()/dpi)-80)}x{height}+20+20')
+        self.geometry(f'{width}x{height}+20+20')
     def save(self):
         try:
             data=[{'enabled':c.enabled.get(),'target':c.target.get(),'alt':c.alt.get(),'mode':c.mode.get(),'tolerance':c.tolerance.get()} for c in self.cards]
@@ -470,8 +481,8 @@ class App(ct.CTk):
         self.active_mode=mode
         self.busy=True;self.start.configure(state='disabled');self.status.configure(text='正在识别游戏界面…')
         session_root=DATA/'sessions'
-        cleanup_sessions(session_root)
-        folder=session_root/datetime.datetime.now().strftime('%Y%m%d-%H%M%S')
+        start_session_cleanup(session_root)
+        folder=new_session_path(session_root)
         try:self.runner=build_runner(lambda k,d:self.q.put((k,d)),folder,strategy)
         except (ValueError,RuntimeError) as exc:
             self.busy=False;self.start.configure(state='normal');self.status.configure(text=tr(str(exc)));return

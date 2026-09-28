@@ -3,10 +3,17 @@ import customtkinter as ct
 from i18n import tr,on_language
 from window_target import list_windows,choose_auto,WindowUnavailable,valid_target
 from ui_typography import TITLE_FONT,BODY_FONT
+from display_geometry import logical_size
+
+
+def initial_picker_size(window, preferred=(680, 350), margins=(80, 100)):
+    """Choose logical picker dimensions that fit a physical DPI-scaled screen."""
+    return logical_size(window,preferred,margins)
 
 class WindowPicker(ct.CTkToplevel):
     def __init__(self,parent,current,selected):
-        super().__init__(parent);self.title(tr('选择游戏窗口'));self.geometry('680x350');self.minsize(520,350)
+        super().__init__(parent);self.title(tr('选择游戏窗口'))
+        width,height=initial_picker_size(self);self.minsize(min(520,width),min(350,height));self.geometry(f'{width}x{height}')
         self.transient(parent);self.selected=selected;self.current=current;self.choices={}
         self.grid_columnconfigure(0,weight=1)
         ct.CTkLabel(self,text='选择游戏窗口',font=TITLE_FONT).grid(row=0,column=0,padx=24,pady=(20,8),sticky='w')
@@ -20,9 +27,10 @@ class WindowPicker(ct.CTkToplevel):
         ct.CTkButton(bar,text='使用此窗口',font=BODY_FONT,command=self.apply).pack(side='right')
         self.refresh();self.after(80,self.lift);on_language(self,self.refresh_language)
         self.bind('<Configure>',self.resize,add='+')
+        self.after_idle(lambda:self.geometry(f'{width}x{height}') if self.winfo_exists() else None)
     def resize(self,event):
         if event.widget!=self:return
-        width=max(300,int(event.width/self._get_widget_scaling())-55)
+        width=max(100,int(event.width/self.menu._get_widget_scaling())-55)
         for child in self.winfo_children():
             if isinstance(child,ct.CTkLabel):child.configure(wraplength=width)
     def refresh_language(self):

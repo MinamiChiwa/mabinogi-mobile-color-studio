@@ -1,6 +1,7 @@
 import unittest,threading,tempfile
 from unittest.mock import patch,MagicMock
-from window_target import WindowTarget,choose_auto,resolve_target,valid_target,WindowUnavailable
+from window_target import (WindowTarget,choose_auto,resolve_target,valid_target,
+                           WindowUnavailable,MultipleWindows)
 from platform_win import Game,Interrupted
 
 class WindowTargetTests(unittest.TestCase):
@@ -14,7 +15,8 @@ class WindowTargetTests(unittest.TestCase):
         with self.assertRaises(WindowUnavailable):choose_auto([WindowTarget(1,2,'染色工坊 · 瑪奇 Mobile','ColorStudio.exe'),WindowTarget(3,4,'瑪奇Mobile - Microsoft Edge','msedge.exe')])
     def test_multiple_candidates_require_selection_or_foreground(self):
         a=WindowTarget(1,2,'瑪奇Mobile');b=WindowTarget(3,4,'瑪奇 Mobile')
-        with self.assertRaises(WindowUnavailable):choose_auto([a,b])
+        with self.assertRaises(MultipleWindows):choose_auto([a,b])
+        self.assertTrue(issubclass(MultipleWindows,WindowUnavailable))
         self.assertEqual(choose_auto([a,b],3),b)
     def test_manual_window_does_not_depend_on_title(self):
         target=WindowTarget(1,2,'Different title')

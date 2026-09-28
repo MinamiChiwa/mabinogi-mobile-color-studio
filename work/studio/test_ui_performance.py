@@ -91,7 +91,7 @@ class ResizeTests(unittest.TestCase):
 
     def test_resize_handler_ignores_changes_inside_current_breakpoint(self):
         from app import App
-        window=SimpleNamespace(winfo_width=lambda:900,_get_widget_scaling=lambda:1,
+        window=SimpleNamespace(winfo_width=lambda:900,page=SimpleNamespace(_get_widget_scaling=lambda:1),
                                _layout_columns=2,_topbars_compact=False,_controls_compact=False,reflow=MagicMock())
         App.schedule_layout(window,SimpleNamespace(widget=window,width=900))
         App.schedule_layout(window,SimpleNamespace(widget=window,width=850))
@@ -107,19 +107,28 @@ class ResizeTests(unittest.TestCase):
 
     def test_initial_density_reserves_space_for_all_controls(self):
         from app import App,MIN_WINDOW_WIDTH,COMPACT_HEADER_EXTRA_HEIGHT
-        for dpi in (1,1.25,1.5,2):
-            window=SimpleNamespace(_get_window_scaling=lambda:dpi,
-                winfo_screenwidth=lambda:1920,winfo_screenheight=lambda:1080,
-                minsize=MagicMock(),geometry=MagicMock(),update_idletasks=MagicMock(),
-                page=SimpleNamespace(winfo_reqheight=lambda:600))
-            with patch('app.ct.set_widget_scaling') as scaling:
-                App.fit_screen(window)
-            scaling.assert_called_once_with(window._ui_scale)
-            width,height=window.minsize.call_args.args
-            self.assertEqual((width,height),(MIN_WINDOW_WIDTH,600+round(COMPACT_HEADER_EXTRA_HEIGHT*window._ui_scale)))
-            geometry_height=int(window.geometry.call_args.args[0].split('x')[1].split('+')[0])
-            self.assertGreaterEqual(geometry_height,height)
-            self.assertGreaterEqual(window._ui_scale,.7)
+        for screen in ((1024,768),(1920,1080),(3840,2160),(5120,2880)):
+            for dpi in (1,1.25,1.5,2,2.5):
+                with self.subTest(screen=screen,dpi=dpi):
+                    window=SimpleNamespace(_get_window_scaling=lambda:dpi,
+                        winfo_screenwidth=lambda:screen[0],winfo_screenheight=lambda:screen[1],
+                        minsize=MagicMock(),geometry=MagicMock(),update_idletasks=MagicMock(),
+                        page=SimpleNamespace(winfo_reqheight=lambda:600))
+                    with patch('app.ct.set_widget_scaling') as scaling:
+                        App.fit_screen(window)
+                    scaling.assert_called_once_with(window._ui_scale)
+                    available_width=max(1,int(screen[0]/dpi)-80)
+                    available_height=max(1,int(screen[1]/dpi)-100)
+                    required_height=max(560,600+round(COMPACT_HEADER_EXTRA_HEIGHT*window._ui_scale))
+                    self.assertEqual(window.minsize.call_args.args,
+                                     (min(MIN_WINDOW_WIDTH,available_width),min(required_height,available_height)))
+                    parts=window.geometry.call_args.args[0].split('+')
+                    width,height=map(int,parts[0].split('x'))
+                    self.assertLessEqual(width,available_width)
+                    self.assertLessEqual(height,available_height)
+                    self.assertLessEqual(width+20,screen[0]/dpi-60)
+                    self.assertLessEqual(height+20,screen[1]/dpi-80)
+                    self.assertGreaterEqual(window._ui_scale,.7)
 
     def test_scroll_viewport_fits_one_fixed_card_row_without_vertical_stretch(self):
         from app import CARD_HEIGHT,CARD_GAP,INTRO_HEIGHT,SCROLL_VIEWPORT_HEIGHT

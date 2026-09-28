@@ -12,6 +12,7 @@ class WindowTarget:
     executable:str=''
 
 class WindowUnavailable(RuntimeError):pass
+class MultipleWindows(WindowUnavailable):pass
 
 u=C.windll.user32;k=C.windll.kernel32
 u.GetWindowThreadProcessId.argtypes=[W.HWND,C.POINTER(W.DWORD)];u.GetWindowThreadProcessId.restype=W.DWORD
@@ -59,7 +60,7 @@ def choose_auto(windows,foreground=0):
     if len(candidates)==1:return candidates[0]
     active=[w for w in candidates if w.hwnd==foreground]
     if len(active)==1:return active[0]
-    if candidates:raise WindowUnavailable('发现多个游戏窗口，请手动选择目标窗口。')
+    if candidates:raise MultipleWindows('发现多个游戏窗口，请手动选择目标窗口。')
     raise WindowUnavailable('未找到游戏窗口。请启动游戏，或手动选择窗口。')
 
 def valid_target(target):

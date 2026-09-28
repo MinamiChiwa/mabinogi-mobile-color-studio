@@ -20,6 +20,11 @@ EN={
 '全局注册不可用：':'Some hotkeys failed to register; ',
 '；F9 仍通过轮询停止，其他操作请使用按钮。':'F9 polling remains available. Use the buttons for the other actions.',
 '大图重建校验未通过':'Atlas reconstruction validation failed',
+'大图重建校验未通过：':'Atlas reconstruction validation failed: ',
+'区域 ':'Region ',
+' 留出 RGB RMSE ':' held-out RGB RMSE ',
+'（上限 ':' (limit ',
+'）。尚未搜索目标组合，不能据此判断没有满足目标的方案。':'). The target colors have not been searched, so this does not mean that no matching combination exists.',
 '当前搜索未得到可执行方案':'The current search found no executable plan',
 '请先启动工具，再手动进入染色倒计时界面；识别成功后自动采样和定位，结果须在游戏内手动确认。':'Start the tool, then manually enter the timed dye screen. Sampling and positioning begin after recognition; the result must be confirmed in the game.',
 '旧版策略':'Legacy strategy',
@@ -187,6 +192,28 @@ TW={
 
 from ui_strings import EN as UI_EN, TW as UI_TW
 EN.update(UI_EN);TW.update(UI_TW)
+from runtime_messages import EN as RUNTIME_EN, TW as RUNTIME_TW, ERROR_SOURCE
+EN.update(RUNTIME_EN);TW.update(RUNTIME_TW)
+
+# Complete messages emitted by the formal atlas service.  These entries are
+# intentionally keyed by the full sentence: translating only a shorter
+# substring would leave the remainder of a status message in Chinese.
+EN.update({
+    '。尚未搜索目标组合，不能据此判断没有满足目标的方案。': '. The target combinations have not been searched, so this does not show that no match exists.',
+    '请进入普通染色；教学结束后自动验证颜色板。F9停止。': 'Open regular dyeing; the board is verified automatically after the tutorial. F9 stops.',
+    '游戏倒计时已截止，未发布候选。': 'The game countdown has expired. No candidates were published.',
+    '剩余时间不足以安全定位并复核自动最佳方案，未发送定位操作。': 'Not enough time to safely position and verify the automatic best combination. No positioning input was sent.',
+    '候选已失效，保持自动最佳方案。': 'The candidate expired. The automatic best combination is kept.',
+    '已停止，保留自动最佳方案。': 'Stopped. The automatic best combination is kept.',
+})
+TW.update({
+    '。尚未搜索目标组合，不能据此判断没有满足目标的方案。': '。尚未搜尋目標組合，無法據此判斷沒有符合目標的方案。',
+    '请进入普通染色；教学结束后自动验证颜色板。F9停止。': '請進入普通染色；教學結束後會自動驗證顏色板。F9 停止。',
+    '游戏倒计时已截止，未发布候选。': '遊戲倒數已結束，未發布候選方案。',
+    '剩余时间不足以安全定位并复核自动最佳方案，未发送定位操作。': '剩餘時間不足以安全定位並複核自動最佳方案，未傳送定位操作。',
+    '候选已失效，保持自动最佳方案。': '候選方案已失效，保留自動最佳方案。',
+    '已停止，保留自动最佳方案。': '已停止，保留自動最佳方案。',
+})
 _english_parts=sorted(EN,key=len,reverse=True)
 _widgets=weakref.WeakSet()
 _refreshers=weakref.WeakKeyDictionary()
@@ -202,6 +229,7 @@ class DisplayText(str):
 
 @lru_cache(maxsize=4096)
 def _translate(text,language):
+    text=ERROR_SOURCE.get(text,text)
     if language=='简体中文':return text
     if language=='繁體中文':return TW.get(text,traditional.convert(text).replace('玛奇','瑪奇'))
     if text in EN:return EN[text]

@@ -5,13 +5,20 @@ from i18n import tr
 import customtkinter as ct
 from PIL import Image,ImageTk
 from palette import full_atlas
-from ui_typography import SECTION_FONT,SMALL_FONT
+from ui_typography import SECTION_FONT,BODY_FONT,SMALL_FONT
+from display_geometry import logical_size
+
+
+def initial_palette_size(window, preferred=(1000, 740), margins=(100, 100)):
+    """Choose logical dimensions that remain inside a DPI-scaled screen."""
+    return logical_size(window,preferred,margins)
 
 class PaletteViewer(ct.CTkToplevel):
     def __init__(self,parent,colors,target,pool):
         super().__init__(parent);self.title(tr('允许颜色 · 完整色图'));self.configure(fg_color='#10151F')
-        self.geometry(f'{min(1000,self.winfo_screenwidth()-100)}x{min(740,self.winfo_screenheight()-100)}+40+40')
-        self.minsize(600,420)
+        width,height=initial_palette_size(self)
+        self.minsize(min(600,width),min(420,height))
+        self.geometry(f'{width}x{height}+40+40')
         self.image=None;self.scale=1.;self.target=target;self.transient(parent)
         self._render_job=None;self._item=None;self._last_inspect=0.;self._last_color=None
         top=ct.CTkFrame(self,fg_color='transparent');top.pack(fill='x',padx=20,pady=(16,8))
@@ -32,6 +39,7 @@ class PaletteViewer(ct.CTkToplevel):
         self.canvas.bind('<ButtonPress-1>',lambda e:self.canvas.scan_mark(e.x,e.y))
         self.canvas.bind('<B1-Motion>',lambda e:self.canvas.scan_dragto(e.x,e.y,gain=1))
         self.bind('<Escape>',lambda e:self.destroy())
+        self.after_idle(lambda:self.geometry(f'{width}x{height}+40+40') if self.winfo_exists() else None)
         self.future=pool.submit(full_atlas,colors.copy());self.after(100,self.poll)
     def poll(self):
         if not self.winfo_exists():return

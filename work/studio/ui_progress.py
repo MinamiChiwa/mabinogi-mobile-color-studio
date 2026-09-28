@@ -10,7 +10,8 @@ STAGES={
 def progress_text(data):
     title=STAGES.get(data.get('stage'),'正在按目标计算，请稍候。')
     if data.get('total'):title+=f"  {data.get('current',0)}/{data['total']}"
-    body=('等待手动进入染色倒计时；F9 可停止。' if data.get('stage')=='waiting' else
-          '图像处理中，鼠标暂时不动是正常现象。' if data.get('stage') in ('align','period','stitch','export','validate','search','similarity','ready') else
-          '根据图像实测位移校正；F9随时停止。')
+    body=data.get('message') or (
+        '等待手动进入染色倒计时；F9 可停止。' if data.get('stage')=='waiting' else
+        '图像处理中，鼠标暂时不动是正常现象。' if data.get('stage') in ('align','period','stitch','export','validate','search','similarity','ready') else
+        '根据图像实测位移校正；F9随时停止。')
     return title,body

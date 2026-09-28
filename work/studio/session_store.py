@@ -1,5 +1,5 @@
 """Opt-in bounded diagnostics. Normal searches create no session files."""
-import json,time,threading,queue,re
+import json,time,threading,queue,re,datetime,uuid
 from pathlib import Path
 from PIL import Image
 
@@ -8,6 +8,22 @@ MARKER='.color-studio-diagnostics'
 SESSION_RETENTION_DAYS=30
 SESSION_RETENTION_COUNT=20
 SESSION_RETENTION_BYTES=512*1024*1024
+
+def new_session_path(root, now=None):
+    """Return a collision-resistant timestamped path without creating it."""
+    stamp=(now or datetime.datetime.now()).strftime('%Y%m%d-%H%M%S')
+    base=Path(root)/(stamp+'-'+uuid.uuid4().hex[:8])
+    while base.exists():base=Path(root)/(stamp+'-'+uuid.uuid4().hex[:8])
+    return base
+
+def start_session_cleanup(root):
+    """Run best-effort session housekeeping away from the UI thread."""
+    def run():
+        try:cleanup_sessions(root)
+        except OSError:pass
+    worker=threading.Thread(target=run,name='session-cleanup',daemon=True)
+    worker.start()
+    return worker
 
 def cleanup_sessions(root, now=None, keep_days=SESSION_RETENTION_DAYS,
                      keep_count=SESSION_RETENTION_COUNT,
@@ -25,7 +41,7 @@ def cleanup_sessions(root, now=None, keep_days=SESSION_RETENTION_DAYS,
     entries=[]
     for folder in root.iterdir():
         if (folder.is_symlink() or not folder.is_dir() or
-                not re.fullmatch(r'\d{8}-\d{6}',folder.name)):continue
+                not re.fullmatch(r'\d{8}-\d{6}(?:-[0-9a-f]{8})?',folder.name)):continue
         try:
             files=[p for p in folder.rglob('*') if p.is_file() and not p.is_symlink()]
             entries.append((folder.stat().st_mtime,folder,files,

@@ -1,17 +1,19 @@
 """Visual recognition only. Coordinates are physical client-image pixels."""
 from dataclasses import dataclass
 from pathlib import Path
-import itertools, re, sys, os, shutil
+import itertools, re, sys, os, shutil, subprocess, io, shlex
 import cv2
 import numpy as np
 import pytesseract
 from PIL import Image
 
 OCR_AVAILABLE = None
+OCR_CONFIG = ''
 
 def configure_ocr(strict=False):
     """Check the OCR executable and English data before a timed capture."""
-    global OCR_AVAILABLE
+    global OCR_AVAILABLE, OCR_CONFIG
+    OCR_CONFIG = ''
     root=Path(getattr(sys,'_MEIPASS',Path(__file__).parent))
     candidates=[root/'ocr/tesseract.exe',
                 Path(__file__).resolve().parents[2]/'outputs/dependencies/ocr/tesseract.exe']
@@ -20,24 +22,56 @@ def configure_ocr(strict=False):
     candidates.append(Path('C:/Program Files/Tesseract-OCR/tesseract.exe'))
     found=shutil.which('tesseract')
     if found:candidates.append(Path(found))
+    found_candidate=False
+    checked=set()
     for exe in candidates:
-        if exe.is_file():
-            pytesseract.pytesseract.tesseract_cmd=str(exe)
-            try:
-                pytesseract.get_tesseract_version()
-                if 'eng' not in pytesseract.get_languages(config=''):
-                    raise OSError('English OCR data is missing')
-            except (pytesseract.TesseractNotFoundError, pytesseract.TesseractError, OSError):
-                OCR_AVAILABLE = False
-                if strict:
-                    raise RuntimeError('文字识别组件不可用，请修复 Tesseract 后再开始染色采样。')
-                return False
-            OCR_AVAILABLE = True
-            return True
+        try:
+            resolved=exe.resolve()
+            if resolved in checked or not exe.is_file():continue
+        except OSError:
+            continue
+        checked.add(resolved);found_candidate=True
+        try:
+            data_dir=exe.parent/'tessdata'
+            data_args=['--tessdata-dir',str(data_dir)] if (data_dir/'eng.traineddata').is_file() else []
+            # --list-langs includes the installation path in its header, whose
+            # encoding can follow the Windows locale. Only the ASCII language
+            # identifiers matter; decoding that header as UTF-8 can reject a
+            # working installation. Avoid pytesseract's process-global cache
+            # too: a failed executable must not poison the next candidate.
+            probe=subprocess.run([str(exe),'--list-langs',*data_args],
+                capture_output=True,timeout=5,
+                creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+            if probe.returncode!=0 or b'eng' not in [line.strip() for line in probe.stdout.splitlines()]:continue
+        except (OSError,subprocess.TimeoutExpired):
+            continue
+        pytesseract.pytesseract.tesseract_cmd=str(exe)
+        OCR_CONFIG=f'--tessdata-dir "{data_dir}"' if data_args else ''
+        OCR_AVAILABLE = True
+        return True
     OCR_AVAILABLE = False
     if strict:
-        raise RuntimeError('文字识别组件缺失，请使用完整安装包。')
+        message=('文字识别组件不可用，请修复 Tesseract 后再开始染色采样。'
+                 if found_candidate else '文字识别组件缺失，请使用完整安装包。')
+        raise RuntimeError(message)
     return False
+
+def _ocr_text(image, *, lang='eng', config='', timeout=2):
+    """Use binary pipes so OCR never depends on temporary-file path encoding."""
+    if not isinstance(image, Image.Image):image=Image.fromarray(image)
+    buffer=io.BytesIO()
+    image.save(buffer,format='PNG')
+    # Parse our internal options once, removing grouping quotes before Windows
+    # serializes the argument list. Retained quotes become part of tessdata's
+    # filename when passed through pytesseract's Windows config parser.
+    args=[pytesseract.pytesseract.tesseract_cmd,'stdin','stdout','-l',lang]
+    args.extend(shlex.split(config,posix=True))
+    result=subprocess.run(args,input=buffer.getvalue(),capture_output=True,
+        timeout=timeout,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+    if result.returncode:
+        raise pytesseract.TesseractError(result.returncode,result.stderr.decode('utf-8',errors='replace'))
+    return result.stdout.decode('utf-8',errors='replace')
+
 
 def _tesseract(image, config, timeout=2):
     """Return OCR text, degrading to an empty result when Tesseract is absent."""
@@ -45,11 +79,18 @@ def _tesseract(image, config, timeout=2):
     if OCR_AVAILABLE is False:
         return ''
     try:
-        text = pytesseract.image_to_string(image, config=config, timeout=timeout).strip()
+        text = _ocr_text(image, lang='eng', config=' '.join(filter(None,(OCR_CONFIG,config))), timeout=timeout).strip()
         OCR_AVAILABLE = True
         return text
-    except (pytesseract.TesseractNotFoundError, pytesseract.TesseractError, OSError):
+    except (pytesseract.TesseractNotFoundError, OSError):
         OCR_AVAILABLE = False
+        return ''
+    except (pytesseract.TesseractError, UnicodeDecodeError, subprocess.TimeoutExpired):
+        # An unreadable frame or localized subprocess diagnostic must not
+        # disable every subsequent OCR attempt in this session.
+        return ''
+    except RuntimeError as exc:
+        if 'timeout' not in str(exc).lower():raise
         return ''
 
 def normalize_hex(value):

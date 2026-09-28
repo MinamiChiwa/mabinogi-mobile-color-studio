@@ -72,11 +72,16 @@ class UiLanguageTests(unittest.TestCase):
         try:
             label=fake.CTkLabel(text='使用教程')
             dialog=fake.CTkToplevel();dialog.title('支持作者')
+            waiting=fake.CTkLabel(text='等待用户手动进入倒计时染色界面')
             i18n.set_language('English')
             self.assertEqual(str(label.text),'How to use Color Studio')
             self.assertEqual(str(dialog.window_title),'Support the creator')
+            self.assertEqual(str(waiting.text),'Waiting for the timed dye screen to be opened.')
             i18n.set_language('繁體中文')
             self.assertEqual(str(label.text),'使用教學')
+            self.assertEqual(str(waiting.text),'等待您手動進入限時染色畫面。')
+            i18n.set_language('简体中文')
+            self.assertEqual(str(waiting.text),'等待用户手动进入倒计时染色界面')
         finally:i18n.set_language(original)
 
     def test_selected_similar_tolerance_is_translated_without_fixed_ceiling(self):
@@ -85,6 +90,49 @@ class UiLanguageTests(unittest.TestCase):
             i18n.set_language('English')
             hint=i18n.tr('目标色差 ΔE ≤ 12 · 数值越小越接近目标')
             self.assertEqual(str(hint),'Target color difference ΔE ≤ 12 · Lower values are closer to the target')
+        finally:i18n.set_language(original)
+
+    def test_dynamic_runtime_statuses_are_translated_and_refresh_in_place(self):
+        fake=SimpleNamespace(
+            CTkLabel=fake_class('CTkLabel'),CTkButton=fake_class('CTkButton'),
+            CTkCheckBox=fake_class('CTkCheckBox'),CTkSwitch=fake_class('CTkSwitch'),
+            CTk=fake_class('CTk'),CTkToplevel=fake_class('CTkToplevel'))
+        i18n.install_widgets(fake)
+        original=i18n.language
+        try:
+            status=fake.CTkLabel(text='正在寻色 · 游戏剩余 56 秒')
+            i18n.set_language('English')
+            self.assertEqual(str(status.text),'Searching · game time left: 56 s')
+            status.configure(text='当前颜色  #AABBCC')
+            self.assertEqual(str(status.text),'Current color  #AABBCC')
+            i18n.set_language('繁體中文')
+            self.assertEqual(str(status.text),'當前顏色  #AABBCC')
+        finally:i18n.set_language(original)
+
+    def test_critical_capture_and_quality_failures_are_localized(self):
+        from atlas_service import quality_failure_message
+        timer='倒计时无法可靠识别，未开始缩放或扫描；本次入口已消耗染色剂，请检查 OCR 后再运行。'
+        gate=quality_failure_message({'thresholds':{'max_rgb_rmse':8},'regions':[
+            {'region':1,'passed':False,'heldout_rgb_rmse':12.4}]})
+        original=i18n.language
+        try:
+            i18n.set_language('English')
+            self.assertEqual(str(i18n.tr(timer)), 'The countdown could not be read reliably. No zoom or scan was started, but this dye was consumed. Check OCR before trying again.')
+            self.assertEqual(str(i18n.tr(gate)), 'Atlas reconstruction validation failed: Region 1 held-out RGB RMSE 12.40 (limit 8.00). The target colors have not been searched, so this does not mean that no matching combination exists.')
+            i18n.set_language('繁體中文')
+            self.assertEqual(str(i18n.tr(timer)), '倒數計時無法可靠辨識，未開始縮放或掃描；本次染劑已消耗，請先檢查 OCR 再重新執行。')
+            self.assertNotIn('倒计时',str(i18n.tr(timer)))
+            self.assertNotIn('大图',str(i18n.tr(gate)))
+        finally:i18n.set_language(original)
+
+    def test_progress_event_can_report_a_specific_retry_status(self):
+        from ui_progress import progress_text
+        original=i18n.language
+        try:
+            title,body=progress_text({'stage':'zoom','message':'正在复核倒计时识别'})
+            i18n.set_language('English')
+            self.assertEqual(str(i18n.tr(title)),'Detecting and zooming')
+            self.assertEqual(str(i18n.tr(body)),'Rechecking the countdown reading')
         finally:i18n.set_language(original)
 
 

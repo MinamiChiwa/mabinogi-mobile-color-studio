@@ -18,6 +18,7 @@ from unittest.mock import patch
 import numpy as np
 from PIL import Image, ImageGrab
 from platform_win import Game, Interrupted, u
+from window_target import WindowUnavailable, MultipleWindows
 from vision import recognize, green_buttons, measure_board_motion, configure_ocr
 from atlas_masks import board_texture_mask
 from workflow_budget import WorkflowBudget
@@ -233,7 +234,7 @@ def preflight(folder):
 def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=False,entry_size=None,emit=None,row_stagger=0.):
     if not np.isfinite(row_stagger) or not 0 <= row_stagger <= .1:
         raise ValueError('row_stagger must be between 0 and 0.1')
-    stop=stop or threading.Event();g=CaptureGame(stop,target=target)
+    stop=stop or threading.Event();g=None
     folder.mkdir(parents=True,exist_ok=False)
     started=time.monotonic();records=[];game_deadline=None;session_scene=None;final_image=None
     input_started=False
@@ -242,7 +243,8 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
         records.append(row)
         (folder/'log.json').write_text(json.dumps(records,indent=2),encoding='utf-8')
         if kind=='waiting':
-            print(data['message'],flush=True)
+            try:print(data['message'],flush=True)
+            except (UnicodeError,OSError,ValueError):pass  # Optional console output.
             if emit:emit('atlas_status',message=data['message'])
         if emit:
             if kind=='waiting':emit('atlas_progress',stage='waiting')
@@ -267,13 +269,32 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
         # coordinates must never bypass the OCR precondition.
         if strategy in ('grid','probe'):
             configure_ocr(strict=True)
-        if activate:g.focus()
+        next_window_notice=0.
+        while g is None:
+            if stop.is_set() or u.GetAsyncKeyState(0x78)&0x8000:
+                stop.set();raise Interrupted('已停止，鼠标已释放。')
+            try:g=CaptureGame(stop,target=target)
+            except WindowUnavailable as exc:
+                # Auto-detection may start before the game. Keep the session
+                # cancellable while waiting; an ambiguous selection needs an
+                # explicit choice and cannot resolve itself by waiting.
+                if target is not None or isinstance(exc,MultipleWindows):raise
+                if time.monotonic()>=next_window_notice:
+                    log('waiting_window',message=str(exc))
+                    if emit:emit('waiting',message=str(exc),seconds=None)
+                    next_window_notice=time.monotonic()+5
+                if stop.wait(.5):raise Interrupted('已停止，鼠标已释放。')
+        if activate:
+            try:g.focus()
+            except RuntimeError as exc:
+                message='未能自动切回游戏。请点击游戏窗口，程序会继续等待识别，无需再次开始。'
+                log('activation',message=message,detail=str(exc))
+                if emit:emit('activation',message=message)
         if entry is not None or entry_size is not None:
             log('legacy_entry_ignored',message='入口坐标参数已忽略；等待用户手动进入倒计时染色界面')
         log('waiting',message='等待用户手动进入倒计时染色界面')
         scene=None;im=None
-        wait_deadline=time.monotonic()+300
-        while time.monotonic()<wait_deadline:
+        while True:
             # Launching the batch file temporarily focuses Explorer/console.
             # Waiting is read-only, so tolerate that focus loss until the user
             # brings the game forward; input guards remain strict after ready.
@@ -287,17 +308,31 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
                 candidate=recognize(im,with_ocr=True)
                 if candidate.seconds is not None:
                     scene=candidate;break
+            except WindowUnavailable:
+                if g.manual_target is not None:raise
+                continue
             except (ValueError,RuntimeError):
                 continue
-        if scene is None:raise RuntimeError('等待染色倒计时超时，未开始采样。')
         ready_at=time.monotonic()
         initial_game_deadline=waiting_frame_at+scene.seconds
         log('ready',board=scene.board,markers=scene.markers,cards=scene.cards)
         original_at=time.monotonic()
         im=snap('original',scene)
         if strategy in ('grid','probe'):
-            timed_scene=recognize(im,with_ocr=True,previous=scene)
-            if timed_scene.seconds is None:
+            timed_scene=None
+            timer_attempts=4
+            for attempt in range(timer_attempts):
+                if attempt:
+                    if stop.wait(.25):raise Interrupted('已停止，鼠标已释放。')
+                    g.check()
+                    original_at=time.monotonic()
+                    im=snap('timer_recheck_%02d'%attempt,scene)
+                try:timed_scene=recognize(im,with_ocr=True,previous=scene)
+                except (ValueError,RuntimeError):timed_scene=None
+                if timed_scene is not None and timed_scene.seconds is not None:break
+                log('timer_recheck',attempt=attempt+1,attempts=timer_attempts,recognized=False)
+                if emit:emit('atlas_progress',stage='zoom',message='正在复核倒计时识别')
+            if timed_scene is None or timed_scene.seconds is None:
                 raise RuntimeError('倒计时无法可靠识别，未开始缩放或扫描；本次入口已消耗染色剂，请检查 OCR 后再运行。')
             scene=timed_scene;game_deadline=min(initial_game_deadline,original_at+timed_scene.seconds)
             budget=WorkflowBudget(ready_at,game_deadline)

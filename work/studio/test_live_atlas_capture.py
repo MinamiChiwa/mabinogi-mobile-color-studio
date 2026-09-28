@@ -7,16 +7,52 @@ import json
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock,patch
 import numpy as np
 from PIL import Image
 from live_atlas_capture import (CaptureGame, acquire, preflight, grid_scan_plan,
                                 coverage_fill_positions, sampling_frame_is_safe,
                                 zoom_sampling_steps)
 from platform_win import Interrupted,u
+from window_target import WindowUnavailable, MultipleWindows
 
 
 class CaptureGuardTests(unittest.TestCase):
+    def test_late_manual_entry_and_failed_activation_do_not_abort_waiting(self):
+        class Clock:
+            now=0.
+            def monotonic(self):return self.now
+        class Stop:
+            def __init__(self,clock):self.clock=clock;self.waits=iter((200.,101.,1.))
+            def is_set(self):return False
+            def wait(self,timeout):
+                try:self.clock.now+=next(self.waits)
+                except StopIteration:self.clock.now+=timeout
+                return False
+        clock=Clock();stop=Stop(clock);image=np.zeros((100,100,3),np.uint8)
+        focus=MagicMock(side_effect=RuntimeError('foreground denied'))
+        game=SimpleNamespace(
+            focus=focus,
+            geometry=lambda:(0,0,100,100),capture_waiting=lambda:image,capture=lambda:image,
+            check=lambda:None)
+        scenes=[SimpleNamespace(seconds=None),SimpleNamespace(seconds=None),
+                SimpleNamespace(seconds=100,board=(10,10,90,90),markers=[(20,50),(50,50),(80,50)],cards=[])]
+        scenes.extend(SimpleNamespace(seconds=None) for _ in range(4))
+        events=[]
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch('live_atlas_capture.CaptureGame',return_value=game), \
+             patch('live_atlas_capture.configure_ocr'), \
+             patch('live_atlas_capture.time.monotonic',side_effect=clock.monotonic), \
+             patch('live_atlas_capture.recognize',side_effect=scenes) as recognize, \
+             patch.object(u,'GetAsyncKeyState',return_value=0):
+            with self.assertRaisesRegex(RuntimeError,'倒计时无法可靠识别'):
+                acquire(Path(tmp)/'capture',strategy='grid',stop=stop,activate=True,
+                        emit=lambda kind,**data:events.append((kind,data)))
+        self.assertEqual(clock.now,302.75)
+        self.assertEqual(recognize.call_count,7)
+        focus.assert_called_once_with()
+        self.assertTrue(any(kind=='activation' for kind,_ in events))
+
     def test_sampling_zoom_stops_at_game_limit_or_clipped_frame(self):
         self.assertEqual(zoom_sampling_steps([1.02, 1.02, 1.0, 1.08], [True]*4), 2)
         self.assertEqual(zoom_sampling_steps([1.02]*4, [True]*4), 4)
@@ -286,10 +322,63 @@ class CaptureGuardTests(unittest.TestCase):
              patch('live_atlas_capture.CaptureGame',return_value=game), \
              patch('live_atlas_capture.configure_ocr'), \
              patch.object(u,'GetAsyncKeyState',return_value=0), \
-             patch('live_atlas_capture.recognize',side_effect=[scene,SimpleNamespace(seconds=None)]):
+             patch('live_atlas_capture.recognize',side_effect=[scene]+[SimpleNamespace(seconds=None)]*4) as recognize:
             with self.assertRaisesRegex(RuntimeError,'倒计时'):
                 acquire(Path(tmp)/'capture',strategy='grid')
+        self.assertEqual(recognize.call_count,5)
         game.send.assert_not_called();game.wheel.assert_not_called();game.drag.assert_not_called()
+
+    def test_transient_timer_ocr_failure_is_retried_before_any_input(self):
+        game=MagicMock();game.geometry.return_value=(0,0,100,100)
+        game.capture.return_value=game.capture_waiting.return_value=np.zeros((100,100,3),np.uint8)
+        game.check.side_effect=[None,Interrupted('stop after timer verification')]
+        scene=SimpleNamespace(board=(10,10,90,90),markers=[(20,50),(50,50),(80,50)],cards=[],seconds=119)
+        recovered=SimpleNamespace(seconds=117)
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch('live_atlas_capture.CaptureGame',return_value=game), \
+             patch('live_atlas_capture.configure_ocr'), \
+             patch.object(u,'GetAsyncKeyState',return_value=0), \
+             patch('live_atlas_capture.recognize',side_effect=[scene,SimpleNamespace(seconds=None),recovered]) as recognize:
+            with self.assertRaisesRegex(Interrupted,'stop after timer verification'):
+                acquire(Path(tmp)/'capture',strategy='grid')
+        self.assertEqual(recognize.call_count,3)
+        game.send.assert_not_called();game.wheel.assert_not_called();game.drag.assert_not_called()
+
+    def test_auto_window_detection_waits_for_game_to_open_and_f9_cancels(self):
+        stop=threading.Event();image=np.zeros((20,20,3),np.uint8);events=[]
+        game=SimpleNamespace(manual_target=None,capture_waiting=lambda:(stop.set() or None))
+        missing=WindowUnavailable('未找到游戏窗口。请启动游戏，或手动选择窗口。')
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch('live_atlas_capture.CaptureGame',side_effect=[missing,game]) as construct, \
+             patch('live_atlas_capture.configure_ocr'), \
+             patch.object(u,'GetAsyncKeyState',return_value=0):
+            with self.assertRaises(Interrupted):
+                acquire(Path(tmp)/'capture',strategy='grid',stop=stop,
+                        emit=lambda kind,**data:events.append((kind,data)))
+        self.assertEqual(construct.call_count,2)
+        self.assertTrue(any(kind=='waiting' and '未找到游戏窗口' in data['message'] for kind,data in events))
+
+    def test_ambiguous_game_windows_fail_immediately_for_manual_selection(self):
+        from pathlib import Path
+        stop=threading.Event()
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch('live_atlas_capture.CaptureGame',side_effect=MultipleWindows('发现多个游戏窗口，请手动选择目标窗口。')) as construct, \
+             patch('live_atlas_capture.configure_ocr'), \
+             patch.object(u,'GetAsyncKeyState',return_value=0):
+            with self.assertRaises(MultipleWindows):
+                acquire(Path(tmp)/'capture',strategy='grid',stop=stop)
+        construct.assert_called_once()
+
+    def test_closed_manually_selected_window_is_reported_instead_of_silently_waiting(self):
+        target=object();stop=threading.Event()
+        game=SimpleNamespace(manual_target=target,capture_waiting=MagicMock(
+            side_effect=WindowUnavailable('所选窗口已关闭，请重新选择游戏窗口。')))
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch('live_atlas_capture.CaptureGame',return_value=game), \
+             patch('live_atlas_capture.configure_ocr'), \
+             patch.object(u,'GetAsyncKeyState',return_value=0):
+            with self.assertRaisesRegex(WindowUnavailable,'所选窗口已关闭'):
+                acquire(Path(tmp)/'capture',strategy='grid',stop=stop)
 
     def test_preflight_reports_missing_ocr_without_input(self):
         g=self.game();g.until=float('inf')

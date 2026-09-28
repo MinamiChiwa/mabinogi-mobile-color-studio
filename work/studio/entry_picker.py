@@ -6,6 +6,7 @@ from PIL import ImageGrab, ImageTk
 import platform_win
 from window_target import resolve_target
 from i18n import tr
+from screen_mapping import screen_point
 
 
 def client_point(screen_point, geometry):
@@ -78,7 +79,10 @@ def pick_game_entry(root, target, callback):
                 callback(target, point, (geometry[2], geometry[3]))
 
         def point_at(event):
-            return client_point((x0+event.x, y0+event.y), geometry)
+            absolute=screen_point(event.x,event.y,
+                                 (canvas.winfo_width(),canvas.winfo_height()),
+                                 screenshot.size,(x0,y0))
+            return client_point(absolute, geometry)
 
         def preview(event):
             try:

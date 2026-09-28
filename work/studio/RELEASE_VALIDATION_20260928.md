@@ -28,4 +28,4 @@ The wheel-detent fallback behaved as intended: it accepted a small residual betw
 
 ## Release boundary
 
-The build is suitable as a usable atlas workflow with explicit HEX verification and conservative failure handling. It is not evidence that screenshot prediction alone is exact or that every random board will meet a requested ΔE. Users should judge the displayed verified HEX before applying a dye. Further color calibration remains a follow-up item.
+The build provides an atlas workflow with explicit HEX verification and conservative failure handling. These measurements do not establish that screenshot prediction is exact or that every random board will meet a requested ΔE. The displayed in-game HEX values are the final verification result; dye application remains a manual in-game action. Further color calibration remains necessary.

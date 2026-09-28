@@ -57,8 +57,19 @@ EN={
 ' · 数值越小越接近目标':' · Lower values are closer to the target',
 '正在采集本局颜色板':'Capturing this round’s color board',
 '精准命中 ':'Exact HEX hits ',
+'未找到游戏窗口。请启动游戏，或手动选择窗口。':'Game window not found. Start the game, or select its window manually.',
+'倒计时无法可靠识别，未开始缩放或扫描；本次入口已消耗染色剂，请检查 OCR 后再运行。':'The countdown could not be read reliably. No zoom or scan was started, but this dye was consumed. Check OCR before trying again.',
+'正在复核倒计时识别':'Rechecking the countdown reading',
+'正在寻色 · 游戏剩余 ':'Searching · game time left: ',
+'正在恢复最佳颜色 · 游戏剩余 ':'Restoring the best colors · game time left: ',
+'当前颜色  ':'Current color  ','最佳结果  ':'Best result  ',
+'本次结果':'Current result','最佳组合':'Best combination',
+'最大色差 ΔE ':'Maximum difference ΔE ',' / 平均 ':' / mean ',
+' · 色差越小越接近目标':' · lower is closer to the target',
+' 秒':' s',
 }
 TW={
+'等待用户手动进入倒计时染色界面':'等待您手動進入限時染色畫面。',
 '每个区域都可单独选择精准或相似。精准区优先于相似区：先比较精准命中数，再比较精准区色差，最后比较相似区色差。':'每個區域都可個別選擇精準或相似。精準區優先於相似區：先比較精準命中數，再比較精準區色差，最後比較相似區色差。',
 '每個區域都可單獨選擇精準或相似。精準區域優先：先看精準命中數，再看精準區色差，最後才看相似區色差。':'每個區域都可個別選擇精準或相似。精準區域優先：先看精準命中數，再看精準區色差，最後才看相似區色差。',
 'Tips 1 · 匹配方式':'提示 1・比對模式','Tips 2 · 等待与候选':'提示 2・等待與候選',
@@ -78,4 +89,5 @@ TW={
 '选择您偏好的平台支持后续开发，感谢您的支持。':'如需支持後續開發，請選擇適合的平台。感謝您的支持。',
 '在游戏中依次打开【图形】→【畫面設定】→【視窗模式】→【解析度】，设为 1280 × 960。':'在遊戲中依序開啟【圖形】→【畫面設定】→【視窗模式】→【解析度】，設為 1280 × 960。',
 '提交问题 / Issues':'回報問題 / Issues',
+'倒计时无法可靠识别，未开始缩放或扫描；本次入口已消耗染色剂，请检查 OCR 后再运行。':'倒數計時無法可靠辨識，未開始縮放或掃描；本次染劑已消耗，請先檢查 OCR 再重新執行。',
 }

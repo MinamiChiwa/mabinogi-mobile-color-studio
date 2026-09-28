@@ -14,7 +14,7 @@ This tool was developed with AI assistance.
 
 ## Getting started
 
-Download the complete ZIP from Releases, extract it and run `ColorStudio.exe`. Keep the adjacent `_internal` folder.
+Download `ColorStudio-v0.3.1.zip` from Releases, extract it and run `ColorStudio.exe`. Keep the adjacent `_internal` folder. OCR and English recognition data are included; Python and a separate Tesseract installation are not required. Close the previous version before upgrading, and extract into a separate folder to avoid mixing files.
 
 1. Set the game window to 1280 × 960. All three regions are enabled by default; turn off any not required. Enter HEX colors, use the color picker or screen eyedropper, and optionally add alternatives.
 2. Choose Exact HEX or Similar independently for each region. Even if only one or two regions use Exact HEX, they take priority over the remaining Similar regions: candidates rank first by exact-match count, then by maximum and average color error across all enabled regions. Exact regions require identical HEX codes.
@@ -23,9 +23,9 @@ Download the complete ZIP from Releases, extract it and run `ColorStudio.exe`. K
 
 Auto-detection accepts spacing variations in the title and recognizes the game executable. Select manually if multiple candidates exist; select again if that window closes. Borderless fullscreen is supported. Keep the game in the foreground and its geometry unchanged during active searching.
 
-The 60-second figure is a performance reference, not a hard cutoff. As long as the game timer allows, the tool continues its normal workflow. Screenshot predictions are provisional; game HEX verification is the final check. You decide whether to apply the dye.
+The 60-second figure is a performance reference, not a hard cutoff. As long as the game timer allows, the tool continues its normal workflow. Screenshot predictions are provisional; game HEX verification is the final check. Apply the dye only after reviewing the verified game HEX.
 
-Exact mode enlarges nearby color islands around the pointer to expose small pure-color areas. Rotation pivots around the initial right-button position; zoom pivots around the pointer. Moving or resizing the game window during a search stops it; press F8 to detect the new layout.
+Exact and Similar modes both search the current stitched board and calculate rotation, zoom and translation for each candidate. Avoid moving the mouse during automatic operation. Moving or resizing the game window during a search stops it; press F8 to detect the new layout.
 
 Choose Simplified Chinese, Traditional Chinese or English in the upper-right selector. The main window, overlay and open information dialogs switch immediately without restarting. The main layout adapts from three columns to two or one; the help button opens the tutorial, and Support offers Afdian and Patreon.
 
@@ -34,9 +34,9 @@ Choose Simplified Chinese, Traditional Chinese or English in the upper-right sel
 - Click the ordered color overview to open the complete allowed-color atlas.
 - Use +/− to zoom, drag to pan, and hover to inspect individual HEX values without pagination.
 - The last 50 results retain the three colors, per-region ΔE, maximum and mean differences.
-- Automatic verification and apply is off by default. Exact mode disables the tolerance slider.
-- Settings, results and diagnostic screenshots are stored locally in the adjacent `data` folder.
-- The tool keeps the 20 most recent search sessions. Sessions older than 30 days or beyond the 512 MiB total budget are cleaned up before a new run; active and recently modified sessions are protected.
+- The normal search workflow verifies the in-game HEX values and never applies dye automatically. Exact mode disables the tolerance slider.
+- Settings, results and diagnostic screenshots are stored in the adjacent `data` folder by default. If the install directory is not writable, the tool uses `%LOCALAPPDATA%\MabinogiMobileColorStudio\data`, then the system temporary directory as a last resort.
+- Old-session cleanup runs in the background when a new run starts. The latest 20 sessions and sessions updated within the last five minutes are protected. Other sessions may be removed after 30 days or when total session storage exceeds 512 MiB. Protected data can therefore keep the total above 512 MiB. Data in the system temporary directory may be removed by the operating system.
 
 ## Development
 
@@ -58,10 +58,14 @@ Output: `outputs/release/ColorStudio`. Previous release data is backed up locall
 
 ## Validation
 
-A timed search cannot guarantee an exact match or a global optimum. Actual game testing does not cover every DPI and monitor configuration.
+A timed search cannot guarantee an exact match, satisfaction of every tolerance or a global optimum. The layout calculation matrix covers 1024×768, 1920×1080, 3840×2160 and 5120×2880 at 100%, 125%, 150%, 200% and 250% DPI. Separate tests cover physical-pixel coordinate mapping and monitors with negative desktop coordinates. These checks do not establish real-game validation for every 4K, multi-monitor or mixed-DPI configuration.
+
+The main window, overlay, tutorial, support dialog and runtime messages switch between all three languages immediately. OCR uses fixed `eng` data independently of the interface language and handles non-UTF-8 output from Windows installation paths. Tool windows size to the monitor work area. On a 4K display, keep the game in 1280 × 960 windowed mode; the desktop resolution does not need to change.
 
 After starting, the tool waits for the dye board and timer until F9 cancels. The 60-second figure is a performance reference, not a hard stop: the tool continues to finish a normal build and search even when they take longer. Input stops only when the OCR game countdown reaches its safety deadline, F9 is pressed, focus or window geometry changes, or recognition becomes unreliable. If Windows prevents game activation, activate the game window manually; restarting is unnecessary. Hotkey registration status appears at the bottom. Close other tool copies or use buttons if a key is unavailable.
 
-The main window adapts between three, two and one card columns, and debounces layout work while resizing. Enabled cards have a teal border and background; disabled cards show an explicit label. The overlay can be moved, collapsed and made transparent while showing live progress. Wheel input is disabled throughout the tool UI; click or drag to adjust values. During the initial wait, the game may be returned to the foreground after focus is changed briefly. Interruptions and errors display a dialog.
+The color cards retain fixed dimensions and reflow only when crossing a column breakpoint. Enabled cards have a teal border and background; disabled cards show an explicit label. The overlay can be moved, collapsed and adjusted for opacity while showing the current step and elapsed time. Long content scrolls while the title and F9 stop button remain visible. Click or drag to adjust color values, preventing accidental wheel changes. During the initial wait, the game may be returned to the foreground after focus is changed briefly. Interruptions and errors display a dialog.
 
-Screenshot color predictions can still differ from the game’s actual HEX values in this version. The tool reads the in-game HEX after positioning; if verification misses the target, it leaves the result for review and never applies it automatically.
+Screenshot color predictions can still differ from actual in-game HEX values. The tool reads and displays those values after positioning; applying the dye remains a manual action in the game. See the [0.3.1 release notes](RELEASE_NOTES_0.3.1.md) and [0.3.1 validation report](work/studio/RELEASE_VALIDATION_0.3.1.md).
+
+In a source environment, `run_preflight.bat` performs a read-only check of game capture, physical client size and DPI. Protection checks are simulated and send no game input. This script requires the source environment and is not a prerequisite for the release ZIP.
