@@ -33,6 +33,7 @@ from ui_typography import FONT_FAMILY,TITLE_FONT,SECTION_FONT,BODY_FONT,SMALL_FO
 from resize_rendering import TopLevelResizeRedrawOptimization
 from display_geometry import logical_size,work_area
 
+APP_VERSION='0.3.2'
 CARD_WIDTH=344
 CARD_HEIGHT=400
 CARD_GAP=6
@@ -237,7 +238,7 @@ class Card(ct.CTkFrame):
 
 class App(ct.CTk):
     def __init__(self):
-        super().__init__();self.title(tr('染色工坊 · 瑪奇 Mobile'));self.geometry('1120x800');self.minsize(MIN_WINDOW_WIDTH,560);self.configure(fg_color=BG)
+        super().__init__();self.title(f"{tr('染色工坊 · 瑪奇 Mobile')}  v{APP_VERSION}");self.geometry('1120x800');self.minsize(MIN_WINDOW_WIDTH,560);self.configure(fg_color=BG)
         self._resize_redraw=TopLevelResizeRedrawOptimization()
         self._resize_redraw.disable_for(self.winfo_id())
         self.after(100,self.fit_screen)
@@ -254,7 +255,7 @@ class App(ct.CTk):
         self.header=header;header.grid_columnconfigure(0,weight=1)
         brand=ct.CTkFrame(header,fg_color='transparent');self.brand=brand;brand.grid(row=0,column=0,sticky='w')
         ct.CTkLabel(brand,text='染色工坊',font=TITLE_FONT,text_color=INK).pack(anchor='w')
-        ct.CTkLabel(brand,text='瑪奇 Mobile  /  by 南千和',font=SMALL_FONT,text_color=MUTED).pack(anchor='w')
+        ct.CTkLabel(brand,text=f'瑪奇 Mobile  /  by 南千和  ·  v{APP_VERSION}',font=SMALL_FONT,text_color=MUTED).pack(anchor='w')
         toolbar=ct.CTkFrame(self.page,fg_color='transparent');toolbar.grid(row=1,column=0,padx=BODY_SIDE_PADDING,pady=(0,8),sticky='ew')
         self.toolbar=toolbar;toolbar.grid_columnconfigure(0,weight=1)
         self.window_button=ct.CTkButton(toolbar,text='游戏窗口 · 自动检测',width=250,height=32,font=BODY_FONT,anchor='w',fg_color='#28364A',command=self.pick_window)
@@ -370,6 +371,7 @@ class App(ct.CTk):
         self.apply_topbar_layout(columns==1)
         self.apply_control_layout(columns==1)
     def refresh_language(self):
+        self.title(f"{tr('染色工坊 · 瑪奇 Mobile')}  v{APP_VERSION}")
         self.refresh_window_label()
     def show_support(self):self._show_dialog('support',support_dialog)
     def show_tutorial(self):self._show_dialog('tutorial',tutorial_dialog)

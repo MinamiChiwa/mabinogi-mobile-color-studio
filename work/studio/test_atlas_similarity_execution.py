@@ -68,6 +68,23 @@ class SimilarityExecutionTests(unittest.TestCase):
                 else:self.row['angle']=0;self.game.tick=0
                 with self.assertRaisesRegex(RuntimeError,'stalled'):self.run_row()
                 self.assertEqual(self.game.actions,[kind]);self.assertEqual(self.game.releases,1)
+    def test_subpixel_final_rotation_accepts_identity_registration(self):
+        # A rounded screen path may produce an identity registration for the
+        # final few pixels. The bounded micro-rotation path carries the
+        # commanded pose forward so verification can still finish.
+        original=self.game.rotate
+        def rotate(angle,anchor):
+            if abs(angle)<1:
+                self.game.actions.append('rotate')
+                return
+            original(angle,anchor)
+        self.game.rotate=rotate
+        self.row.update(dx=0,dy=0,angle=.4,scale=1)
+        result=self.run_row()
+        self.assertTrue(result['verified'])
+        self.assertEqual(self.game.actions,['rotate'])
+        self.assertLessEqual(max(result['marker_errors']),1)
+
     def test_wrong_pivot_cannot_be_hidden_by_center_displacement(self):
         rotate=self.game.rotate
         self.game.rotate=lambda angle,anchor:rotate(angle,np.array(anchor)+[0,40])

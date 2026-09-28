@@ -34,6 +34,11 @@ def quality_failure_message(gate):
     return ('大图重建校验未通过'+suffix+'。尚未搜索目标组合，不能据此判断没有满足目标的方案。')
 
 
+def _is_safety_interrupt(exc):
+    """Keep explicit user/window safety stops on the interrupt path."""
+    return exc.__class__.__name__ in ('Interrupted','InterruptedError')
+
+
 class AtlasService:
     def __init__(self, callbacks):
         self.callbacks=callbacks
@@ -41,8 +46,22 @@ class AtlasService:
     def run(self, owner, rules, **context):
         emit=owner.event
         emit('atlas_status',message='正在采集本局颜色板。')
-        captured=self.callbacks.acquire(owner,rules,**context)
-        report=self.callbacks.build(captured,rules,**context)
+        try:
+            captured=self.callbacks.acquire(owner,rules,**context)
+        except Exception as exc:
+            if _is_safety_interrupt(exc):raise
+            emit('atlas_recovery_unavailable',
+                 message='颜色板采集未能完成，已停止自动移动并保留游戏当前画面。',
+                 detail=str(exc))
+            return None
+        try:
+            report=self.callbacks.build(captured,rules,**context)
+        except Exception as exc:
+            if _is_safety_interrupt(exc):raise
+            emit('atlas_recovery_unavailable',
+                 message='颜色板校验未能完成，已停止自动移动并保留游戏当前画面。',
+                 detail=str(exc))
+            return None
         gate=report.get('quality_gate',{})
         if not gate.get('passed',False):
             emit('atlas_invalidated',reason='atlas_quality_failed',search_performed=False,
@@ -82,8 +101,12 @@ class AtlasService:
         markers=(batch.context.markers if batch is not None else report.get('markers'))
         available=[]
         for row in rows:
-            budget=(reposition_budget(row,time.monotonic(),deadline,board,markers=markers)
-                    if deadline is not None and board else {'allowed':False})
+            try:
+                budget=(reposition_budget(row,time.monotonic(),deadline,board,markers=markers)
+                        if deadline is not None and board else {'allowed':False})
+            except Exception as exc:
+                emit('atlas_candidate_unavailable',candidate_id=row.get('id'),detail=str(exc))
+                budget={'allowed':False,'reason':'invalid_candidate'}
             if budget['allowed']:available.append((row,budget))
         default,default_budget=available[0] if available else (rows[0],{'allowed':False})
         if not default_budget['allowed']:
@@ -94,36 +117,95 @@ class AtlasService:
              compromise_only=compromise_only,
              message=('未找到满足所设目标的组合，正在定位最接近的妥协方案。'
                       if compromise_only else None))
-        result=self.callbacks.default(owner,report,default,rules,**context)
+        try:
+            result=self.callbacks.default(owner,report,default,rules,**context)
+        except Exception as exc:
+            if _is_safety_interrupt(exc):raise
+            # An input or verification fault after the session has started is
+            # a recoverable execution outcome.  The callback has already
+            # released the mouse; keep the current game frame and finish the
+            # session without turning the fault into the global error dialog.
+            if batch is not None:batch.invalidate()
+            emit('atlas_recovery_unavailable',
+                 message='当前动作未能可靠复核，已停止自动移动并保留游戏当前画面。',
+                 detail=str(exc), candidate_id=default.get('id'))
+            return None
+        if not isinstance(result,dict):
+            if batch is not None:batch.invalidate()
+            emit('atlas_recovery_unavailable',
+                 message='自动方案未返回可验证结果，已停止自动移动并保留游戏当前画面。',
+                 detail='default callback returned no result', candidate_id=default.get('id'))
+            return None
         result=dict(result, predicted_accepted=bool(default.get('accepted')),
                     compromise=compromise_only or not bool(default.get('accepted')),
                     candidate_id=default['id'])
+        # Recovery is terminal unless the repeated frame proves that the
+        # game reached a native zoom stop.  In that bounded case the measured
+        # pose is still trustworthy, so the normal alternate-candidate path
+        # may rebase from it without repeating the failed wheel input.
+        if ((result.get('recovered') or result.get('positioning_complete') is False)
+                and not result.get('pose_reliable')):
+            if batch is not None:batch.invalidate()
+            return result
         if not result.get('verified') or result.get('actual_pose') is None:
-            raise RuntimeError('Candidate execution did not return measured pose and HEX verification')
+            if batch is not None:batch.invalidate()
+            emit('atlas_recovery_unavailable',
+                 message='自动方案未能完成位置复核，已停止自动移动并保留当前游戏画面。',
+                 detail='missing verified pose', candidate_id=default.get('id'))
+            return result if result.get('verified') else None
         attempted={default['id']}
         # A successful geometric move is not a successful color match. Try
         # other predicted candidates only after a complete, measured HEX read.
         # Input/registration/OCR failures propagate and never trigger a retry.
-        while result.get('verified') and not result.get('accepted') and default.get('accepted'):
+        while (result.get('verified') and not result.get('accepted') and
+               (default.get('accepted') or result.get('recovered'))):
             emit('atlas_candidate_failed',**result)
             if result.get('actual_pose') is None:break
             next_move=None
             for candidate in rows:
                 if candidate['id'] in attempted:continue
                 if candidate.get('exact_matches',0)<result.get('exact_matches',0):continue
-                move=relative_candidate(candidate,result['actual_pose'],board)
-                budget=reposition_budget(move,time.monotonic(),deadline,board,markers=markers)
+                try:
+                    move=relative_candidate(candidate,result['actual_pose'],board)
+                    budget=reposition_budget(move,time.monotonic(),deadline,board,markers=markers)
+                except Exception as exc:
+                    emit('atlas_candidate_unavailable',candidate_id=candidate.get('id'),detail=str(exc))
+                    continue
                 if budget['allowed']:
                     next_move=move;default=candidate;break
             if next_move is None:break
             attempted.add(default['id'])
             emit('atlas_status',message='当前候选实测未达标，正在定位并复核下一候选。')
-            result=self.callbacks.choice(owner,report,next_move,rules,**context)
+            try:
+                result=self.callbacks.choice(owner,report,next_move,rules,**context)
+            except Exception as exc:
+                if _is_safety_interrupt(exc):raise
+                emit('atlas_recovery_unavailable',
+                     message='备用方案未能可靠复核，已保留当前游戏画面。',
+                     detail=str(exc), candidate_id=default.get('id'))
+                if batch is not None:batch.invalidate()
+                return result
+            if not isinstance(result,dict):
+                if batch is not None:batch.invalidate()
+                emit('atlas_recovery_unavailable',
+                     message='备用方案未返回可验证结果，已保留当前游戏画面。',
+                     detail='choice callback returned no result', candidate_id=default.get('id'))
+                return result
             result=dict(result, predicted_accepted=bool(default.get('accepted')),
                         compromise=not bool(default.get('accepted')),
                         candidate_id=default['id'])
+            if result.get('recovered') and not result.get('pose_reliable'):
+                if batch is not None:batch.invalidate()
+                return result
             if not result.get('verified') or result.get('actual_pose') is None:
-                raise RuntimeError('Candidate execution did not return measured pose and HEX verification')
+                if batch is not None:batch.invalidate()
+                emit('atlas_recovery_unavailable',
+                     message='备用方案未能完成位置复核，已保留当前游戏画面。',
+                     detail='missing verified pose', candidate_id=default.get('id'))
+                return result if result.get('verified') else None
+        if result.get('recovered'):
+            if batch is not None:batch.invalidate()
+            return result
         if result.get('verified') and not result.get('accepted') and default.get('accepted'):
             if batch is not None:batch.invalidate()
             emit('atlas_verified',**result)
@@ -133,11 +215,18 @@ class AtlasService:
         # walking through successively worse predictions.
         result=dict(result,compromise=not bool(result.get('accepted')))
         emit('atlas_default_verified',**result)
-        if self.callbacks.select:
-            selected=self.callbacks.select(owner,batch_id,deadline,
-                                           **{k:v for k,v in context.items() if k!='selection_deadline'})
-        else:
-            selected=owner.wait_candidate_choice(batch_id,deadline)
+        try:
+            if self.callbacks.select:
+                selected=self.callbacks.select(owner,batch_id,deadline,
+                                               **{k:v for k,v in context.items() if k!='selection_deadline'})
+            else:
+                selected=owner.wait_candidate_choice(batch_id,deadline)
+        except Exception as exc:
+            if _is_safety_interrupt(exc):raise
+            if batch is not None:batch.invalidate()
+            emit('atlas_recovery_unavailable',
+                 message='候选选择未能完成，已保持自动方案。',detail=str(exc))
+            return result
         if selected is None or selected==default['id']:
             if getattr(owner,'stop',None) is not None and owner.stop.is_set():
                 if batch is not None:batch.invalidate()
@@ -157,9 +246,15 @@ class AtlasService:
             emit('atlas_choice_rejected',candidate_id=selected,default_id=default['id'],
                  message='缺少当前姿态测量，未执行切换，保持当前颜色。')
             return result
-        move=relative_candidate(candidate,result['actual_pose'],board)
-        budget=(reposition_budget(move,time.monotonic(),deadline,board,markers=markers)
-                if board else {'allowed':False})
+        try:
+            move=relative_candidate(candidate,result['actual_pose'],board)
+            budget=(reposition_budget(move,time.monotonic(),deadline,board,markers=markers)
+                    if board else {'allowed':False})
+        except Exception as exc:
+            if batch is not None:batch.invalidate()
+            emit('atlas_choice_rejected',candidate_id=selected,default_id=default['id'],
+                 message='所选方案无法生成安全操作，保持自动最佳方案。',detail=str(exc))
+            return result
         if not budget['allowed']:
             if batch is not None:batch.invalidate()
             emit('atlas_choice_rejected',candidate_id=selected,default_id=default['id'],
@@ -170,10 +265,26 @@ class AtlasService:
                  exact_matches=candidate.get('exact_matches'),
                  message='剩余时间不足，保持自动最佳方案。',budget=budget)
             return result
-        choice=self.callbacks.choice(owner,report,move,rules,**context)
+        try:
+            choice=self.callbacks.choice(owner,report,move,rules,**context)
+        except Exception as exc:
+            if _is_safety_interrupt(exc):raise
+            if batch is not None:batch.invalidate()
+            emit('atlas_recovery_unavailable',
+                 message='所选备用方案未能可靠复核，已保留自动方案。',
+                 detail=str(exc), candidate_id=default.get('id'))
+            return result
+        if not isinstance(choice,dict):
+            emit('atlas_recovery_unavailable',
+                 message='所选方案未返回可验证结果，已保留自动方案。',
+                 detail='choice callback returned no result', candidate_id=candidate.get('id'))
+            return result
         if batch is not None:batch.invalidate()
         if not choice.get('verified') or choice.get('actual_pose') is None:
-            raise RuntimeError('Candidate execution did not return measured pose and HEX verification')
+            emit('atlas_recovery_unavailable',
+                 message='所选方案未能完成位置复核，已保留自动方案。',
+                 detail='missing verified pose', candidate_id=candidate.get('id'))
+            return result
         choice=dict(choice, predicted_accepted=bool(candidate.get('accepted')),
                     compromise=not bool(candidate.get('accepted')),
                     candidate_id=candidate['id'])

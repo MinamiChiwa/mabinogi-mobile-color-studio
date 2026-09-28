@@ -14,7 +14,7 @@
 
 ## 使用
 
-从 Releases 下载 `ColorStudio-v0.3.1.zip`，解压后运行 `ColorStudio.exe`，保留旁边的 `_internal` 文件夹。正式包包含 OCR 及英文识别数据，无需安装 Python 或另行安装 Tesseract。升级时请先退出旧版本，并将新版本解压到独立文件夹，避免混用不同版本的文件。
+从 Releases 下载 `ColorStudio-v0.3.2.zip`，解压后运行 `ColorStudio.exe`，保留旁边的 `_internal` 文件夹。正式包包含 OCR 及英文识别数据，无需安装 Python 或另行安装 Tesseract。升级时请先退出旧版本，并将新版本解压到独立文件夹，避免混用不同版本的文件。
 
 1. 在游戏中将窗口设为 1280 × 960。程序默认启用三个区域；不需要匹配的区域可手动关闭。输入 HEX 或使用选色器、屏幕吸管，也可以填写替代颜色。
 2. 每个区域可独立选择精准 HEX 或相似颜色。即使只将一个或两个区域设为精准 HEX，也优先于其余相似区域：先比较精准命中区域数；命中数相同时，再比较所有启用区域的最大色差和平均色差。精准区域必须完全命中 HEX。
@@ -52,7 +52,7 @@ python -m unittest discover -s work/studio -p "test_*.py"
 
 源码环境可运行 `run_studio.bat`，它使用项目 `.venv`。OCR 也会识别项目内的 `outputs/dependencies/ocr`。`run_preflight.bat` 提供只读预检并将报告写入独立时间戳目录；该脚本需要源码环境，不是正式压缩包的必需步骤。正式入口使用本局拼图、候选定位和游戏 HEX 复核流程。
 
-当前版本的截图颜色预测仍可能与游戏实际 HEX 存在偏差。工具在移动完成后读取并显示游戏 HEX，最终套用须在游戏内手动完成。当前版本说明见 [0.3.1 更新内容](RELEASE_NOTES_0.3.1.md)，验证范围见 [0.3.1 验证报告](work/studio/RELEASE_VALIDATION_0.3.1.md)。
+当前版本的截图颜色预测仍可能与游戏实际 HEX 存在偏差。工具在移动完成后读取并显示游戏 HEX，最终套用须在游戏内手动完成。当前版本说明见 [0.3.2 更新内容](RELEASE_NOTES_0.3.2.md)，验证范围见 [0.3.2 验证报告](work/studio/RELEASE_VALIDATION_0.3.2.md)。
 
 ```powershell
 python work/studio/build_release.py

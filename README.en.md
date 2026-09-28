@@ -14,7 +14,7 @@ This tool was developed with AI assistance.
 
 ## Getting started
 
-Download `ColorStudio-v0.3.1.zip` from Releases, extract it and run `ColorStudio.exe`. Keep the adjacent `_internal` folder. OCR and English recognition data are included; Python and a separate Tesseract installation are not required. Close the previous version before upgrading, and extract into a separate folder to avoid mixing files.
+Download `ColorStudio-v0.3.2.zip` from Releases, extract it and run `ColorStudio.exe`. Keep the adjacent `_internal` folder. OCR and English recognition data are included; Python and a separate Tesseract installation are not required. Close the previous version before upgrading, and extract into a separate folder to avoid mixing files.
 
 1. Set the game window to 1280 × 960. All three regions are enabled by default; turn off any not required. Enter HEX colors, use the color picker or screen eyedropper, and optionally add alternatives.
 2. Choose Exact HEX or Similar independently for each region. Even if only one or two regions use Exact HEX, they take priority over the remaining Similar regions: candidates rank first by exact-match count, then by maximum and average color error across all enabled regions. Exact regions require identical HEX codes.
@@ -66,6 +66,6 @@ After starting, keep the game in the foreground and wait on the timed dye screen
 
 The color cards retain fixed dimensions and reflow only when crossing a column breakpoint. Enabled cards have a teal border and background; disabled cards show an explicit label. The overlay can be moved, collapsed and adjusted for opacity while showing the current step and elapsed time. Long content scrolls while the title and F9 stop button remain visible. Click or drag to adjust color values, preventing accidental wheel changes. During the initial wait, the game may be returned to the foreground after focus is changed briefly. Interruptions and errors display a dialog.
 
-Screenshot color predictions can still differ from actual in-game HEX values. The tool reads and displays those values after positioning; applying the dye remains a manual action in the game. See the [0.3.1 release notes](RELEASE_NOTES_0.3.1.md) and [0.3.1 validation report](work/studio/RELEASE_VALIDATION_0.3.1.md).
+Screenshot color predictions can still differ from actual in-game HEX values. The tool reads and displays those values after positioning; applying the dye remains a manual action in the game. See the [0.3.2 release notes](RELEASE_NOTES_0.3.2.md) and [0.3.2 validation report](work/studio/RELEASE_VALIDATION_0.3.2.md).
 
 In a source environment, `run_preflight.bat` performs a read-only check of game capture, physical client size and DPI. Protection checks are simulated and send no game input. This script requires the source environment and is not a prerequisite for the release ZIP.

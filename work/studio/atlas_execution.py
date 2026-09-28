@@ -15,6 +15,11 @@ from atlas_pose import candidate_pose, homogeneous, marker_errors, pose_fields, 
 from planner import decompose_gestures
 
 
+# Below this screen-space marker displacement, integer mouse coordinates cannot
+# provide a reliable feature-registration measurement.
+MICRO_ROTATION_PIXELS = 3.0
+
+
 class CandidateExpired(RuntimeError):
     pass
 
@@ -319,6 +324,75 @@ def verify_result(candidate,actual,rules):
                 exact_matches=exact_matches,exact_total=len(exact_regions))
 
 
+def _recover_current_result(adapter, candidate, rules, actual, markers, target,
+                            emit, reason):
+    """Read the colour currently under the picker without sending input.
+
+    A live action can fail after the game has accepted part of the gesture.
+    Retrying from an unverified pose is unsafe, so the recovery path only
+    captures and performs the existing two-frame HEX check.  The result is
+    deliberately marked incomplete; callers may display it and offer a new
+    candidate, but it can never be presented as a successful positioning.
+    """
+    if candidate is None or not getattr(adapter, 'recovery_enabled', False):
+        return None
+    try:
+        adapter.check()
+        frame = adapter.capture()
+        first = adapter.read_codes(frame)
+        adapter.pause(.2)
+        second_frame = adapter.capture()
+        second = adapter.read_codes(second_frame)
+        adapter.check()
+        if any(r['enabled'] and (first[i] is None or second[i] is None or
+                                 first[i] != second[i]) for i,r in enumerate(rules)):
+            return None
+        result = verify_result(candidate, second, rules)
+        # A repeated frame after a wheel command is a known, bounded native
+        # zoom stop.  The pose accumulated before that command remains valid,
+        # so the service may safely rebase one of the other measured
+        # candidates from it.  Other failures leave the pose untrusted.
+        pose_reliable = actual is not None and 'native zoom limit' in str(reason).lower()
+        pose = actual[:2].tolist() if pose_reliable else None
+        errors = (marker_errors(target, actual, markers).tolist()
+                  if actual is not None else None)
+        # A recovery is a safe observation, not proof that the requested pose
+        # was reached.  Keep it available for the UI and manual confirmation.
+        observed_accepted=bool(result.get('accepted'))
+        result.update(actual_pose=pose, marker_errors=errors, verified=True,
+                      # The colour read is reliable, but the requested pose
+                      # was not confirmed.  Never let this path count as a
+                      # successful automatic candidate.
+                      accepted=False, observed_accepted=observed_accepted,
+                      pose_reliable=pose_reliable,
+                      positioning_complete=False, recovered=True,
+                      recovery_reason=str(reason))
+        # Keep the event self-contained.  The overlay can therefore render a
+        # recovery even when the error happened before a complete positioning
+        # result was assembled.
+        emit('atlas_recovery', dict(
+            candidate_id=candidate['id'], reason=str(reason),
+            actual_pose=pose, marker_errors=errors,
+            predicted_colors=result.get('predicted_colors', [None] * 3),
+            predicted_deltas=result.get('predicted_deltas', [None] * 3),
+            actual_colors=result.get('actual_colors', [None] * 3),
+            actual_deltas=result.get('actual_deltas', [None] * 3),
+            prediction_errors=result.get('prediction_errors', [None] * 3),
+            maximum=result.get('maximum'), average=result.get('average'),
+            accepted=False, observed_accepted=observed_accepted, verified=True,
+            recovered=True, pose_reliable=pose_reliable,
+            positioning_complete=False))
+        adapter.verified_frame = second_frame
+        return result
+    except Exception as exc:
+        # F9, focus loss, geometry changes and the game deadline are safety
+        # interrupts.  Do not convert one that arrives during read-only
+        # recovery into an ordinary execution fault.
+        if exc.__class__.__name__ in ('Interrupted','InterruptedError'):
+            raise
+        return None
+
+
 def execute_candidate(adapter,batch,batch_id,candidate_id,reference,rules,emit=lambda *args:None,
                       clock=time.monotonic,max_steps=80,reservation='legacy',
                       verified_kind='atlas_verified'):
@@ -327,6 +401,7 @@ def execute_candidate(adapter,batch,batch_id,candidate_id,reference,rules,emit=l
     Reference is the image used to publish this batch, not an old atlas image.
     Once claimed, failures invalidate the batch permanently; never blind retry.
     """
+    candidate=None; actual=None; target=None; markers=None
     try:
         adapter.check()
         context=adapter.context()
@@ -414,12 +489,48 @@ def execute_candidate(adapter,batch,batch_id,candidate_id,reference,rules,emit=l
                 if np.linalg.norm(measured[:2,:2]@anchor+measured[:2,2]-anchor)>3:
                     raise RuntimeError('Gesture pivot moved unexpectedly')
                 if kind=='rotate':
-                    if (response['angle']*command<=0 or abs(response['angle'])<.025 or
-                            abs(response['angle'])>abs(command)*2+.3 or abs(response['scale']-1)>.003):
-                        raise RuntimeError('Unexpected or stalled rotation')
+                    stalled = (response['angle']*command<=0 or abs(response['angle'])<.025 or
+                               abs(response['angle'])>abs(command)*2+.3 or abs(response['scale']-1)>.003)
+                    if stalled:
+                        # A final arc can be smaller than one screen pixel after
+                        # integer coordinate rounding. Accept only this bounded
+                        # identity measurement and carry the commanded pose
+                        # forward; larger stalled rotations remain failures.
+                        marker_pixels=abs(np.radians(command))*radius
+                        identity=(abs(response['angle'])<.025 and
+                                  abs(response['scale']-1)<=.003)
+                        if not (identity and marker_pixels<=MICRO_ROTATION_PIXELS):
+                            raise RuntimeError('Unexpected or stalled rotation')
+                        theta=np.radians(command)
+                        pivot=np.asarray(gestures['rotation_anchor'],float)-[l,t]
+                        matrix=np.array([[np.cos(theta),-np.sin(theta)],
+                                         [np.sin(theta),np.cos(theta)]])
+                        measured=homogeneous(np.column_stack((matrix,pivot-matrix@pivot)))
+                        response=pose_fields(measured,batch.context.board)
+                        emit('atlas_micro_rotation',dict(step=step+1,command=float(command),
+                                                         marker_pixels=float(marker_pixels)))
                 elif (np.log(response['scale'])*command<=0 or abs(response['scale']-1)<.0005 or
                         abs(response['angle'])>.25 or abs(np.log(response['scale']))>abs(command)*.15):
-                    raise RuntimeError('Unexpected or stalled wheel response')
+                    # A wheel burst can reach the game's native zoom stop.
+                    # Give the final frame one longer, read-only observation
+                    # before treating it as a failed input.  If it remains
+                    # identical, the recovery path records the current colour
+                    # instead of raising a user-facing workflow error.
+                    if (abs(response['angle']) <= .25 and
+                            abs(response['scale']-1) < .0005):
+                        adapter.pause(.35)
+                        retry_after=adapter.capture()
+                        retry_registration=_measured_motion(adapter,after,retry_after,
+                                                           emit,'positioning_recheck',step+1)
+                        retry_measured=homogeneous(retry_registration['matrix'])
+                        retry_response=pose_fields(retry_measured,batch.context.board)
+                        if (abs(retry_response['angle']) <= .25 and
+                                abs(retry_response['scale']-1) < .0005):
+                            raise RuntimeError('Unexpected or stalled wheel response (native zoom limit)')
+                        measured=retry_measured
+                        response=retry_response
+                    else:
+                        raise RuntimeError('Unexpected or stalled wheel response')
                 if kind=='wheel':zoom_tick=abs(np.log(response['scale'])/command)
             actual=measured@actual;before=after
             emit('atlas_positioning',dict(step=step+1,action=kind,command=np.asarray(command).tolist(),
@@ -455,7 +566,10 @@ def execute_candidate(adapter,batch,batch_id,candidate_id,reference,rules,emit=l
         else:batch.actual_pose=actual
         if verified_kind:emit(verified_kind,result)
         return result
-    except Exception:
+    except Exception as exc:
+        recovered=_recover_current_result(adapter,candidate,rules,actual,markers,target,emit,exc)
+        if recovered is not None:
+            return recovered
         batch.invalidate()
         raise
     finally:

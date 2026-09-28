@@ -159,7 +159,14 @@ class Runner:
             except Interrupted as e:
                 self.event('interrupted',message=str(e))
             except Exception as e:
-                self.event('error',message=str(e),detail=traceback.format_exc())
+                # Once atlas dyeing has started, ordinary capture, planning,
+                # registration and verification faults must not surface as a
+                # global error dialog.  The atlas service has already released
+                # the mouse; leave the current game frame untouched and let
+                # the overlay explain the safe recovery state.
+                self.event('atlas_recovery_unavailable',
+                           message='自动染色未能可靠完成，已停止自动移动并保留游戏当前画面。',
+                           detail=traceback.format_exc())
             finally:
                 # Atlas already retains screenshots. Preserve the much smaller
                 # event trail too, so a rejected map is not mistaken for an

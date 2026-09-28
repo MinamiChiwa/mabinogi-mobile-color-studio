@@ -73,5 +73,15 @@ class AtlasEndToEndTests(unittest.TestCase):
         kinds=[kind for kind,_ in events]
         self.assertLess(kinds.index('atlas_default_verified'),kinds.index('atlas_verified'))
 
+    def test_runner_converts_unexpected_atlas_fault_to_recovery_state(self):
+        def broken(owner,rules,**ctx):raise RuntimeError('unexpected registration')
+        events=[]
+        with tempfile.TemporaryDirectory() as folder:
+            runner=Runner(lambda kind,data:events.append((kind,data)),folder,atlas_runner=broken)
+            self.assertIsNone(runner.launch([],strategy='atlas'))
+        kinds=[kind for kind,_ in events]
+        self.assertIn('atlas_recovery_unavailable',kinds)
+        self.assertNotIn('error',kinds)
+
 
 if __name__=='__main__':unittest.main()

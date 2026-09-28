@@ -48,6 +48,10 @@ def build_current(capture, rules, **_context):
                     tuple(map(tuple,scene.markers)))
     batch=CandidateBatch(rows,context,deadline)
     adapter=Adapter(game,scene,context.session)
+    # Failed input is handled as a read-only recovery observation.  The
+    # executor never retries from an unverified pose and never reports that
+    # observation as a successful candidate.
+    adapter.recovery_enabled=True
     report.update(batch=batch,batch_id=batch.id,board=tuple(scene.board),
                   markers=tuple(map(tuple,scene.markers)),
                   selection_deadline=deadline,adapter=adapter,

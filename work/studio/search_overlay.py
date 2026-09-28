@@ -255,6 +255,20 @@ class SearchOverlay(ct.CTkToplevel):
                   f"实测 {data['actual_colors'][i]} · ΔE {data['actual_deltas'][i]:.2f}")
             ct.CTkLabel(self.results,text=tr(text),justify='left',anchor='w').pack(fill='x',padx=8,pady=8)
         ct.CTkLabel(self.results,text=tr(f"最大 {data['maximum']:.2f} / 平均 {data['average']:.2f}")).pack(pady=8)
+    def show_recovery(self,data):
+        """Render a read-only recovery without assuming a complete pose."""
+        self.clear_candidates();self.phase='verified'
+        self.results.grid(row=4,column=0,padx=2,pady=(0,10),sticky='ew');self._has_results=True;self._collapsed=False;self.copy.grid();self.activity.grid();self.collapse.configure(text='收起');self.resize_surface()
+        actual=data.get('actual_colors') or [None]*3
+        deltas=data.get('actual_deltas') or [None]*3
+        self.render('已停止自动移动','动作响应未能可靠确认，已读取并保留当前游戏颜色；请在游戏内确认是否套用。')
+        for i,(color,delta) in enumerate(zip(actual,deltas)):
+            if color is None and delta is None:continue
+            text=f"区域 {i+1}\n实测 {color or '—'}"+(f" · ΔE {delta:.2f}" if delta is not None else '')
+            ct.CTkLabel(self.results,text=tr(text),justify='left',anchor='w').pack(fill='x',padx=8,pady=8)
+        maximum=data.get('maximum');average=data.get('average')
+        if maximum is not None and average is not None:
+            ct.CTkLabel(self.results,text=tr(f"最大 {maximum:.2f} / 平均 {average:.2f}")).pack(pady=8)
     def handle(self,kind,data):
         if getattr(self,'_dismissed',False):return
         if kind=='atlas_progress':
@@ -263,7 +277,7 @@ class SearchOverlay(ct.CTkToplevel):
         if kind=='atlas_command':
             self.phase='positioning';self.update_activity({'stage':'position'})
             self.render('移动到目标位置',f"步骤 {data.get('step',1)} · 根据图像实测位移校正；F9随时停止。");return
-        if kind in ('atlas_default_verified','atlas_verified','atlas_invalidated','atlas_default_unavailable','error','interrupted','finished') and hasattr(self,'activity'):
+        if kind in ('atlas_default_verified','atlas_verified','atlas_recovery','atlas_recovery_unavailable','atlas_invalidated','atlas_default_unavailable','error','interrupted','finished') and hasattr(self,'activity'):
             self.activity.stop();self.activity.set(1)
         if kind=='interrupted' and self.phase in ('choosing','positioning','verified'):
             self.batch_id=None
@@ -302,6 +316,16 @@ class SearchOverlay(ct.CTkToplevel):
             self.phase='verified';self.render('未选择其他方案','已保持自动最佳方案。')
         elif kind=='atlas_verified':
             self.show_verification(data)
+        elif kind=='atlas_recovery':
+            self.show_recovery(data)
+        elif kind=='atlas_recovery_unavailable':
+            self.clear_candidates();self.phase='verified'
+            self.render('已保留当前画面',data.get('message','当前动作未能可靠复核，已停止自动移动。'))
+        elif kind=='atlas_candidate_unavailable':
+            # A malformed or unreachable candidate is filtered before any
+            # input. Keep the visible workflow alive while the service checks
+            # the remaining candidates.
+            return
         elif kind=='waiting':
             self.phase='waiting';self.render('等待染色界面',data.get('message','可从任意游戏界面进入普通染色并完成教学。\n识别成功后自动寻色；F9 取消等待。'))
         elif kind=='activation':

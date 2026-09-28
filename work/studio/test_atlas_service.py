@@ -99,6 +99,10 @@ class ServiceTests(unittest.TestCase):
     def test_any_tolerance_with_no_match_auto_positions_best_compromise(self):
         owner=Owner();base=self.callbacks();calls=[]
         base.build=lambda *a,**k:{'quality_gate':{'passed':True},'candidates':[
+            dict(id=0,dx=0,dy=0,accepted=False,maximum=12,average=8,exact_matches=0),
+            dict(id=1,dx=12,dy=12,accepted=False,maximum=13,average=9,exact_matches=0)],
+            'board':(0,0,900,900)}
+        base.build=lambda *a,**k:{'quality_gate':{'passed':True},'candidates':[
             dict(id=0,dx=40,dy=0,accepted=False,maximum=14,average=8),
             dict(id=1,dx=5,dy=2,accepted=False,maximum=9,average=7),
             dict(id=2,dx=7,dy=2,accepted=False,maximum=11,average=5)],
@@ -199,12 +203,54 @@ class ServiceTests(unittest.TestCase):
         self.assertNotIn('atlas_default_verified',[k for k,_ in owner.events])
 
     def test_registration_failure_never_triggers_another_candidate(self):
-        base=self.callbacks();calls=[]
+        base=self.callbacks();calls=[];owner=Owner()
         def failed(*a,**kw):raise RuntimeError('registration')
         base.default=failed;base.choice=lambda *a,**kw:calls.append(1)
-        with self.assertRaisesRegex(RuntimeError,'registration'):
-            AtlasService(base).run(Owner(),[],selection_deadline=time.monotonic()+30)
+        result=AtlasService(base).run(owner,[],selection_deadline=time.monotonic()+30)
+        self.assertIsNone(result)
         self.assertEqual(calls,[])
+        self.assertEqual(owner.events[-1][0],'atlas_recovery_unavailable')
+
+    def test_recovered_default_is_terminal_when_pose_is_untrusted(self):
+        owner=Owner();base=self.callbacks();calls=[]
+        def recovered(*a,**kw):
+            calls.append('default')
+            return dict(candidate_id=0,verified=True,recovered=True,
+                        positioning_complete=False,pose_reliable=False,
+                        actual_pose=None,accepted=False)
+        base.default=recovered;base.choice=lambda *a,**kw:calls.append('choice')
+        result=AtlasService(base).run(owner,[],selection_deadline=time.monotonic()+30)
+        self.assertTrue(result['recovered'])
+        self.assertEqual(calls,['default'])
+        self.assertNotIn('atlas_default_verified',[kind for kind,_ in owner.events])
+        self.assertNotIn('atlas_selection_expired',[kind for kind,_ in owner.events])
+
+    def test_native_zoom_recovery_can_rebase_to_another_candidate(self):
+        owner=Owner();base=self.callbacks();calls=[]
+        def recovered(owner,report,candidate,rules,**kwargs):
+            calls.append(('default',candidate['id']))
+            return dict(candidate_id=candidate['id'],verified=True,recovered=True,
+                        positioning_complete=False,pose_reliable=True,
+                        actual_pose=[[1,0,0],[0,1,0]],accepted=False,
+                        exact_matches=0)
+        def alternate(owner,report,candidate,rules,**kwargs):
+            calls.append(('choice',candidate['id']))
+            return dict(candidate_id=candidate['id'],verified=True,accepted=True,
+                        actual_pose=[[1,0,0],[0,1,0]])
+        base.default=recovered;base.choice=alternate;owner.selection=None
+        result=AtlasService(base).run(owner,[],selection_deadline=time.monotonic()+30)
+        self.assertEqual(calls,[('default',0),('choice',1)])
+        self.assertTrue(result['accepted'])
+
+    def test_capture_or_build_fault_is_reported_as_recovery(self):
+        owner=Owner();base=self.callbacks()
+        base.acquire=lambda *a,**k: (_ for _ in ()).throw(RuntimeError('capture fault'))
+        self.assertIsNone(AtlasService(base).run(owner,[]))
+        self.assertEqual(owner.events[-1][0],'atlas_recovery_unavailable')
+        owner=Owner();base=self.callbacks()
+        base.build=lambda *a,**k: (_ for _ in ()).throw(RuntimeError('build fault'))
+        self.assertIsNone(AtlasService(base).run(owner,[]))
+        self.assertEqual(owner.events[-1][0],'atlas_recovery_unavailable')
 
     def test_shorter_candidate_is_used_when_best_does_not_fit_game_time(self):
         base=self.callbacks();build=base.build
