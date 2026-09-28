@@ -33,7 +33,7 @@ from ui_typography import FONT_FAMILY,TITLE_FONT,SECTION_FONT,BODY_FONT,SMALL_FO
 from resize_rendering import TopLevelResizeRedrawOptimization
 from display_geometry import logical_size,work_area
 
-APP_VERSION='0.3.2'
+APP_VERSION='0.3.3'
 CARD_WIDTH=344
 CARD_HEIGHT=400
 CARD_GAP=6
@@ -551,7 +551,7 @@ class App(ct.CTk):
             elif k=='atlas_progress':
                 from ui_progress import progress_text
                 title,body=progress_text(d)
-                self.status.configure(text=title);self.set_detail(body)
+                self.status.configure(text=tr(title));self.set_detail(tr(body))
             elif k=='atlas_status':
                 self.status.configure(text=tr('正在采集本局颜色板'))
                 self.set_detail(tr(d.get('message','')))

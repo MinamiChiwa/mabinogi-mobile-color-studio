@@ -6,6 +6,33 @@ from atlas_masks import board_texture_mask, material_masks
 from vision import read_codes
 
 
+# OpenCV's remap implementation stores the output dimensions in a signed
+# 16-bit value.  A dense material check on a high-resolution board can easily
+# produce more than 32,767 point samples, even though the source frame itself
+# is a normal 1280x960/2560x1440 image.  Keep each remap call below that native
+# limit and concatenate the point results in their original order.
+_REMAP_POINT_CHUNK = 16_384
+
+
+def _remap_points(source, px, py, chunk_size=_REMAP_POINT_CHUNK):
+    """Bilinearly sample arbitrary points without hitting OpenCV's size limit."""
+    px = np.asarray(px, dtype=np.float32).reshape(-1)
+    py = np.asarray(py, dtype=np.float32).reshape(-1)
+    if px.shape != py.shape:
+        raise ValueError('Point coordinate arrays must have the same length')
+    if chunk_size <= 0 or chunk_size >= 32_767:
+        raise ValueError('Point chunk size must stay below OpenCV remap limit')
+    if not len(px):
+        return np.empty((0, source.shape[2]), dtype=np.float32)
+    parts = []
+    for start in range(0, len(px), chunk_size):
+        stop = start + chunk_size
+        values = cv2.remap(source, px[start:stop, None], py[start:stop, None],
+                           cv2.INTER_LINEAR)
+        parts.append(values.reshape(-1, source.shape[2]))
+    return np.concatenate(parts, axis=0)
+
+
 def texture_mask(scene, shape):
     l, t, r, b = map(int, scene.board)
     expected = (b - t, r - l)
@@ -91,9 +118,8 @@ def motion(a, b, scene, diagnostics=None):
     if good_points.sum() < 200:
         diagnostics['reason'] = 'insufficient_material_overlap'
         return None
-    actual = cv2.remap(b[t:bottom, l:r].astype(np.float32),
-                       px[good_points, None].astype(np.float32),
-                       py[good_points, None].astype(np.float32), cv2.INTER_LINEAR).reshape(-1, 3)
+    actual = _remap_points(b[t:bottom, l:r].astype(np.float32),
+                           px[good_points], py[good_points])
     squared = (actual - a[t + yy[good_points], l + xx[good_points]]) ** 2
     rgb_rmse = float(np.sqrt(np.mean(squared)))
     region_rmse = []

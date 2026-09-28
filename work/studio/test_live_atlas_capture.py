@@ -34,7 +34,7 @@ class CaptureGuardTests(unittest.TestCase):
         game=SimpleNamespace(
             focus=focus,
             geometry=lambda:(0,0,100,100),capture_waiting=lambda:image,capture=lambda:image,
-            check=lambda:None)
+            check=MagicMock(side_effect=[None,None,None,Interrupted('stop after timer fallback')]))
         scenes=[SimpleNamespace(seconds=None),SimpleNamespace(seconds=None),
                 SimpleNamespace(seconds=100,board=(10,10,90,90),markers=[(20,50),(50,50),(80,50)],cards=[])]
         scenes.extend(SimpleNamespace(seconds=None) for _ in range(4))
@@ -45,7 +45,7 @@ class CaptureGuardTests(unittest.TestCase):
              patch('live_atlas_capture.time.monotonic',side_effect=clock.monotonic), \
              patch('live_atlas_capture.recognize',side_effect=scenes) as recognize, \
              patch.object(u,'GetAsyncKeyState',return_value=0):
-            with self.assertRaisesRegex(RuntimeError,'倒计时无法可靠识别'):
+            with self.assertRaisesRegex(Interrupted,'stop after timer fallback'):
                 acquire(Path(tmp)/'capture',strategy='grid',stop=stop,activate=True,
                         emit=lambda kind,**data:events.append((kind,data)))
         self.assertEqual(clock.now,302.75)
@@ -317,13 +317,14 @@ class CaptureGuardTests(unittest.TestCase):
         from unittest.mock import MagicMock
         game=MagicMock();game.geometry.return_value=(0,0,100,100)
         game.capture.return_value=game.capture_waiting.return_value=np.zeros((100,100,3),np.uint8)
+        game.check.side_effect=[None,None,None,Interrupted('stop after timer fallback')]
         scene=SimpleNamespace(board=(10,10,90,90),markers=[(20,50),(50,50),(80,50)],cards=[],seconds=119)
         with tempfile.TemporaryDirectory() as tmp, \
              patch('live_atlas_capture.CaptureGame',return_value=game), \
              patch('live_atlas_capture.configure_ocr'), \
              patch.object(u,'GetAsyncKeyState',return_value=0), \
              patch('live_atlas_capture.recognize',side_effect=[scene]+[SimpleNamespace(seconds=None)]*4) as recognize:
-            with self.assertRaisesRegex(RuntimeError,'倒计时'):
+            with self.assertRaisesRegex(Interrupted,'stop after timer fallback'):
                 acquire(Path(tmp)/'capture',strategy='grid')
         self.assertEqual(recognize.call_count,5)
         game.send.assert_not_called();game.wheel.assert_not_called();game.drag.assert_not_called()

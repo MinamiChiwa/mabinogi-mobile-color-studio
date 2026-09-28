@@ -205,6 +205,8 @@ EN.update({
     '剩余时间不足以安全定位并复核自动最佳方案，未发送定位操作。': 'Not enough time to safely position and verify the automatic best combination. No positioning input was sent.',
     '候选已失效，保持自动最佳方案。': 'The candidate expired. The automatic best combination is kept.',
     '已停止，保留自动最佳方案。': 'Stopped. The automatic best combination is kept.',
+    '倒计时复核暂时不可用，沿用首次识别结果；未延长安全截止时间。': 'The countdown could not be rechecked temporarily. The first reading is being used; the safe deadline was not extended.',
+    '倒计时复核暂时不可用，沿用首次识别结果': 'The countdown could not be rechecked temporarily. The first reading is being used.',
 })
 TW.update({
     '。尚未搜索目标组合，不能据此判断没有满足目标的方案。': '。尚未搜尋目標組合，無法據此判斷沒有符合目標的方案。',
@@ -213,6 +215,8 @@ TW.update({
     '剩余时间不足以安全定位并复核自动最佳方案，未发送定位操作。': '剩餘時間不足以安全定位並複核自動最佳方案，未傳送定位操作。',
     '候选已失效，保持自动最佳方案。': '候選方案已失效，保留自動最佳方案。',
     '已停止，保留自动最佳方案。': '已停止，保留自動最佳方案。',
+    '倒计时复核暂时不可用，沿用首次识别结果；未延长安全截止时间。': '倒數暫時無法複核，沿用首次辨識結果；未延長安全操作期限。',
+    '倒计时复核暂时不可用，沿用首次识别结果': '倒數暫時無法複核，沿用首次辨識結果。',
 })
 _english_parts=sorted(EN,key=len,reverse=True)
 _widgets=weakref.WeakSet()

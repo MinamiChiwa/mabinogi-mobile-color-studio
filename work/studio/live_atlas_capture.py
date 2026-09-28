@@ -320,6 +320,7 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
         im=snap('original',scene)
         if strategy in ('grid','probe'):
             timed_scene=None
+            timer_source='ocr'
             timer_attempts=4
             for attempt in range(timer_attempts):
                 if attempt:
@@ -333,13 +334,30 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
                 log('timer_recheck',attempt=attempt+1,attempts=timer_attempts,recognized=False)
                 if emit:emit('atlas_progress',stage='zoom',message='正在复核倒计时识别')
             if timed_scene is None or timed_scene.seconds is None:
-                raise RuntimeError('倒计时无法可靠识别，未开始缩放或扫描；本次入口已消耗染色剂，请检查 OCR 后再运行。')
-            scene=timed_scene;game_deadline=min(initial_game_deadline,original_at+timed_scene.seconds)
+                # The waiting frame already provided a valid countdown and
+                # established the hard deadline. A later frame may hide the
+                # timer behind a transient animation or produce an OCR miss;
+                # that is not a reason to abort the session before input.
+                # Keep the conservative initial deadline and continue only
+                # after the normal CaptureGame guard has passed.
+                timed_scene=scene
+                timer_source='initial'
+                log('timer_recheck_fallback',seconds=scene.seconds,
+                    message='倒计时复核暂时不可用，沿用首次识别结果；未延长安全截止时间。')
+                if emit:
+                    emit('atlas_progress',stage='zoom',
+                         message='倒计时复核暂时不可用，沿用首次识别结果')
+                game_deadline=initial_game_deadline
+            else:
+                game_deadline=min(initial_game_deadline,original_at+timed_scene.seconds)
+            scene=timed_scene
+            if game_deadline is None:
+                game_deadline=initial_game_deadline
             budget=WorkflowBudget(ready_at,game_deadline)
             g.until=budget.deadline
             g.stage_until=budget.sampling_deadline
             g.check()
-            log('timer',seconds=timed_scene.seconds,source='ocr',
+            log('timer',seconds=timed_scene.seconds,source=timer_source,
                 deadline_elapsed_seconds=game_deadline-started,
                 workflow_deadline_elapsed_seconds=budget.workflow_deadline-started,
                 effective_deadline_elapsed_seconds=budget.deadline-started,

@@ -93,6 +93,16 @@ class OcrSetupTests(unittest.TestCase):
                     self.assertTrue(vision.OCR_AVAILABLE)
                     self.assertEqual(vision._tesseract('next frame',''),'#AABBCC')
 
+    def test_timer_ocr_ignores_adjacent_hourglass_digit(self):
+        image=np.zeros((960,1280,3),np.uint8)
+        with patch('vision.ocr',return_value='4120'):
+            self.assertEqual(vision.timer_seconds(image,unit=81),120)
+
+    def test_timer_ocr_uses_previous_value_for_merged_short_countdown(self):
+        image=np.zeros((960,1280,3),np.uint8)
+        with patch('vision.ocr',return_value='420'):
+            self.assertEqual(vision.timer_seconds(image,unit=81,previous=20),20)
+
     def test_unexpected_ocr_runtime_error_is_not_silently_swallowed(self):
         vision.OCR_AVAILABLE=True
         with patch('vision._ocr_text',side_effect=RuntimeError('unexpected bug')):

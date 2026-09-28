@@ -2,13 +2,31 @@ import unittest
 import json
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 import cv2
 import numpy as np
 from PIL import Image
+import atlas_runtime
 from atlas_runtime import motion, Adapter
 
 
 class RuntimeMotionTests(unittest.TestCase):
+    def test_large_point_cloud_is_remapped_in_bounded_chunks(self):
+        source=np.arange(12*13*3,dtype=np.float32).reshape(12,13,3)
+        px=np.resize(np.linspace(0.25,11.5,12,dtype=np.float32),40001)
+        py=np.resize(np.linspace(0.75,10.5,12,dtype=np.float32),40001)
+        original=atlas_runtime.cv2.remap
+        calls=[]
+        def wrapped(image,xmap,ymap,interpolation):
+            calls.append((xmap.shape,ymap.shape))
+            return original(image,xmap,ymap,interpolation)
+        with patch.object(atlas_runtime.cv2,'remap',side_effect=wrapped):
+            result=atlas_runtime._remap_points(source,px,py)
+        self.assertEqual(result.shape,(40001,3))
+        self.assertEqual(len(calls),3)
+        self.assertLessEqual(max(shape[0] for shape,_ in calls),16384)
+        self.assertEqual(calls[-1][0][0],7233)
+
     def scene(self):
         return SimpleNamespace(board=(0,0,498,498),
                                markers=[(83,200),(249,300),(415,100)],cards=[])

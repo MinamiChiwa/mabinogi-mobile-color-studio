@@ -266,6 +266,83 @@ def result_colors(image):
     else:return None
     return [p[2] for p in pills]
 
+
+def _timer_values(text):
+    """Extract plausible countdown values from noisy timer OCR.
+
+    The hourglass icon is adjacent to the digits and Tesseract may merge it
+    with the first digit (for example ``4120`` for ``120``).  Keep the suffix
+    candidates from a merged run so the icon cannot make an otherwise valid
+    countdown disappear.  Zero is excluded because it is already past the
+    safe input window.
+    """
+    values=[]
+    for run in re.findall(r'\d+',str(text)):
+        # Keep the complete run and its short suffixes. A leading hourglass
+        # glyph may be merged into a three-digit reading (``420`` for ``20``)
+        # just as it may be merged into a four-digit reading (``4120``).
+        candidates=(run,)+tuple(run[-size:] for size in (3,2,1)
+                                if size<len(run))
+        for candidate in candidates:
+            try:value=int(candidate)
+            except ValueError:continue
+            if 1<=value<=120:values.append(value)
+    return values
+
+
+def timer_seconds(image, unit=None, previous=None):
+    """Read the upper-left game countdown across window sizes and UI themes.
+
+    The timer is not anchored to the colour cards: on the standard 1280x960
+    client it sits near x=30..110 while the cards begin around x=750.  The
+    former crop used only a card-relative 37-pixel strip and could therefore
+    miss the digits during the post-entry recheck.  These bounded crops keep
+    the timer local, enlarge it for OCR, and use the previous reading to
+    reject an icon-only or progress-bar digit.
+    """
+    h,w=image.shape[:2]
+    ref=float(unit or max(24,min(w,h)*.08))
+    portrait=w<h
+    if portrait:
+        # Preserve the established portrait location while allowing more
+        # vertical margin for font rendering at 100% and high DPI.
+        boxes=[(round(ref*.55),round(h*.035),
+                min(w,round(ref*1.65)),min(h,round(h*.13))),
+               (0,0,min(w,round(ref*2.2)),min(h,round(h*.16)))]
+    else:
+        boxes=[(round(ref*.68),0,min(w,round(ref*1.85)),
+                min(h,round(ref*1.25))),
+               (round(ref*.50),0,min(w,round(ref*2.2)),
+                min(h,round(ref*1.50))),
+               (0,0,min(w,round(max(ref*3.0,220))),
+                min(h,round(max(ref*1.5,90))))]
+    values=[]
+    for box_index,(left,top,right,bottom) in enumerate(boxes):
+        left=max(0,min(w-1,left));top=max(0,min(h-1,top))
+        right=max(left+1,min(w,right));bottom=max(top+1,min(h,bottom))
+        crop=image[top:bottom,left:right]
+        gray=cv2.cvtColor(crop,cv2.COLOR_RGB2GRAY) if crop.ndim==3 else crop
+        # Grayscale avoids the coloured pill background suppressing white
+        # glyphs. One raw and one high-contrast variant cover anti-aliasing.
+        variants=[gray,np.where(gray>=170,255,0).astype('uint8')]
+        for variant in variants:
+            for psm in (6,11):
+                text=ocr(variant,'0123456789',psm=psm)
+                found=_timer_values(text)
+                if found:values.extend(found)
+                if values and previous is None and max(values)>=100:
+                    return max(values)
+        # A clean crop is normally sufficient; continue to the broad crop
+        # only when no candidate was found or when the previous value helps
+        # disambiguate a merged hourglass digit.
+        if values and previous is None and box_index>=1:break
+    if not values:return None
+    if previous is not None:
+        # A countdown can only stay the same or decrease between frames.
+        ordered=[v for v in values if v<=int(previous)+1]
+        if ordered:return min(ordered,key=lambda v:abs(v-int(previous)))
+    return max(values)
+
 def recognize(image,with_ocr=True,previous=None,enabled=None):
     cards=color_cards(image)
     if cards is None:raise ValueError('未识别到染色小游戏的三张色码卡片。请先进入限时染色界面。')
@@ -306,16 +383,8 @@ def recognize(image,with_ocr=True,previous=None,enabled=None):
     seconds=None
     if with_ocr:
         unit=cards[0][2]
-        # Timer sits at upper-left; keep crop independent of aspect ratio.
-        portrait=w<h
-        if portrait:
-            roi=image[round(h*.05):round(h*.095),round(unit*.68):min(w,round(unit*1.35))]
-        else:
-            # Exclude the hourglass and bar; retain all three timer digits.
-            roi=image[round(unit*.225):round(unit*.675),round(unit*.77):min(w,round(unit*1.49))]
-        text=ocr(roi,'0123456789',psm=7 if not portrait else 6)
-        values=[int(v) for v in re.findall(r'\d{1,3}',text) if 0<=int(v)<=120]
-        seconds=values[0] if len(values)==1 else None
+        seconds=timer_seconds(image,unit=unit,
+                              previous=None if previous is None else previous.seconds)
     buttons=green_buttons(image)
     return Scene(cards,markers,(left,top,right,bottom),colors,seconds,buttons[0][:2] if buttons else None)
 
