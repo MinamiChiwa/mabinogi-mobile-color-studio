@@ -7,7 +7,7 @@
 ### 更新内容
 
 - 增加滚轮档位残差修正：当目标位置位于两个滚轮档位之间，且三个取色点仍处于安全定位范围内时，程序会通过受限平移完成修正。
-- 保留游戏内 HEX 复核流程。程序不会自动点击套用、确认或取消。
+- 保留游戏内 HEX 复核流程；完成定位后请在游戏中确认结果，再手动套用。
 - 增加历史会话清理：仅保留最近 20 次会话；超过 30 天、超过 512 MiB 或超过保留数量的旧会话可被清理；正在进行和最近 5 分钟内的会话受到保护。
 - 正式发布包不包含本地配置、截图、诊断记录和历史搜索数据。
 - 同步更新简体中文、繁体中文和英文界面及说明文档。
@@ -27,7 +27,7 @@
 ### 更新內容
 
 - 新增滾輪檔位殘差修正：當目標位置位於兩個滾輪檔位之間，且三個取色點仍處於安全定位範圍內時，程式會透過受限平移完成修正。
-- 保留遊戲內 HEX 複核流程。程式不會自動點選套用、確認或取消。
+- 保留遊戲內 HEX 複核流程；完成定位後請在遊戲中確認結果，再手動套用。
 - 新增歷史工作階段清理：僅保留最近 20 次工作階段；超過 30 天、超過 512 MiB 或超過保留數量的舊工作階段可被清理；進行中及最近 5 分鐘內的工作階段受到保護。
 - 正式發布包不包含本機設定、截圖、診斷記錄及歷史搜尋資料。
 - 同步更新繁體中文、簡體中文及英文介面與說明文件。
@@ -47,7 +47,7 @@ This tool was developed with AI assistance.
 ### Updates
 
 - Added measured wheel-detent residual correction. When a target lies between two wheel detents and all three markers remain within the safe positioning gate, a bounded translation completes the correction.
-- Preserved in-game HEX verification. The tool never clicks Apply, Confirm or Cancel automatically.
+- Preserved in-game HEX verification; review the result in the game and apply it manually after positioning.
 - Added bounded session cleanup. The latest 20 sessions are retained; sessions older than 30 days, beyond 512 MiB or beyond the retention count may be removed. Active sessions and sessions from the last five minutes are protected.
 - Release packages exclude local settings, screenshots, diagnostic traces and search history.
 - Synchronized the Simplified Chinese, Traditional Chinese and English interface text and documentation.

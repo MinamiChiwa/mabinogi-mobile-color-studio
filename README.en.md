@@ -23,7 +23,7 @@ Download `ColorStudio-v0.3.1.zip` from Releases, extract it and run `ColorStudio
 
 Auto-detection accepts spacing variations in the title and recognizes the game executable. Select manually if multiple candidates exist; select again if that window closes. Borderless fullscreen is supported. Keep the game in the foreground and its geometry unchanged during active searching.
 
-The 60-second figure is a performance reference, not a hard cutoff. As long as the game timer allows, the tool continues its normal workflow. Screenshot predictions are provisional; game HEX verification is the final check. Apply the dye only after reviewing the verified game HEX.
+After positioning, the tool shows the in-game HEX. Review it in the game, then apply the dye manually if desired.
 
 Exact and Similar modes both search the current stitched board and calculate rotation, zoom and translation for each candidate. Avoid moving the mouse during automatic operation. Moving or resizing the game window during a search stops it; press F8 to detect the new layout.
 
@@ -34,7 +34,7 @@ Choose Simplified Chinese, Traditional Chinese or English in the upper-right sel
 - Click the ordered color overview to open the complete allowed-color atlas.
 - Use +/− to zoom, drag to pan, and hover to inspect individual HEX values without pagination.
 - The last 50 results retain the three colors, per-region ΔE, maximum and mean differences.
-- The normal search workflow verifies the in-game HEX values and never applies dye automatically. Exact mode disables the tolerance slider.
+- The normal search workflow verifies the in-game HEX values and shows the result in the overlay. Exact mode disables the tolerance slider.
 - Settings, results and diagnostic screenshots are stored in the adjacent `data` folder by default. If the install directory is not writable, the tool uses `%LOCALAPPDATA%\MabinogiMobileColorStudio\data`, then the system temporary directory as a last resort.
 - Old-session cleanup runs in the background when a new run starts. The latest 20 sessions and sessions updated within the last five minutes are protected. Other sessions may be removed after 30 days or when total session storage exceeds 512 MiB. Protected data can therefore keep the total above 512 MiB. Data in the system temporary directory may be removed by the operating system.
 
@@ -62,7 +62,7 @@ A timed search cannot guarantee an exact match, satisfaction of every tolerance 
 
 The main window, overlay, tutorial, support dialog and runtime messages switch between all three languages immediately. OCR uses fixed `eng` data independently of the interface language and handles non-UTF-8 output from Windows installation paths. Tool windows size to the monitor work area. On a 4K display, keep the game in 1280 × 960 windowed mode; the desktop resolution does not need to change.
 
-After starting, the tool waits for the dye board and timer until F9 cancels. The 60-second figure is a performance reference, not a hard stop: the tool continues to finish a normal build and search even when they take longer. Input stops only when the OCR game countdown reaches its safety deadline, F9 is pressed, focus or window geometry changes, or recognition becomes unreliable. If Windows prevents game activation, activate the game window manually; restarting is unnecessary. Hotkey registration status appears at the bottom. Close other tool copies or use buttons if a key is unavailable.
+After starting, keep the game in the foreground and wait on the timed dye screen until the tool finishes. Press F9 to stop. If the game window is moved or resized, stop and start again. If Windows prevents game activation, activate the game window manually and let detection continue. Hotkey registration status appears at the bottom; close other tool copies or use the buttons if a key is unavailable.
 
 The color cards retain fixed dimensions and reflow only when crossing a column breakpoint. Enabled cards have a teal border and background; disabled cards show an explicit label. The overlay can be moved, collapsed and adjusted for opacity while showing the current step and elapsed time. Long content scrolls while the title and F9 stop button remain visible. Click or drag to adjust color values, preventing accidental wheel changes. During the initial wait, the game may be returned to the foreground after focus is changed briefly. Interruptions and errors display a dialog.
 
