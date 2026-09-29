@@ -305,11 +305,18 @@ class SearchOverlay(ct.CTkToplevel):
         ct.CTkLabel(self.results,text=tr(f"最大 {data['maximum']:.2f} / 平均 {data['average']:.2f}")).pack(pady=8)
     def show_recovery(self,data):
         """Render a read-only recovery without assuming a complete pose."""
+        candidates=getattr(self,'_candidate_data',None) if data.get('pose_reliable') else None
         self.clear_candidates();self.phase='verified'
+        # A measured-pose fallback can resume after this observation. Keep
+        # its batch metadata so replanning and final verification can restore
+        # the selectable list; the controls stay hidden until that happens.
+        if candidates is not None:self._candidate_data=candidates
         self.results.grid(row=4,column=0,padx=2,pady=(0,10),sticky='ew');self._has_results=True;self._collapsed=False;self.copy.grid();self.activity.grid();self.collapse.configure(text='收起');self.resize_surface()
         actual=data.get('actual_colors') or [None]*3
         deltas=data.get('actual_deltas') or [None]*3
-        self.render('已停止自动移动','动作响应未能可靠确认，已读取并保留当前游戏颜色；请在游戏内确认是否套用。')
+        self.render('已停止自动移动',
+                    '本次调整未完成，已读取当前游戏颜色。' if data.get('verified') and any(actual)
+                    else '未能读取当前色码，请以游戏内显示为准。')
         for i,(color,delta) in enumerate(zip(actual,deltas)):
             if color is None and delta is None:continue
             text=f"区域 {i+1}\n实测 {color or '—'}"+(f" · ΔE {delta:.2f}" if delta is not None else '')

@@ -90,7 +90,7 @@ class AtlasTests(unittest.TestCase):
         atlas.add(np.full_like(self.tile, 255), self.masks)
         self.assertEqual(translation_candidates(atlas, [[0, 0]]*3, self.rules), [])
 
-    def test_lower_center_color_error_precedes_landing_safety(self):
+    def test_wide_near_color_region_precedes_brittle_exact_center(self):
         atlas=PeriodicAtlas([[32,0],[0,32]],resolution=32)
         image=np.full((32,32,3),100,np.uint8)
         image[3:12,3:12]=34
@@ -100,8 +100,8 @@ class AtlasTests(unittest.TestCase):
         raw=translation_candidates(atlas,[[.5,.5]]*3,rules)[0]
         robust_rows=translation_candidates(atlas,[[.5,.5]]*3,rules,landing_radius=1.)
         self.assertEqual(raw['colors'][0],'#202020')
-        self.assertEqual(robust_rows[0]['colors'][0],'#202020')
-        self.assertFalse(robust_rows[0]['landing_safe'])
+        self.assertEqual(robust_rows[0]['colors'][0],'#222222')
+        self.assertTrue(robust_rows[0]['landing_safe'])
         self.assertTrue(any(row['colors'][0]=='#222222' and row['landing_safe']
                             for row in robust_rows))
 
@@ -138,6 +138,52 @@ class AtlasTests(unittest.TestCase):
                 self.assertTrue(valid[0])
                 expected='#%02X%02X%02X'%tuple(np.rint(value[0]).astype(int))
                 self.assertEqual(row['colors'][i],expected)
+
+    def test_integer_search_does_not_skip_moves_when_period_exceeds_resolution(self):
+        class ScreenLatticeAtlas:
+            resolution=4
+            basis=np.diag([6.5,6.5])
+            def sample(self,region,points):
+                points=np.asarray(points)
+                loss=np.minimum(200,np.abs(points+1).sum(axis=1)*20)
+                return np.repeat((32+loss)[:,None],3,axis=1),np.ones(len(points),bool)
+        rules=[dict(enabled=i==0,exact=True,colors=['#202020'],tolerance=0) for i in range(3)]
+        row=translation_candidates(ScreenLatticeAtlas(),[[0,0]]*3,rules,integer_moves=True)[0]
+        self.assertTrue(row['accepted'])
+        self.assertEqual((row['dx'],row['dy']),(1,1))
+
+    def test_integer_landing_neighborhood_is_sampled_across_noninteger_period(self):
+        class ScreenLatticeAtlas:
+            resolution=4
+            basis=np.diag([6.5,6.5])
+            def sample(self,region,points):
+                points=np.asarray(points)
+                phase=np.mod(points[:,0],6.5)
+                values=np.repeat((32+phase)[:,None],3,axis=1)
+                return values,np.ones(len(points),bool)
+        atlas=ScreenLatticeAtlas()
+        rules=[dict(enabled=i==0,exact=False,colors=['#202020'],tolerance=20) for i in range(3)]
+        rows=translation_candidates(atlas,[[0,0]]*3,rules,integer_moves=True,landing_radius=1,limit=20)
+        from vision import error
+        for row in rows:
+            move=np.array([row['dx'],row['dy']])
+            points=np.array([[x,y] for x in (-1,0,1) for y in (-1,0,1)])-move
+            colors,_=atlas.sample(0,points)
+            losses=[error('#%02X%02X%02X'%tuple(np.rint(value).astype(int)),['#202020'],False)
+                    for value in colors]
+            self.assertAlmostEqual(row['landing_maximum'],max(losses),places=5)
+
+    def test_bounded_ranking_prefix_preserves_full_lattice_result_order(self):
+        from unittest.mock import patch
+        atlas=PeriodicAtlas([[48.7,0],[0,47.8]],resolution=48)
+        image=np.random.default_rng(78).integers(0,256,(56,56,3),dtype=np.uint8)
+        atlas.add_resampled(image,np.ones((3,56,56),bool))
+        rules=[dict(enabled=True,exact=False,colors=['#808080'],tolerance=20)]*3
+        args=(atlas,[[10.2,12.3],[22.4,19.5],[30.6,31.7]],rules)
+        ranked=translation_candidates(*args,integer_moves=True,landing_radius=1,limit=32)
+        with patch('periodic_atlas._ranking_subset',side_effect=lambda p,e,ids,k,limit:ids):
+            full=translation_candidates(*args,integer_moves=True,landing_radius=1,limit=32)
+        self.assertEqual(ranked,full)
 
     def test_two_near_white_regions_beat_white_plus_green_during_search(self):
         atlas=PeriodicAtlas([[32,0],[0,32]],resolution=32)

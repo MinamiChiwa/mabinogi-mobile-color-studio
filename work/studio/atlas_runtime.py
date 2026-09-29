@@ -2,7 +2,9 @@
 import cv2
 import numpy as np
 import time
+from contextlib import contextmanager, nullcontext
 from atlas_execution import Context, checked_translation
+from atlas_stage_budget import StageBudgetExceeded
 from atlas_masks import board_texture_mask, material_masks
 from vision import read_codes
 
@@ -151,31 +153,63 @@ class Adapter:
         self.last_motion_diagnostics = None
         self.last_motion_before = self.last_motion_after = None
         self._code_cache = {}
+        self._stage_budget = None
         self.code_read_stats = dict(calls=0,ocr_passes=0,ocr_cards=0,reused_cards=0,seconds=0.)
 
     def check(self):
         self.g.check()
+
+    def check_positioning(self):
+        self.check()
+        if self._stage_budget is not None:self._stage_budget.check_input()
+
+    def check_observation(self):
+        if self._stage_budget is not None:
+            self.check()
+            self._stage_budget.check_observation()
+
+    @contextmanager
+    def execution_scope(self,budget):
+        previous=self._stage_budget
+        self._stage_budget=budget
+        try:yield
+        finally:self._stage_budget=previous
 
     def context(self):
         return Context(self.session, tuple(self.g.geometry()), tuple(self.scene.board),
                        tuple(map(tuple, self.scene.markers)))
 
     def capture(self):
+        self.check_observation()
         self.last_frame=self.g.capture()
         return self.last_frame
 
     def motion(self, before, after):
+        self.check_observation()
         self.last_motion_before, self.last_motion_after = before, after
         self.last_motion_diagnostics = {}
-        return motion(before, after, self.scene, self.last_motion_diagnostics)
+        measured=motion(before, after, self.scene, self.last_motion_diagnostics)
+        try:self.check_observation()
+        except StageBudgetExceeded:
+            # The pair is already registered and there has been no further
+            # input. Deliver it so execution can retain the measured pose;
+            # its next stage check prevents additional input or OCR work.
+            if measured is None:raise
+            self.last_motion_diagnostics['observation_deadline_reached']=True
+        return measured
 
     def drag(self, dx, dy):
         self.g.drag(self.scene.board, dx, dy)
         self.park()
 
     def perform_gesture(self, gesture):
-        self.g.perform_gesture(gesture)
-        self.park()
+        self.check_positioning()
+        scope=(self.g.input_scope(self._stage_budget.input_deadline,self.check_positioning,
+                                 expiry_factory=StageBudgetExceeded)
+               if self._stage_budget is not None else nullcontext())
+        with scope:
+            self.g.perform_gesture(gesture)
+            self.park()
 
     def rotate(self, angle, anchor):
         self.g.rotate(self.scene.board, angle, anchor=anchor)
@@ -189,6 +223,9 @@ class Adapter:
         self.g.move_to((int(self.g.initial[2] * .5), int(self.g.initial[3] * .15)))
 
     def pause(self, seconds):
+        self.check_observation()
+        if self._stage_budget is not None and not self._stage_budget.can_observe(seconds):
+            raise StageBudgetExceeded('Observation wait would consume the return reserve')
         self.g.pause(seconds)
 
     def read_codes(self, image):
@@ -196,6 +233,7 @@ class Adapter:
         # including both text and swatch. Capturing the second frame, waiting,
         # and registering the board remain the executor's responsibility.
         # No approximate image hash, old pose, or predicted colour is used.
+        self.check_observation()
         started=time.perf_counter()
         enabled=getattr(self,'enabled',None)
         if enabled is None:enabled=[True]*len(self.scene.cards)
@@ -213,7 +251,13 @@ class Adapter:
                 needed[index]=True
                 cards[index]=(geometry,pixels,complete)
         if any(needed):
-            fresh=read_codes(image,self.scene.cards,self.scene.markers,enabled=needed)
+            options=({} if self._stage_budget is None else dict(
+                deadline=self._stage_budget.observation_deadline,
+                clock=self._stage_budget.clock,check=self.check))
+            try:fresh=read_codes(image,self.scene.cards,self.scene.markers,enabled=needed,**options)
+            except TimeoutError as exc:
+                if self._stage_budget is None:raise
+                raise StageBudgetExceeded(str(exc)) from exc
             for index,(geometry,pixels,complete) in cards.items():
                 result[index]=fresh[index]
                 if fresh[index] is not None and complete:

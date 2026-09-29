@@ -2,6 +2,7 @@ import tempfile
 import unittest
 import threading
 import json
+import time
 import numpy as np
 from types import SimpleNamespace
 from pathlib import Path
@@ -14,7 +15,7 @@ class LiveAdapterTests(unittest.TestCase):
     def test_failure_saves_both_existing_motion_frames_and_diagnostics(self):
         with tempfile.TemporaryDirectory() as folder:
             adapter=SimpleNamespace(last_motion_before=None,last_motion_after=None,
-                                    last_motion_diagnostics=None)
+                                    last_motion_diagnostics=None,check=lambda:None)
             before=np.full((12,12,3),20,np.uint8);after=before+10
             diagnostics={'passed':False,'reason':'insufficient_inliers'}
             def fail(*args,**kwargs):
@@ -26,7 +27,8 @@ class LiveAdapterTests(unittest.TestCase):
             owner=SimpleNamespace(event=lambda *a,**k:None)
             with patch('atlas_live_adapter.execute_candidate',side_effect=fail):
                 with self.assertRaises(RuntimeError):
-                    _execute_recorded(owner,report,{'id':1},[],SimpleNamespace(id='batch'),before)
+                    _execute_recorded(owner,report,{'id':1},[],SimpleNamespace(id='batch',deadline=time.monotonic()+60),before)
+            self.assertTrue(report['diagnostic_write'].wait(5))
             data=json.loads((Path(folder)/'execution/attempt-01.json').read_text(encoding='utf-8'))
             self.assertEqual(data['last_registration'],diagnostics)
             self.assertEqual(data['events'][0]['command'],[-49,80])
@@ -37,18 +39,20 @@ class LiveAdapterTests(unittest.TestCase):
             # to a new attempt, and saving never requests another screenshot.
             with patch('atlas_live_adapter.execute_candidate',side_effect=InterruptedError('F9')):
                 with self.assertRaises(InterruptedError):
-                    _execute_recorded(owner,report,{'id':1},[],SimpleNamespace(id='batch'),before)
+                    _execute_recorded(owner,report,{'id':1},[],SimpleNamespace(id='batch',deadline=time.monotonic()+60),before)
+            self.assertTrue(report['diagnostic_write'].wait(5))
             second=json.loads((Path(folder)/'execution/attempt-02.json').read_text(encoding='utf-8'))
             self.assertIsNone(second['last_registration']);self.assertEqual(second['motion_frames'],{})
 
     def test_failed_execution_saves_last_frame_without_recapturing(self):
         with tempfile.TemporaryDirectory() as folder:
-            adapter=SimpleNamespace(last_frame=np.zeros((12,12,3),np.uint8))
+            adapter=SimpleNamespace(last_frame=np.zeros((12,12,3),np.uint8),check=lambda:None)
             report=dict(adapter=adapter,capture_folder=Path(folder))
             owner=SimpleNamespace(event=lambda *a,**k:None)
             with patch('atlas_live_adapter.execute_candidate',side_effect=InterruptedError('F9')):
                 with self.assertRaises(InterruptedError):
-                    _execute_recorded(owner,report,{'id':1},[],SimpleNamespace(id='batch'),None)
+                    _execute_recorded(owner,report,{'id':1},[],SimpleNamespace(id='batch',deadline=time.monotonic()+60),None)
+            self.assertTrue(report['diagnostic_write'].wait(5))
             data=json.loads((Path(folder)/'execution/attempt-01.json').read_text())
             self.assertEqual(data['error'],'F9');self.assertIsNone(data['result'])
             self.assertTrue((Path(folder)/'execution/attempt-01.png').is_file())

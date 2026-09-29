@@ -37,7 +37,7 @@ class BudgetTests(unittest.TestCase):
         # A live batch now requires an atlas and endpoint-scored candidates.
         atlas=SimpleNamespace(sample=lambda region,points,offset:
                               ([[17,34,51]]*len(points),[True]*len(points)))
-        return dict(candidates=[dict(id=0,dx=0,dy=0)],
+        return dict(quality_gate=dict(passed=True),candidates=[dict(id=0,dx=0,dy=0)],
                     runtime=dict(atlas=atlas,capture_offset=[0,0]))
 
     def rules(self):

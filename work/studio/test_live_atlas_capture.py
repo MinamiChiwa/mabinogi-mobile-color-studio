@@ -290,10 +290,11 @@ class CaptureGuardTests(unittest.TestCase):
         scan_frames=[row for row in records if row['kind']=='frame' and row['name'].startswith('grid_')]
         self.assertEqual(len(scan_frames),48)
         self.assertTrue(all(row['scan_timing']['selected']=='baseline' for row in scan_frames))
-        self.assertTrue(all(len(row['settling_probe_files'])==2 for row in scan_frames))
+        self.assertTrue(all(not row.get('settling_probe_files') for row in scan_frames))
+        self.assertTrue(all(not row['scan_timing']['probe_times'] for row in scan_frames))
         self.assertEqual(sum(row['kind']=='command' for row in records),48)
         summary=next(row for row in records if row['kind']=='scan_settling_summary')
-        self.assertEqual(summary['mode'],'observe_only')
+        self.assertEqual(summary['mode'],'baseline')
         self.assertEqual(summary['potential_saving_seconds'],0)  # static fake board
         self.assertEqual(timer['effective_deadline_elapsed_seconds'],
                          timer['sampling_deadline_elapsed_seconds'])

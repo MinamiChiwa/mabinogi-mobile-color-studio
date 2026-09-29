@@ -19,7 +19,8 @@ class MeasuredAtlas:
 
 
 def reachable_candidates(atlas, capture_offset, actual_pose, markers, board, rules,
-                         candidate_id, check=lambda:None, reference_pose=None):
+                         candidate_id, check=lambda:None, reference_pose=None,
+                         limit=32, max_move=None):
     """Keep measured angle/scale; search real integer mouse translations.
 
     actual_pose is relative to the execution reference. reference_pose maps
@@ -34,7 +35,8 @@ def reachable_candidates(atlas, capture_offset, actual_pose, markers, board, rul
         check()
         return False
     rows=translation_candidates(view,local,rules,integer_moves=True,
-                                landing_radius=1.,cancelled=cancelled)
+                                landing_radius=1.,cancelled=cancelled,
+                                limit=limit,max_move=max_move)
     result=[]
     for row in rows:
         shift=homogeneous([[1,0,row['dx']],[0,1,row['dy']]])

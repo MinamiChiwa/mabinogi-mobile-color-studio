@@ -41,7 +41,7 @@ class SettlingTests(unittest.TestCase):
     def setUp(self):
         self.scene = SimpleNamespace(board=(20,20,320,320),
                                      markers=[(70,100),(170,170),(270,260)], cards=[])
-        self.observer = ScanSettlingObserver(self.scene)
+        self.observer = ScanSettlingObserver(self.scene,observe=True)
         self.clock = FakeClock()
         self.previous = np.random.default_rng(929).integers(0,256,(360,360,3),dtype=np.uint8)
         self.frame = np.roll(self.previous, 10, axis=1)
@@ -49,6 +49,29 @@ class SettlingTests(unittest.TestCase):
 
     def run_step(self, game):
         return self.observer.capture_step(game,self.scene,self.action,self.previous,self.clock)
+
+    def test_normal_scan_only_captures_baseline_with_original_wait_and_drag(self):
+        self.observer=ScanSettlingObserver(self.scene)
+        game=FakeGame(self.clock,[self.frame])
+        with patch.object(self.observer,'compare',side_effect=AssertionError('Unexpected diagnostics')):
+            sample=self.run_step(game)
+        self.assertIs(sample.image,self.frame)
+        self.assertEqual(game.calls[:2],[('drag',60,0),('park',(180,54))])
+        self.assertEqual(sum(call[0]=='capture' for call in game.calls),1)
+        self.assertAlmostEqual(sample.capture_started,.692+.38)
+        self.assertEqual(sample.probes,())
+        self.assertEqual(sample.timing['probe_times'],[])
+        self.assertEqual(sample.timing['comparisons'],{})
+        self.assertEqual(self.observer.summary()['mode'],'baseline')
+        self.assertEqual(self.observer.summary()['compared_frames'],0)
+
+    def test_normal_scan_propagates_f9_without_a_recovery_capture(self):
+        self.observer=ScanSettlingObserver(self.scene)
+        game=FakeGame(self.clock,[Interrupted('F9'),self.frame])
+        with self.assertRaisesRegex(Interrupted,'F9'):self.run_step(game)
+        self.assertEqual(sum(call[0]=='capture' for call in game.calls),1)
+        self.assertEqual(sum(call[0]=='drag' for call in game.calls),1)
+        self.assertEqual(self.observer.rows,[])
 
     def test_identical_early_frames_never_replace_baseline_and_keep_drag(self):
         final = self.frame.copy()

@@ -79,16 +79,6 @@ class ResizeTests(unittest.TestCase):
         FixedContentScrollableFrame._set_outer_viewport_size(frame,356)
         outer.configure.assert_called_once_with(width=356+17,height=SCROLL_VIEWPORT_HEIGHT)
 
-    def test_narrow_controls_move_optional_checkbox_to_its_own_right_aligned_row(self):
-        from app import App
-        checkbox=SimpleNamespace(grid_configure=MagicMock())
-        window=SimpleNamespace(_controls_compact=False,auto_check=checkbox)
-        App.apply_control_layout(window,True)
-        checkbox.grid_configure.assert_called_once_with(row=1,column=0,columnspan=3,sticky='e')
-        App.apply_control_layout(window,False)
-        self.assertEqual(checkbox.grid_configure.call_args.kwargs,
-                         dict(row=0,column=2,columnspan=1,sticky='e'))
-
     def test_resize_handler_ignores_changes_inside_current_breakpoint(self):
         from app import App
         window=SimpleNamespace(winfo_width=lambda:900,page=SimpleNamespace(_get_widget_scaling=lambda:1),

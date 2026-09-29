@@ -217,20 +217,31 @@ def _ranking_subset(predictions, enabled, ids, priorities, limit):
         if len(ids)<=limit:break
         values=metric[ids]
         best=ids[values==values.min()]
-        if len(best)<limit:break
-        distinct=set()
-        for index in best[:1024]:
-            distinct.add(b''.join(predictions[i][index].tobytes() for i in enabled))
-            if len(distinct)>=limit:break
-        if len(distinct)<limit:break
-        ids=best
+        def enough(pool):
+            distinct=set()
+            for index in pool[:1024]:
+                distinct.add(b''.join(predictions[i][index].tobytes() for i in enabled))
+                if len(distinct)>=limit:return True
+            return False
+        if len(best)>=limit and enough(best):
+            ids=best
+            continue
+        # A continuous risk score rarely has 32 identical best values. Keep
+        # a proven sufficient prefix instead of sorting the entire screen
+        # lattice. Include every cutoff tie; a sample only proves that enough
+        # distinct colors remain, never decides which final rows to publish.
+        if len(ids)>1024:
+            cutoff=np.partition(values,1023)[1023]
+            prefix=ids[values<=cutoff]
+            if len(prefix)<len(ids) and enough(prefix):ids=prefix
+        break
     return ids
 
 
 def translation_candidates(atlas, markers, rules, current_translation=(0, 0),
                            limit=8, cancelled=lambda: False, cycle_radius=1,
                            max_move=None, landing_radius=0., integer_moves=False):
-    """Exhaust every discrete translation phase at fixed scale and angle.
+    """Search fixed scale/angle, using actual integer moves when requested.
 
     Returns screenshot predictions (Delta E 76), never verified game HEX.
     All markers share one phase offset. Missing/conflicting pixels invalidate
@@ -248,20 +259,39 @@ def translation_candidates(atlas, markers, rules, current_translation=(0, 0),
     if not enabled:
         return []
     n = atlas.resolution
-    yy, xx = np.mgrid[:n, :n]
-    shifts = np.column_stack((xx.ravel(), yy.ravel())) / n
     inverse = np.linalg.inv(atlas.basis)
-    current_phase = current @ inverse.T
-    relative = (shifts-current_phase+.5) % 1-.5
-    moves, distance = _equivalent_moves(relative, atlas.basis, current,
-                                         radius=cycle_radius,
-                                         max_distance=max_move)
     if integer_moves:
-        moves=np.rint(moves)
+        # Enumerating atlas phase bins then rounding skipped integer mouse
+        # positions whenever a measured period exceeded atlas resolution.
+        # Sample the screen lattice directly in a centered fundamental cell.
+        # Padding is sampled too, so boundary landing checks do not assume
+        # that a noninteger texture period equals an integer grid wrap.
+        pad=int(np.ceil(landing_radius))
+        corners=np.array([[-.5,-.5],[-.5,.5],[.5,-.5],[.5,.5]])@atlas.basis.T
+        low=np.floor(corners.min(axis=0)).astype(int)-pad
+        high=np.ceil(corners.max(axis=0)).astype(int)+pad
+        yy,xx=np.mgrid[low[1]:high[1]+1,low[0]:high[0]+1]
+        grid_shape=xx.shape
+        moves=np.column_stack((xx.ravel(),yy.ravel()))
+        relative=moves@inverse.T
+        candidate_mask=((relative>=-.5)&(relative<.5)).all(axis=1)
         distance=np.linalg.norm(moves,axis=1)
-        if max_move is not None:distance=np.where(distance<=max_move,distance,np.inf)
-    sample_shifts=(current+moves) if integer_moves else shifts@atlas.basis.T
-    predictions = []; deltas = []; passes = []; usable = np.ones(n*n, bool)
+        if max_move is not None:candidate_mask&=distance<=max_move
+        sample_shifts=current+moves
+        shifts=np.mod(sample_shifts@inverse.T,1.)
+    else:
+        yy, xx = np.mgrid[:n, :n]
+        grid_shape=(n,n)
+        shifts = np.column_stack((xx.ravel(), yy.ravel())) / n
+        current_phase = current @ inverse.T
+        relative = (shifts-current_phase+.5) % 1-.5
+        moves, distance = _equivalent_moves(relative, atlas.basis, current,
+                                             radius=cycle_radius,
+                                             max_distance=max_move)
+        sample_shifts=shifts@atlas.basis.T
+        candidate_mask=np.isfinite(distance)
+    count=len(moves)
+    predictions = []; deltas = []; passes = []; usable = np.ones(count, bool)
     for i in range(3):
         if cancelled():
             raise InterruptedError('Calculation cancelled')
@@ -274,8 +304,8 @@ def translation_candidates(atlas, markers, rules, current_translation=(0, 0),
         targets = np.array([rgb(c) for c in rules[i]['colors']])
         if not len(targets):
             raise ValueError('An enabled region needs a target color')
-        distances = np.full(n*n, np.inf)
-        exact = np.zeros(n*n, bool)
+        distances = np.full(count, np.inf)
+        exact = np.zeros(count, bool)
         values_lab = lab(values)
         for target, target_lab in zip(targets, lab(targets)):
             distances = np.minimum(distances, np.linalg.norm(values_lab-target_lab, axis=1))
@@ -291,27 +321,36 @@ def translation_candidates(atlas, markers, rules, current_translation=(0, 0),
     stable = np.zeros(len(passed), bool)
     neighborhood_maximum = maximum.copy()
     if landing_radius:
-        pad=int(np.ceil(n*landing_radius*np.abs(inverse).sum(axis=1).max()))
-        if pad > n:
-            raise ValueError('Landing neighborhood exceeds one atlas period')
+        if not integer_moves:
+            pad=int(np.ceil(n*landing_radius*np.abs(inverse).sum(axis=1).max()))
+            if pad > n:
+                raise ValueError('Landing neighborhood exceeds one atlas period')
         kernel=np.ones((2*pad+1,2*pad+1),np.uint8)
-        field=np.where(usable,maximum,np.inf).reshape(n,n).astype(np.float32)
-        padded=cv2.copyMakeBorder(field,pad,pad,pad,pad,cv2.BORDER_WRAP)
-        neighborhood_maximum=cv2.dilate(padded,kernel)[pad:-pad,pad:-pad].ravel()
-        accepted_mask=(passed&usable).reshape(n,n).astype(np.uint8)
-        padded=cv2.copyMakeBorder(accepted_mask,pad,pad,pad,pad,cv2.BORDER_WRAP)
-        stable=cv2.erode(padded,kernel)[pad:-pad,pad:-pad].ravel().astype(bool)
-    risk=np.where(stable,neighborhood_maximum,maximum)
+        field=np.where(usable,maximum,np.inf).reshape(grid_shape).astype(np.float32)
+        accepted_mask=(passed&usable).reshape(grid_shape).astype(np.uint8)
+        if integer_moves:
+            neighborhood_maximum=cv2.dilate(field,kernel,borderType=cv2.BORDER_CONSTANT,
+                                            borderValue=float('inf')).ravel()
+            stable=cv2.erode(accepted_mask,kernel,borderType=cv2.BORDER_CONSTANT,
+                             borderValue=0).ravel().astype(bool)
+        else:
+            padded=cv2.copyMakeBorder(field,pad,pad,pad,pad,cv2.BORDER_WRAP)
+            neighborhood_maximum=cv2.dilate(padded,kernel)[pad:-pad,pad:-pad].ravel()
+            padded=cv2.copyMakeBorder(accepted_mask,pad,pad,pad,pad,cv2.BORDER_WRAP)
+            stable=cv2.erode(padded,kernel)[pad:-pad,pad:-pad].ravel().astype(bool)
+    risk=np.maximum(neighborhood_maximum,maximum)
     from candidate_ranking import candidate_order,exact_priority,exact_fields
     from color_family import family_priority,family_fields
     hits,exact_max,exact_avg,exact_total=exact_priority(predictions,deltas,rules)
     family_max,family_avg,family_losses=family_priority(predictions,rules)
-    ids=_ranking_subset(predictions,enabled,np.flatnonzero(usable&np.isfinite(distance)),
-                        (family_max,family_avg,exact_max,exact_avg,maximum,average),limit)
+    ids=_ranking_subset(predictions,enabled,np.flatnonzero(usable&candidate_mask),
+                        (~(passed&stable) if landing_radius else ~passed,risk,maximum,average,-hits,exact_max,exact_avg,
+                         family_max,family_avg),limit)
     order=ids[candidate_order(hits[ids],maximum[ids],average[ids],passed[ids],stable[ids],
                           neighborhood_maximum[ids],distance[ids],
                           exact_maximum=exact_max[ids],exact_average=exact_avg[ids],
-                          family_maximum=family_max[ids],family_average=family_avg[ids])]
+                           family_maximum=family_max[ids],family_average=family_avg[ids],
+                           neighborhood_present=bool(landing_radius),candidate_ids=ids)]
     result = []; seen = set()
     for index in order:
         if cancelled():

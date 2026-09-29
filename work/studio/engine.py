@@ -11,6 +11,7 @@ from best_result import BestResult,proximity,ranking
 from window_target import WindowUnavailable
 from input_response import assess_response,ResponseGuard
 from session_store import SessionStore,cleanup
+from build_info import runtime_identity
 
 def local_offsets(radius=2):
     """Visit nearby integer offsets without ever issuing a zero displacement."""
@@ -152,7 +153,8 @@ class Runner:
                 # Atlas capture performs OCR before entering the legacy loop;
                 # initialize the bundled/system Tesseract path here as well.
                 configure_ocr()
-                self.event('config',rules=rules,strategy=strategy,auto_apply=False)
+                self.event('config',rules=rules,strategy=strategy,auto_apply=False,
+                           build=runtime_identity())
                 return self.atlas_runner(self,rules,mode=mode,auto=auto,
                                          activate=activate,target=target,
                                          **strategy_context)

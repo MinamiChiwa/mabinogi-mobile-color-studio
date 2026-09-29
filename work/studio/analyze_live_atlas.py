@@ -44,12 +44,25 @@ def export_maps(out,atlas):
     return time.perf_counter()-started
 
 
-def measured_translation(a,b,feature_cache=None,texture_mask=None):
+def measured_translation(a,b,feature_cache=None,texture_mask=None,diagnostics=None,*,dense_retry=True):
     """Register textures; refuse scale/rotation changes in a translation atlas."""
     h,w=a.shape[:2]
-    motion=measure_board_motion(a,b,(0,0,w,h),feature_cache=feature_cache,texture_mask=texture_mask)
+    diagnostics={} if diagnostics is None else diagnostics
+    diagnostics.clear();diagnostics.update(attempts=[],passed=False)
+    motion=None
+    # Low-contrast textures can have fewer than twenty default SIFT inliers
+    # despite a valid overlap. Retry on the same pixels with denser features;
+    # match count, inlier ratio and translation-only gates remain unchanged.
+    for contrast in ((.04,.01) if dense_retry else (.04,)):
+        attempt={};diagnostics['attempts'].append(attempt)
+        motion=measure_board_motion(a,b,(0,0,w,h),feature_cache=feature_cache,
+                                    texture_mask=texture_mask,
+                                    contrast_threshold=contrast,diagnostics=attempt)
+        if motion is not None:break
     if motion is None or abs(motion['scale']-1)>.005 or abs(motion['angle'])>.2:
+        diagnostics['reason']=attempt.get('reason','unverified_motion') if motion is None else 'non_translation_motion'
         raise ValueError('Texture translation could not be established')
+    diagnostics.update(passed=True,method='sift' if contrast==.04 else 'dense_sift_retry')
     return np.asarray(motion['matrix'],dtype=float)[:,2]
 
 
@@ -72,7 +85,10 @@ def measure_periods(images,offsets,masks,feature_cache=None,check=None):
             axes=[axis for axis,extent in enumerate((w,h))
                   if abs(delta[axis])>.45*extent and abs(delta[1-axis])<2]
             if not axes:continue
-            try:residual=measured_translation(images[j],images[i],feature_cache,texture_mask)
+            # Distant frame pairs often have no overlap. Their failure is
+            # already handled by trying another return pair; denser extraction
+            # is reserved for an adjacent frame that would break the chain.
+            try:residual=measured_translation(images[j],images[i],feature_cache,texture_mask,dense_retry=False)
             except ValueError:continue
             difference=delta-residual
             rmse=translation_error(images[j],images[i],masks,*residual)
@@ -162,6 +178,7 @@ class CaptureAlignment:
         self.texture_mask=self.masks.any(axis=0)
         self.images=[];self.names=[];self.offsets=[];self.motions=[]
         self.feature_cache={}
+        self.last_failure=None
         self.seconds=0.
 
     def append(self,name,image,command=None):
@@ -170,7 +187,12 @@ class CaptureAlignment:
         if i:
             a,b=self.images[-1],image
             dx,dy=command['dx'],command['dy']
-            measured=measured_translation(a,b,self.feature_cache,self.texture_mask)
+            registration={}
+            try:measured=measured_translation(a,b,self.feature_cache,self.texture_mask,registration)
+            except ValueError:
+                self.last_failure=dict(frame=name,reference=self.names[-1],
+                                       command=[dx,dy],registration=registration)
+                raise
             if np.linalg.norm(measured-[dx,dy])>12:
                 raise ValueError('Measured motion disagrees with capture command')
             dx,dy=measured
@@ -184,7 +206,7 @@ class CaptureAlignment:
                              absolute[1],1.5,.15)
                 if np.isfinite(ae) and ae<=8:absolute=np.array([ax,ay])
             self.offsets.append(absolute)
-            self.motions.append(dict(frame=name,dx=dx,dy=dy,rgb_rmse=e))
+            self.motions.append(dict(frame=name,dx=dx,dy=dy,rgb_rmse=e,registration=registration))
         else:self.offsets.append(np.zeros(2))
         self.images.append(image);self.names.append(name)
         self.seconds+=time.perf_counter()-started
@@ -318,7 +340,7 @@ def run(source,game_codes=None,example_targets=None,target_rules=None,output=Non
         return False
     progress(stage='search')
     candidates=(translation_candidates(expanded,markers,rules,offsets[-1],cancelled=cancelled,
-                                       landing_radius=1.,integer_moves=True)
+                                       landing_radius=1.,integer_moves=True,limit=32)
                 if rules and report['expanded']['quality_gate']['passed'] else [])
     search_diagnostics={}
     if rules and report['expanded']['quality_gate']['passed']:
@@ -328,7 +350,7 @@ def run(source,game_codes=None,example_targets=None,target_rules=None,output=Non
         joint=similarity_candidates(expanded,markers,rules,offsets[-1],(h,w),
                                     scale_bounds=(min(levels),1.),scale_levels=levels,
                                     cancelled=cancelled,diagnostics=search_diagnostics,
-                                    include_compromises=True)
+                                    include_compromises=True,limit=24)
         for row in candidates:row['search_space']='periodic_translation'
         for row in joint:
             row['id']+=len(candidates)

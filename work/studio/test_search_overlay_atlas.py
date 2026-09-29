@@ -15,6 +15,25 @@ class Button:
 
 
 class SearchOverlayAtlasTests(unittest.TestCase):
+    def test_pose_only_recovery_does_not_claim_colors_were_read(self):
+        import i18n
+        original=i18n.language
+        try:
+            for language in ('简体中文','繁體中文','English'):
+                i18n.set_language(language)
+                overlay=SearchOverlay.__new__(SearchOverlay)
+                for name in ('clear_candidates','results','copy','activity','collapse','resize_surface','render'):
+                    setattr(overlay,name,Mock())
+                with patch('search_overlay.ct.CTkLabel') as labels:
+                    overlay.show_recovery(dict(verified=False,pose_reliable=True,
+                        actual_colors=[None]*3,actual_deltas=[None]*3))
+                self.assertEqual(overlay.render.call_args.args[1],
+                                 '未能读取当前色码，请以游戏内显示为准。')
+                labels.assert_not_called()
+                if language=='English':
+                    self.assertIn('could not be read',str(i18n.tr(overlay.render.call_args.args[1])))
+        finally:i18n.set_language(original)
+
     def test_unrestored_history_is_labeled_separately_in_three_languages(self):
         import i18n
         original=i18n.language

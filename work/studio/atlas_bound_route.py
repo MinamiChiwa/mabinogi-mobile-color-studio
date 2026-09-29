@@ -120,7 +120,7 @@ def bound_motion(candidate, board, markers, max_steps=80):
 
 def bind_candidate(candidate, atlas, capture_offset, board, markers, rules,
                    now, deadline, *, reference_pose=None, check=lambda:None,
-                   require_stable=False, allow_cross_family=False):
+                   require_stable=False, allow_cross_family=False, allow_color_compromise=False):
     """Compile once, resample the forecast endpoint, then retain the same inputs."""
     from atlas_execution import reposition_budget
     check()
@@ -195,8 +195,16 @@ def bind_candidate(candidate, atlas, capture_offset, board, markers, rules,
                                     landing_excess <= MAX_CROSS_LANDING_FAMILY_EXCESS)
         except (TypeError, ValueError):
             cross_family_allowed = False
-    family_gate = (centre_family_safe and landing_family_safe) or cross_family_allowed
-    stable=bool(stability.get('passed')) and family_gate and samples_complete
+    quality_preferred = centre_family_safe and landing_family_safe
+    # Colour uncertainty is a ranking preference, not an impossible input.
+    # Production can retain a fully sampled integer endpoint as a compromise
+    # while still requiring valid gestures and measuring the game response.
+    family_gate = quality_preferred or cross_family_allowed or allow_color_compromise
+    stable=(bool(stability.get('passed')) and family_gate and
+            (samples_complete or allow_color_compromise))
+    row['route_stability'].update(motion_passed=bool(stability.get('passed')),
+        samples_complete=samples_complete,quality_preferred=quality_preferred,
+        color_compromise_allowed=bool(allow_color_compromise))
     row['route_stability']['passed']=stable
     if not stable and stability.get('passed'):
         # Keep the public reason compatible with existing diagnostics; the
@@ -214,6 +222,10 @@ def bind_candidate(candidate, atlas, capture_offset, board, markers, rules,
         row['cross_family_fallback'] = bool(cross_family_allowed and
                                              not (centre_family_safe and landing_family_safe))
         row['route_stability']['family_gate'] = 'relaxed_cross_family'
+    if allow_color_compromise:
+        row['cross_family_fallback'] = not centre_family_safe
+        row['landing_uncertain'] = not (quality_preferred and samples_complete)
+        row['route_stability']['family_gate'] = 'ranked_color_preference'
     if require_stable and not stable:
         reason='unstable_landing' if stability.get('passed') else 'unstable_route'
         return None,dict(budget,allowed=False,reason=reason,

@@ -90,7 +90,8 @@ def rescore_candidate(atlas, capture_offset, candidate, final_pose, markers,
     # survive a pose change. They are recomputed below only when sampled.
     for name in ('landing_safe','landing_maximum','landing_radius','phase',
                  'remaining_translation','planned_route','input_route',
-                 'execution_budget'):
+                 'execution_budget','landing_family_safe','landing_family_maximum',
+                 'route_stability','landing_uncertain','cross_family_fallback'):
         row.pop(name,None)
     row.update(score)
     row.update(pose_fields(pose,board))

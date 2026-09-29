@@ -274,7 +274,7 @@ class ServiceTests(unittest.TestCase):
         self.assertNotIn('时间不足',event[1]['message'])
         self.assertIn('无法从当前位置可靠到达',event[1]['message'])
 
-    def test_automatic_candidate_prioritizes_all_exact_hits_over_similar_error(self):
+    def test_automatic_candidate_balances_regions_before_exact_hits(self):
         owner=Owner();base=self.callbacks();selected=[]
         base.build=lambda *a,**k:{'quality_gate':{'passed':True},'candidates':[
             dict(id=0,dx=0,dy=0,accepted=False,maximum=30,average=20,
@@ -287,14 +287,15 @@ class ServiceTests(unittest.TestCase):
             return dict(self.verified(owner,report,candidate,rules),accepted=False)
         base.default=compromise
         result=AtlasService(base).run(owner,[],selection_deadline=time.monotonic()+30)
-        self.assertEqual(selected,[0])
-        self.assertEqual(result['candidate_id'],0)
+        self.assertEqual(selected,[1])
+        self.assertEqual(result['candidate_id'],1)
 
-    def test_balanced_exact_regions_precede_a_partial_exact_hit(self):
+    def test_family_boundary_does_not_override_lower_overall_error(self):
         owner=Owner();base=self.callbacks();selected=[]
         base.build=lambda *a,**k:{'quality_gate':{'passed':True},'candidates':[
             dict(id=2,dx=0,dy=0,accepted=False,maximum=35,average=12,
-                 exact_matches=1,exact_total=2,exact_maximum=35,exact_average=17.5),
+                 exact_matches=1,exact_total=2,exact_maximum=35,exact_average=17.5,
+                 family_maximum=1.,family_average=.5),
             dict(id=7,dx=1,dy=1,accepted=False,maximum=40,average=16,
                  exact_matches=0,exact_total=2,exact_maximum=5,exact_average=4)],
             'board':(0,0,900,900)}
@@ -303,10 +304,10 @@ class ServiceTests(unittest.TestCase):
             return dict(self.verified(owner,report,candidate,rules),accepted=False)
         base.default=compromise
         result=AtlasService(base).run(owner,[],selection_deadline=time.monotonic()+30)
-        self.assertEqual(selected,[7])
-        self.assertEqual(result['candidate_id'],7)
+        self.assertEqual(selected,[2])
+        self.assertEqual(result['candidate_id'],2)
         candidates=next(data['candidates'] for kind,data in owner.events if kind=='atlas_candidates')
-        self.assertEqual([row['id'] for row in candidates],[7,2])
+        self.assertEqual([row['id'] for row in candidates],[2,7])
 
     def test_failed_hex_automatically_tries_next_from_measured_pose(self):
         owner=Owner();base=self.callbacks();moves=[]
@@ -324,8 +325,8 @@ class ServiceTests(unittest.TestCase):
         kinds=[k for k,_ in owner.events]
         self.assertLess(kinds.index('atlas_candidate_failed'),kinds.index('atlas_default_verified'))
 
-    def test_retry_compares_exact_group_error_instead_of_hit_count(self):
-        for measured_error,expected_ids in ((35,[0,1]),(2,[0])):
+    def test_retry_compares_overall_error_when_exact_hit_counts_match(self):
+        for measured_error,expected_ids in ((50,[0,1]),(2,[0])):
             with self.subTest(measured_error=measured_error):
                 owner=Owner();base=self.callbacks();calls=[]
                 base.build=lambda *a,**k:{'quality_gate':{'passed':True},'candidates':[
@@ -337,7 +338,7 @@ class ServiceTests(unittest.TestCase):
                 def failed(owner,report,candidate,rules,**kwargs):
                     calls.append(candidate['id'])
                     return dict(self.verified(owner,report,candidate,rules),accepted=False,
-                                exact_matches=1,exact_maximum=measured_error,
+                                exact_matches=0,exact_maximum=measured_error,
                                 exact_average=measured_error/2,maximum=measured_error,average=measured_error/3)
                 def choice(owner,report,candidate,rules,**kwargs):
                     calls.append(candidate['id'])
@@ -362,7 +363,8 @@ class ServiceTests(unittest.TestCase):
 
     def protection_case(self,actual_errors,*,accepted=False):
         owner=Owner();base=self.callbacks();calls=[]
-        rows=[dict(id=i,dx=i*5,dy=0,accepted=True,maximum=i,average=i) for i in range(4)]
+        # These fixtures isolate error improvement within one acceptance tier.
+        rows=[dict(id=i,dx=i*5,dy=0,accepted=accepted,maximum=i,average=i) for i in range(4)]
         base.build=lambda *a,**kw:dict(quality_gate={'passed':True},candidates=rows,board=(0,0,900,900))
         def execute(owner,report,candidate,rules,**kwargs):
             calls.append(candidate['id'])

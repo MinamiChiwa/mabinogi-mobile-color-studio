@@ -1,4 +1,4 @@
-"""Observe earlier scan frames without replacing the established late sample.
+"""Capture the established late sample, with optional early-frame diagnostics.
 
 The two probe captures fit inside the existing post-drag settling interval.
 They never enter the atlas or trigger input. Saved comparisons provide the
@@ -28,9 +28,10 @@ class ScanSample:
 
 class ScanSettlingObserver:
     """Bounded, per-session measurement; no learned setting crosses sessions."""
-    def __init__(self, scene):
+    def __init__(self, scene, *, observe=False):
         self.board = tuple(map(int, scene.board))
         self.masks = material_masks(scene)
+        self.observe = bool(observe)
         self.disabled_reason = None
         self.rows = []
 
@@ -88,7 +89,7 @@ class ScanSettlingObserver:
                                     capture_seconds=after-before))
             return after
 
-        if reason is None:
+        if self.observe and reason is None:
             try:
                 first_done = observe('early', parked_at+FIRST_PROBE_SECONDS)
                 second_at = max(parked_at+SECOND_PROBE_SECONDS,
@@ -132,7 +133,7 @@ class ScanSettlingObserver:
         # captures and the measured comparison cost in a prospective policy.
         saving = (max(0., captured_at-parked_at-probe_times[-1]['end_seconds']
                       -comparison_seconds) if matched and changed else 0.)
-        row = dict(mode='observe_only', selected='baseline',
+        row = dict(mode='observe_only' if self.observe else 'baseline', selected='baseline',
                    dx=action['dx'], dy=action['dy'],
                    drag_seconds=released_at-started, park_seconds=parked_at-released_at,
                    settle_target_seconds=BASELINE_SETTLE_SECONDS,
@@ -148,7 +149,7 @@ class ScanSettlingObserver:
         return ScanSample(image, capture_started, captured_at, row, tuple(probes))
 
     def summary(self):
-        return dict(mode='observe_only', frames=len(self.rows),
+        return dict(mode='observe_only' if self.observe else 'baseline', frames=len(self.rows),
                     compared_frames=sum(bool(r['comparisons']) for r in self.rows),
                     identical_early_frames=sum(r['early_matches_baseline'] for r in self.rows),
                     moved_frames=sum(r['motion_observed'] for r in self.rows),

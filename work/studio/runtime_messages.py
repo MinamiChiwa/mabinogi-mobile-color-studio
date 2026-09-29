@@ -2,6 +2,7 @@
 
 # Complete clauses take precedence over generic UI words such as 'Region'.
 EN = {
+    '当前颜色已保留，未能进一步调整。': 'The current colors are kept. No further adjustment was available.',
     '自动染色': 'Automatic dyeing',
     '正在恢复本轮已实测的最佳方案。': 'Restoring the best combination measured in this round.',
     '未能恢复先前最佳结果，请以游戏当前颜色为准。': 'The previous best result could not be restored. Check the current colors in the game.',
@@ -40,10 +41,14 @@ EN = {
     '无法验证色板位置：前后图像配准未通过。': 'The board position could not be verified because image alignment failed.',
     '游戏倒计时已到安全截止时间。': 'The game countdown reached the safe input deadline. Automatic movement stopped.',
     '诊断输入预留时间不足。': 'There is not enough time for the next diagnostic input.',
+    '输入阶段预留时间不足。': 'Movement has ended to leave time for verification and return.',
+    '本次调整未完成，已读取当前游戏颜色。': 'This adjustment was not completed. The current game colors have been read.',
+    '未能读取当前色码，请以游戏内显示为准。': 'The current color codes could not be read. Refer to the colors displayed in the game.',
     '入口坐标参数已忽略；等待用户手动进入倒计时染色界面': 'The entry coordinates were ignored. Waiting for the timed dye screen to be opened manually.',
     '文字识别组件不可用，请修复 Tesseract 后再开始染色采样。': 'OCR is unavailable. Repair Tesseract before starting another dye session.',
 }
 TW = {
+    '当前颜色已保留，未能进一步调整。': '已保留目前顏色，無法進一步調整。',
     '自动染色': '自動染色',
     '正在恢复本轮已实测的最佳方案。': '正在恢復本輪已實測的最佳方案。',
     '未能恢复先前最佳结果，请以游戏当前颜色为准。': '未能恢復先前最佳結果，請以遊戲目前顏色為準。',
@@ -79,6 +84,9 @@ TW = {
     '前后图像配准未通过': '前後影像的對齊驗證未通過',
     '游戏倒计时已到安全截止时间。': '遊戲倒數已到達安全操作期限，已停止自動移動。',
     '诊断输入预留时间不足。': '下一次診斷操作所需的時間不足。',
+    '输入阶段预留时间不足。': '已結束移動，預留複核與返回時間。',
+    '本次调整未完成，已读取当前游戏颜色。': '本次調整未完成，已讀取目前遊戲顏色。',
+    '未能读取当前色码，请以游戏内显示为准。': '無法讀取目前色碼，請以遊戲內顯示為準。',
     '文字识别组件不可用，请修复 Tesseract 后再开始染色采样。': '文字辨識元件無法使用，請修復 Tesseract 後再開始染色採樣。',
 }
 

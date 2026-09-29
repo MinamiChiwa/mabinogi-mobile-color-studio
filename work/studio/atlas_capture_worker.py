@@ -38,8 +38,17 @@ class CaptureWorker:
             record['storage_error']=str(exc)
         record['png_seconds']=time.perf_counter()-started
         if self.error is None:
-            try:self.alignment.append(name,crop,command)
-            except Exception as exc:self.error=str(exc)
+            try:
+                self.alignment.append(name,crop,command)
+                if self.alignment.motions:
+                    last=self.alignment.motions[-1]
+                    if isinstance(last,dict) and last.get('frame')==name:
+                        record['alignment']=last
+            except Exception as exc:
+                self.error=str(exc)
+                record['alignment_error']=self.error
+                failure=getattr(self.alignment,'last_failure',None)
+                if isinstance(failure,dict):record['alignment_failure']=failure
         # Early frames are diagnostic board crops only: never append them to
         # the alignment chain or create training/holdout frame log entries.
         probe_started=time.perf_counter()

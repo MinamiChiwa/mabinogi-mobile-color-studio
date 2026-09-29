@@ -2,7 +2,7 @@
 from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-import itertools, re, sys, os, shutil, subprocess, io, shlex
+import itertools, re, sys, os, shutil, subprocess, io, shlex, time
 import cv2
 import numpy as np
 import pytesseract
@@ -59,7 +59,17 @@ def configure_ocr(strict=False):
         raise RuntimeError(message)
     return False
 
-def _ocr_text(image, *, lang='eng', config='', timeout=2):
+def _check_ocr_deadline(deadline, clock, check):
+    check()
+    if deadline is None:return None
+    if not np.isfinite(deadline):raise ValueError('OCR deadline must be finite')
+    remaining=float(deadline)-clock()
+    if remaining<=0:raise TimeoutError('OCR observation deadline expired')
+    return remaining
+
+
+def _ocr_text(image, *, lang='eng', config='', timeout=2,
+              deadline=None, clock=time.monotonic, check=lambda:None):
     """Use binary pipes so OCR never depends on temporary-file path encoding."""
     if not isinstance(image, Image.Image):image=Image.fromarray(image)
     buffer=io.BytesIO()
@@ -69,22 +79,34 @@ def _ocr_text(image, *, lang='eng', config='', timeout=2):
     # filename when passed through pytesseract's Windows config parser.
     args=[pytesseract.pytesseract.tesseract_cmd,'stdin','stdout','-l',lang]
     args.extend(shlex.split(config,posix=True))
-    result=subprocess.run(args,input=buffer.getvalue(),capture_output=True,
-        timeout=timeout,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+    # Encoding and preprocessing use the same absolute allowance as the OCR
+    # process. Recheck immediately before launching, not only at card entry.
+    remaining=_check_ocr_deadline(deadline,clock,check)
+    process_timeout=timeout if remaining is None else min(timeout,remaining)
+    try:
+        result=subprocess.run(args,input=buffer.getvalue(),capture_output=True,
+            timeout=process_timeout,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+    finally:
+        _check_ocr_deadline(deadline,clock,check)
     if result.returncode:
         raise pytesseract.TesseractError(result.returncode,result.stderr.decode('utf-8',errors='replace'))
     return result.stdout.decode('utf-8',errors='replace')
 
 
-def _tesseract(image, config, timeout=2):
+def _tesseract(image, config, timeout=2, *,
+               deadline=None, clock=time.monotonic, check=lambda:None):
     """Return OCR text, degrading to an empty result when Tesseract is absent."""
     global OCR_AVAILABLE
     if OCR_AVAILABLE is False:
         return ''
     try:
-        text = _ocr_text(image, lang='eng', config=' '.join(filter(None,(OCR_CONFIG,config))), timeout=timeout).strip()
+        budget={} if deadline is None else dict(deadline=deadline,clock=clock,check=check)
+        text = _ocr_text(image, lang='eng', config=' '.join(filter(None,(OCR_CONFIG,config))), timeout=timeout,**budget).strip()
         OCR_AVAILABLE = True
         return text
+    except TimeoutError:
+        # Observation expiry is a stage outcome, not a missing OCR runtime.
+        raise
     except (pytesseract.TesseractNotFoundError, OSError):
         OCR_AVAILABLE = False
         return ''
@@ -116,11 +138,12 @@ def accepted(colors,rules):
     if len(colors)!=3 or len(rules)!=3 or not any(rule['enabled'] for rule in rules):return False
     return all(not rule['enabled'] or (color is not None and error(color,rule['colors'],rule['exact']) <= (0 if rule['exact'] else rule['tolerance'])) for color,rule in zip(colors,rules))
 
-def ocr(im,whitelist,psm=7):
+def ocr(im,whitelist,psm=7, *, deadline=None,clock=time.monotonic,check=lambda:None):
     if im.size==0:return ''
     h,w=im.shape[:2]; scale=max(2,40/max(h,1))
     im=cv2.resize(im,None,fx=scale,fy=scale,interpolation=cv2.INTER_CUBIC)
-    return _tesseract(Image.fromarray(im), config=f'--psm {psm} -c tessedit_char_whitelist={whitelist}')
+    budget={} if deadline is None else dict(deadline=deadline,clock=clock,check=check)
+    return _tesseract(Image.fromarray(im), config=f'--psm {psm} -c tessedit_char_whitelist={whitelist}',**budget)
 
 @dataclass
 class Scene:
@@ -167,7 +190,15 @@ def _swatch_distance(value,samples):
     return float(min(np.linalg.norm(code-samples),np.linalg.norm(rendered-samples)))
 
 
-def read_codes(image,cards,markers=None,enabled=None):
+def read_codes(image,cards,markers=None,enabled=None, *,
+               deadline=None,clock=time.monotonic,check=lambda:None):
+    """Read actual HEX values within an optional shared observation deadline."""
+    _check_ocr_deadline(deadline,clock,check)
+    def read_text(reader,*args,**kwargs):
+        _check_ocr_deadline(deadline,clock,check)
+        if deadline is not None:kwargs.update(deadline=deadline,clock=clock,check=check)
+        try:return reader(*args,**kwargs)
+        finally:_check_ocr_deadline(deadline,clock,check)
     out=[]
     for index,(x,y,w,h) in enumerate(cards):
         if enabled is not None and not enabled[index]:
@@ -187,7 +218,7 @@ def read_codes(image,cards,markers=None,enabled=None):
         for var in variants:
             var=cv2.resize(var,None,fx=4,fy=4,interpolation=cv2.INTER_CUBIC)
             var=cv2.copyMakeBorder(var,15,15,15,15,cv2.BORDER_CONSTANT,value=255 if var.ndim==2 else (255,255,255))
-            text=_tesseract(var, config='--psm 7 -c tessedit_char_whitelist=#0123456789ABCDEF')
+            text=read_text(_tesseract,var, config='--psm 7 -c tessedit_char_whitelist=#0123456789ABCDEF')
             hash_seen |= text.lstrip().startswith('#')
             m=re.fullmatch(r'#?([0-9A-F]{6})',text.replace(' ',''))
             if not m:continue
@@ -204,14 +235,14 @@ def read_codes(image,cards,markers=None,enabled=None):
                 enlarged=cv2.resize(gray,None,fx=factor,fy=factor,interpolation=cv2.INTER_CUBIC)
                 var=enlarged if threshold is None else np.uint8(enlarged>=threshold)*255
                 var=cv2.copyMakeBorder(var,15,15,15,15,cv2.BORDER_CONSTANT,value=255)
-                text=_tesseract(var,config=f'--psm {psm} -c tessedit_char_whitelist=#0123456789ABCDEF')
+                text=read_text(_tesseract,var,config=f'--psm {psm} -c tessedit_char_whitelist=#0123456789ABCDEF')
                 m=re.fullmatch(r'#?([0-9A-F]{6})',text.replace(' ',''))
                 if m:
                     value='#'+m.group(1);distance=_swatch_distance(value,samples)
                     candidates.append((distance,value))
                     if distance<3:break
         if not candidates or min(c[0] for c in candidates)>=3:
-            text=ocr(crop,'#0123456789ABCDEF')
+            text=read_text(ocr,crop,'#0123456789ABCDEF')
             m=re.fullmatch(r'#?([0-9A-F]{6})',text.replace(' ',''))
             if m:
                 value='#'+m.group(1); distance=_swatch_distance(value,samples)
@@ -234,7 +265,7 @@ def read_codes(image,cards,markers=None,enabled=None):
                     glyph=(1-mask[by:by+bh,bx:bx+bw])*255
                     key=(glyph.shape,glyph.tobytes())
                     if key not in cache:
-                        cache[key]=ocr(cv2.copyMakeBorder(glyph,5,5,5,5,cv2.BORDER_CONSTANT,value=255),'0123456789ABCDEF',10)
+                        cache[key]=read_text(ocr,cv2.copyMakeBorder(glyph,5,5,5,5,cv2.BORDER_CONSTANT,value=255),'0123456789ABCDEF',10)
                     chars.append(cache[key])
                 if all(re.fullmatch('[0-9A-F]',c) for c in chars):
                     value='#'+''.join(chars);distance=_swatch_distance(value,samples)
@@ -245,6 +276,7 @@ def read_codes(image,cards,markers=None,enabled=None):
         # must not turn a low-nibble misread into a successful HEX check.
         value=candidates[0][1] if candidates and candidates[0][0]<3 else None
         out.append(value)
+    _check_ocr_deadline(deadline,clock,check)
     return out
 
 def green_buttons(image):
@@ -411,7 +443,8 @@ def recognize(image,with_ocr=True,previous=None,enabled=None,*,read_colors=True)
     buttons=green_buttons(image)
     return Scene(cards,markers,(left,top,right,bottom),colors,seconds,buttons[0][:2] if buttons else None)
 
-def measure_board_motion(before,after,board,feature_cache=None,texture_mask=None):
+def measure_board_motion(before,after,board,feature_cache=None,texture_mask=None,
+                         contrast_threshold=.04,diagnostics=None):
     """Fit texture motion, rejecting weak matches and static UI features."""
     l,t,r,b=board
     if texture_mask is not None:
@@ -419,9 +452,12 @@ def measure_board_motion(before,after,board,feature_cache=None,texture_mask=None
         if texture_mask.shape!=(b-t,r-l):
             raise ValueError('Texture mask must match the board crop')
     mask_key=None if texture_mask is None else texture_mask.tobytes()
-    detector=cv2.SIFT_create(nfeatures=1800)
+    diagnostics={} if diagnostics is None else diagnostics
+    diagnostics.clear()
+    diagnostics.update(contrast_threshold=float(contrast_threshold),passed=False)
+    detector=cv2.SIFT_create(nfeatures=1800,contrastThreshold=float(contrast_threshold))
     def features(image):
-        key=(id(image),tuple(board),mask_key)
+        key=(id(image),tuple(board),mask_key,float(contrast_threshold))
         if feature_cache is not None and key in feature_cache:
             return feature_cache[key][1]
         crop=image[t:b,l:r]
@@ -432,13 +468,22 @@ def measure_board_motion(before,after,board,feature_cache=None,texture_mask=None
             feature_cache[key]=(image,found)
         return found
     ka,da=features(before);kb,db=features(after)
-    if da is None or db is None or len(db)<2:return None
+    diagnostics.update(features_before=len(ka),features_after=len(kb))
+    if da is None or db is None or len(db)<2:
+        diagnostics['reason']='insufficient_features';return None
     pairs=cv2.BFMatcher().knnMatch(da,db,k=2)
     good=[p[0] for p in pairs if len(p)==2 and p[0].distance<.7*p[1].distance]
-    if len(good)<20:return None
+    diagnostics['matches']=len(good)
+    if len(good)<20:
+        diagnostics['reason']='insufficient_matches';return None
     src=np.float32([ka[m.queryIdx].pt for m in good]);dst=np.float32([kb[m.trainIdx].pt for m in good])
     matrix,inliers=cv2.estimateAffinePartial2D(src,dst,method=cv2.RANSAC,ransacReprojThreshold=2)
-    if matrix is None or int(inliers.sum())<20 or float(inliers.mean())<.5:return None
+    if matrix is None or inliers is None or not np.isfinite(matrix).all():
+        diagnostics['reason']='invalid_transform';return None
+    diagnostics.update(inliers=int(inliers.sum()),inlier_ratio=float(inliers.mean()))
+    if int(inliers.sum())<20 or float(inliers.mean())<.5:
+        diagnostics['reason']='insufficient_inliers';return None
+    diagnostics.update(passed=True,reason='ok')
     return {'angle':round(float(np.degrees(np.arctan2(matrix[1,0],matrix[0,0]))),3),
             'scale':round(float(np.hypot(matrix[0,0],matrix[1,0])),4),'inliers':int(inliers.sum()),
             'matrix':matrix.tolist(),'origin':[l,t]}

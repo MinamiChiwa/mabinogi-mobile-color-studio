@@ -104,26 +104,26 @@ class CaptureGame(Game):
         if flags not in (4,16):
             self.check()
             scopes=tuple(getattr(self,'_input_scopes',()))
-            for deadline,guard in scopes:
-                if time.monotonic()>=deadline:raise Interrupted('诊断输入预留时间不足。')
+            for deadline,guard,expiry_factory in scopes:
+                if time.monotonic()>=deadline:raise expiry_factory('输入阶段预留时间不足。')
                 guard()
             # Guard callbacks may themselves consume time.
             self.check()
-            if any(time.monotonic()>=deadline for deadline,_guard in scopes):
-                raise Interrupted('诊断输入预留时间不足。')
+            for deadline,_guard,expiry_factory in scopes:
+                if time.monotonic()>=deadline:raise expiry_factory('输入阶段预留时间不足。')
         return super().send(flags,dx,dy,data)
 
     @contextmanager
-    def input_scope(self,deadline,guard):
+    def input_scope(self,deadline,guard,*,expiry_factory=Interrupted):
         """Bind an extra diagnostic guard to every final mouse input boundary.
 
         Releases remain possible during interruption. The scope never changes
         the preexisting game/workflow/stage deadlines and is removed on error.
         """
-        if not np.isfinite(deadline) or not callable(guard):
+        if not np.isfinite(deadline) or not callable(guard) or not callable(expiry_factory):
             raise ValueError('Finite input deadline and guard callback required')
         if not hasattr(self,'_input_scopes'):self._input_scopes=[]
-        self._input_scopes.append((float(deadline),guard))
+        self._input_scopes.append((float(deadline),guard,expiry_factory))
         try:
             yield
         finally:
@@ -268,7 +268,7 @@ def preflight(folder):
     return result
 
 
-def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=False,entry_size=None,emit=None,row_stagger=0.,response_protocol='baseline'):
+def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=False,entry_size=None,emit=None,row_stagger=0.,response_protocol='baseline',settling_probes=False):
     if not np.isfinite(row_stagger) or not 0 <= row_stagger <= .1:
         raise ValueError('row_stagger must be between 0 and 0.1')
     if response_protocol not in ('baseline','rotation_compare') or (response_protocol!='baseline' and strategy!='response'):
@@ -519,7 +519,7 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
                             workflow_deadline=budget.workflow_deadline,ready_at=ready_at,game=g,scene=scene,
                             image=final_image,geometry=tuple(g.geometry()))
             plan=grid_scan_plan(scene.board,row_stagger=row_stagger)
-            settling=ScanSettlingObserver(scene)
+            settling=ScanSettlingObserver(scene,observe=settling_probes)
             log('grid_plan',columns=8,rows=5,row_stagger=row_stagger,
                 marker_column_fill=True,coverage_fill=True,
                 marker_column_fill_moves=sum(a['supplemental_kind']=='marker_column_fill' for a in plan),
@@ -583,6 +583,8 @@ if __name__=='__main__':
     parser.add_argument('--response-protocol',choices=['baseline','rotation_compare'],default='baseline')
     parser.add_argument('--row-stagger',type=float,default=0.,choices=(0.,.05),
                         help='Optional 5%% row offset for the next capture-only calibration')
+    parser.add_argument('--settling-probes',action='store_true',
+                        help='Record extra early scan frames for offline settling diagnostics')
     args=parser.parse_args()
     kernel=C.windll.kernel32
     kernel.CreateMutexW.argtypes=[C.c_void_p,C.c_bool,C.c_wchar_p];kernel.CreateMutexW.restype=C.c_void_p
@@ -592,5 +594,6 @@ if __name__=='__main__':
     try:
         if args.mode=='preflight':
             if not preflight(args.folder)['passed']:raise SystemExit(1)
-        else:acquire(args.folder,args.entry,args.strategy,row_stagger=args.row_stagger,response_protocol=args.response_protocol)
+        else:acquire(args.folder,args.entry,args.strategy,row_stagger=args.row_stagger,
+                     response_protocol=args.response_protocol,settling_probes=args.settling_probes)
     finally:kernel.CloseHandle(mutex)

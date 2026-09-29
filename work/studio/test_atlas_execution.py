@@ -203,12 +203,12 @@ class ExecutionTests(unittest.TestCase):
         with self.assertRaises(CandidateExpired):batch.claim_choice(batch.id,0,self.adapter.ctx)
         self.assertEqual(batch.best()['id'],0)
 
-    def test_execution_prioritizes_overall_color_error_before_landing_safety(self):
+    def test_execution_uses_the_same_neighborhood_quality_as_search(self):
         exact=dict(self.row,accepted=True,maximum=0,average=0,landing_safe=False,landing_maximum=20)
         robust=dict(self.row,id=1,accepted=True,maximum=2,average=2,landing_safe=True,landing_maximum=3)
         batch=CandidateBatch([exact,robust],self.adapter.ctx,100,clock=lambda:0)
-        self.assertEqual(batch.best()['id'],0)
-        self.assertEqual(batch.commit_default(batch.id,self.adapter.ctx,0)['id'],0)
+        self.assertEqual(batch.best()['id'],1)
+        self.assertEqual(batch.commit_default(batch.id,self.adapter.ctx,1)['id'],1)
 
 
 if __name__=='__main__':unittest.main()

@@ -33,7 +33,7 @@ from ui_typography import FONT_FAMILY,TITLE_FONT,SECTION_FONT,BODY_FONT,SMALL_FO
 from resize_rendering import TopLevelResizeRedrawOptimization
 from display_geometry import logical_size,work_area
 
-APP_VERSION='0.3.4'
+from build_info import APP_VERSION
 CARD_WIDTH=344
 CARD_HEIGHT=400
 CARD_GAP=6
@@ -243,7 +243,7 @@ class App(ct.CTk):
         self._resize_redraw.disable_for(self.winfo_id())
         self.after(100,self.fit_screen)
         self.selected_window=None;self.overlay=None;self.active_rules=None;self.history=read_history(DATA/'history.json');self.best_summary=None
-        self.q=queue.Queue();self.runner=None;self.busy=False;self.picking=False;self.keys={};self.cards=[];self.auto=tk.BooleanVar(value=False)
+        self.q=queue.Queue();self.runner=None;self.busy=False;self.picking=False;self.keys={};self.cards=[]
         self.grid_columnconfigure(0,weight=1); self.grid_rowconfigure(0,weight=1)
         # The page follows the native window. Fixed-size card content is
         # centered inside it, while the top and bottom bars use the full width.
@@ -288,22 +288,20 @@ class App(ct.CTk):
         for i in range(3):
             body.grid_columnconfigure(i,weight=1,uniform='cards');card=Card(body,i);card.grid(row=0,column=i,padx=CARD_GAP,pady=CARD_GAP);self.cards.append(card)
         # Keep the card viewport centered between the top and bottom bars.
-        # The primary controls stay left; the optional checkbox stays right.
+        # The primary controls remain fixed and left aligned.
         self.page.grid_rowconfigure(2,weight=1)
         controls=ct.CTkFrame(self.page,fg_color='transparent');controls.grid(row=3,column=0,padx=BODY_SIDE_PADDING,pady=(8,4),sticky='ew')
         self.start=ct.CTkButton(controls,text='开始寻色   F8',height=44,width=165,font=(FONT,13,'bold'),fg_color=ACCENT,text_color='#102A27',hover_color='#80E5CF',command=lambda:self.go(activate=True));self.start.grid(row=0,column=0,padx=(0,8),pady=4,sticky='w')
         self.stop_button=ct.CTkButton(controls,text='停止   F9',height=44,width=100,font=BODY_FONT,fg_color='#2B384C',command=self.stop);self.stop_button.grid(row=0,column=1,padx=(0,8),pady=4,sticky='w')
-        self.auto_check=ct.CTkCheckBox(controls,text='达标后自动复核并套用',variable=self.auto,font=BODY_FONT,fg_color='#236D62')
         self.controls=controls;controls.grid_columnconfigure(2,weight=1)
-        self.auto_check.grid(row=0,column=2,pady=4,sticky='e')
         status=ct.CTkFrame(self.page,fg_color=PANEL,corner_radius=14);status.grid(row=4,column=0,padx=BODY_SIDE_PADDING,pady=(4,8),sticky='ew');status.grid_columnconfigure(0,weight=1)
         self.status=ct.CTkLabel(status,text='就绪 · 请先选择游戏窗口和目标颜色',font=BODY_FONT,anchor='w',wraplength=720,text_color=INK);self.status.grid(row=0,column=0,padx=18,pady=(12,5),sticky='ew')
         self.detail=ct.CTkLabel(status,text='',font=SMALL_FONT,text_color=MUTED,wraplength=720,anchor='w')
         self.detail.grid(row=1,column=0,padx=18,pady=(0,8),sticky='ew');self.detail.grid_remove()
         label=ct.CTkLabel(intro,text='适用于港澳台服瑪奇Mobile。游戏中使用本工具可能存在风险，建议谨慎使用。',font=SMALL_FONT,text_color=MUTED,wraplength=320,justify='left',anchor='w');label.pack(fill='x',pady=(0,8));self.intro_labels.append(label)
         self.footer=ct.CTkLabel(self.page,text='F9 随时停止并释放鼠标  ·  切换窗口停止寻色  ·  不自动开启下一瓶染色剂',font=SMALL_FONT,text_color=MUTED,wraplength=340,justify='right');self.footer.grid(row=5,column=0,padx=BODY_SIDE_PADDING,pady=(0,8),sticky='e')
-        self._layout_columns=None;self._topbars_compact=None;self._controls_compact=None
-        self.apply_card_layout(3);self.apply_topbar_layout(False);self.apply_control_layout(False)
+        self._layout_columns=None;self._topbars_compact=None
+        self.apply_card_layout(3);self.apply_topbar_layout(False)
         self.load()
         if self.history:self.display_best(self.history[0])
         self._hotkeys_stop=threading.Event()
@@ -320,8 +318,7 @@ class App(ct.CTk):
         width=int(event.width/scaling)
         columns=columns_for_width(width)
         topbars_compact=columns==1
-        controls_compact=columns==1
-        if columns==self._layout_columns and topbars_compact==self._topbars_compact and controls_compact==self._controls_compact:return
+        if columns==self._layout_columns and topbars_compact==self._topbars_compact:return
         self.reflow(width)
     def apply_card_layout(self,columns):
         if columns==self._layout_columns:return
@@ -337,11 +334,6 @@ class App(ct.CTk):
             columnspan=columns if columns==2 and i==2 else 1
             card.grid_configure(row=i//columns,column=column,columnspan=columnspan,sticky='')
         self._layout_columns=columns
-    def apply_control_layout(self,compact):
-        if compact==self._controls_compact:return
-        self.auto_check.grid_configure(row=1 if compact else 0,column=0 if compact else 2,
-                                       columnspan=3 if compact else 1,sticky='e')
-        self._controls_compact=compact
     def apply_topbar_layout(self,compact):
         if compact==self._topbars_compact:return
         if compact:
@@ -369,7 +361,6 @@ class App(ct.CTk):
         columns=columns_for_width(width)
         self.apply_card_layout(columns)
         self.apply_topbar_layout(columns==1)
-        self.apply_control_layout(columns==1)
     def refresh_language(self):
         self.title(f"{tr('染色工坊 · 瑪奇 Mobile')}  v{APP_VERSION}")
         self.refresh_window_label()
@@ -494,7 +485,7 @@ class App(ct.CTk):
                 self.overlay.begin(rules)
             except Exception:
                 self.set_detail('浮窗暂不可用，寻色状态请查看主窗口。')
-        threading.Thread(target=self.runner.launch,args=(rules,mode,self.auto.get(),activate,target),
+        threading.Thread(target=self.runner.launch,args=(rules,mode,False,activate,target),
                          kwargs={'strategy':runtime_strategy},daemon=True).start()
     def select_candidate(self,batch_id,candidate_id):
         if self.runner:self.runner.choose_candidate(batch_id,candidate_id)

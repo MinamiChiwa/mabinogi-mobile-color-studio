@@ -5,25 +5,34 @@ import numpy as np
 
 def candidate_order(exact_matches,maximum,average,accepted,landing_safe,
                     landing_maximum,distance,*,exact_maximum=None,exact_average=None,
-                    family_maximum=None,family_average=None):
-    """Return vectorized candidate indices using :func:`candidate_rank` order."""
-    exact_matches=np.asarray(exact_matches)
-    maximum=np.asarray(maximum)
-    average=np.asarray(average)
-    accepted=np.asarray(accepted,dtype=bool)
-    stable=accepted & np.asarray(landing_safe,dtype=bool)
-    risk=np.where(stable,np.asarray(landing_maximum),maximum)
-    distance=np.asarray(distance)
-    exact_maximum=np.zeros_like(maximum) if exact_maximum is None else np.asarray(exact_maximum)
-    exact_average=np.zeros_like(average) if exact_average is None else np.asarray(exact_average)
-    family_maximum=np.zeros_like(maximum) if family_maximum is None else np.asarray(family_maximum)
-    family_average=np.zeros_like(average) if family_average is None else np.asarray(family_average)
-    return np.lexsort((distance,risk,~stable,~accepted,-exact_matches,average,maximum,
-                       exact_average,exact_maximum,family_average,family_maximum))
+                    family_maximum=None,family_average=None,
+                    neighborhood_present=False,candidate_ids=None):
+    """Vectorized :func:`candidate_rank`, including compromise landing risk.
+
+    ``neighborhood_present`` distinguishes a sampled acceptance check from an
+    early search risk proxy. Supplying a risk never makes it disappear merely
+    because the center misses tolerance. None/NaN samples mean unknown risk.
+    """
+    def values(value,default=0.):
+        result=np.broadcast_to(np.asarray(default if value is None else value,float),shape)
+        return np.where(np.isfinite(result)&(result>=0),result,np.inf)
+    shape=np.asarray(maximum).shape
+    maximum=values(maximum,np.inf);average=values(average,np.inf)
+    risk=np.maximum(maximum,values(landing_maximum,np.inf))
+    accepted=np.asarray(accepted,float);landing_safe=np.asarray(landing_safe,float)
+    accepted=(np.isfinite(accepted)&(accepted!=0)&np.isfinite(risk)&np.isfinite(average)&
+              (~np.asarray(neighborhood_present,dtype=bool)|
+               (np.isfinite(landing_safe)&(landing_safe!=0))))
+    hits=np.asarray(exact_matches,float)
+    hits=np.where(np.isfinite(hits)&(hits>=0),hits,0)
+    ids=np.arange(maximum.size) if candidate_ids is None else np.asarray(candidate_ids)
+    return np.lexsort((ids,values(distance,np.inf),values(family_average),values(family_maximum),
+                       values(exact_average),values(exact_maximum),-hits,
+                       average,maximum,risk,~accepted))
 
 
 def exact_priority(colors,distances,rules):
-    """Vectorized exact-region priority, after all enabled colour families."""
+    """Vectorized exact matches, used after balanced overall colour quality."""
     from vision import rgb
     enabled=[i for i,r in enumerate(rules) if r.get('enabled')]
     count=len(colors[enabled[0]])
@@ -42,32 +51,39 @@ def exact_fields(hits,worst,average,total,index):
 
 
 def candidate_quality(row):
-    """Color priority shared by predictions and verified game results.
+    """Acceptance, sampled worst error, balanced center, then Exact ties.
 
-    Preserve every enabled region's colour family before balancing Exact
-    errors. Exact hits cannot compensate for turning a Similar blue grey.
-    Within the family envelope, minimize worst/mean Exact error, then overall
-    error. Similar-only searches have zero Exact-region metrics.
+    Observed results carry actual HEX acceptance and no landing forecast.
+    Predictions with a sampled neighborhood need all samples accepted before
+    entering the full-acceptance tier. The worst sample is a conservative
+    comparison score, not a calibrated game-response confidence bound.
     """
-    return (float(row.get('family_maximum',0)),float(row.get('family_average',0)),
-            float(row.get('exact_maximum',0)),float(row.get('exact_average',0)),
-            float(row.get('maximum',float('inf'))),float(row.get('average',float('inf'))),
-            -int(row.get('exact_matches',0)))
+    maximum=_number(row.get('maximum'));average=_number(row.get('average'))
+    observed=_truth(row.get('verified',False))
+    risk=(maximum if observed else
+          max(maximum,_number(row['landing_maximum']) if 'landing_maximum' in row else maximum))
+    neighborhood=not observed and ('landing_safe' in row or _number(row.get('landing_radius',0))>0)
+    accepted=(_truth(row.get('observed_accepted',row.get('accepted',False)) if observed else row.get('accepted',False))
+              and math.isfinite(risk) and math.isfinite(average)
+              and (not neighborhood or _truth(row.get('landing_safe',False))))
+    hits=_number(row.get('exact_matches',0));hits=hits if math.isfinite(hits) else 0.
+    return (not accepted,risk,maximum,average,-hits,
+            _number(row.get('exact_maximum',0)),_number(row.get('exact_average',0)),
+            _number(row.get('family_maximum',0)),_number(row.get('family_average',0)))
+
+
+def _number(value):
+    try: value=float(value)
+    except (ValueError,TypeError): return math.inf
+    return value if math.isfinite(value) and value>=0 else math.inf
+
+
+def _truth(value):
+    try:return bool(np.isfinite(value) and value)
+    except (TypeError,ValueError):return False
 
 
 def candidate_rank(row):
     """Use the same balanced color priority throughout search and execution."""
-    accepted=bool(row.get('accepted',False))
-    stable=accepted and bool(row.get('landing_safe',False))
-    maximum=float(row.get('maximum',float('inf')))
-    risk=float(row.get('landing_maximum',maximum)) if stable else maximum
-    # Cross-family rows are published only as the final fallback tier.  Once
-    # that tier is active, minimize the actual colour error first; otherwise a
-    # barely-in-family but very distant colour could outrank a visibly closer
-    # compromise.  Normal same-family and exact-priority ordering is unchanged.
-    if row.get('cross_family_fallback'):
-        return (maximum,float(row.get('average',float('inf'))),
-                float(row.get('family_maximum',float('inf'))),risk,
-                math.hypot(row.get('dx',0),row.get('dy',0)),int(row['id']))
-    return (*candidate_quality(row),not accepted,not stable,risk,
-            math.hypot(row.get('dx',0),row.get('dy',0)),int(row['id']))
+    return (*candidate_quality(row),_number(math.hypot(row.get('dx',0),row.get('dy',0))),
+            int(row['id']))

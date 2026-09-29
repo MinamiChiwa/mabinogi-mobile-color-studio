@@ -37,22 +37,15 @@ def _seeds(atlas, region, rule, limit, source_radius, include_compromises=False)
     hit_count=len(ids)
     if not hit_count and include_compromises:
         ids=np.flatnonzero(usable.ravel())
-        # No target hit: preserve the family before choosing closest colours.
-        # This changes proposals only; acceptance always uses original rules.
-        count=min(len(ids),max(limit,2048))
-        if count and count<len(ids):
-            within=ids[family[ids]<=1e-7]
-            if len(within)>=count:
-                ids=within[np.argpartition(distances[within],count-1)[:count]]
-            else:
-                ids=ids[np.lexsort((distances[ids],family[ids]))[:count]]
+        # Do not truncate by center error before evaluating neighborhood
+        # risk: a narrow low-error stripe could crowd out every broad island.
     if not len(ids):return np.empty((0,2)),np.empty(0),0
     pad=max(1,int(np.ceil(source_radius*n*np.abs(np.linalg.inv(atlas.basis)).sum(axis=1).max())))
     if pad>n:raise ValueError('Landing radius exceeds atlas period')
     field=np.where(usable.ravel(),distances,np.inf).reshape(n,n).astype(np.float32)
     padded=cv2.copyMakeBorder(field,pad,pad,pad,pad,cv2.BORDER_WRAP)
     worst=cv2.dilate(padded,np.ones((2*pad+1,2*pad+1),np.uint8))[pad:-pad,pad:-pad].ravel()
-    order=ids[np.lexsort((ids,distances[ids],worst[ids],family[ids]))]
+    order=ids[np.lexsort((ids,family[ids],distances[ids],worst[ids]))]
     # First include a best hit per spatial bin, then fill by color/robustness.
     bins=max(2,int(np.sqrt(limit)))
     kept=[]; seen=set()
@@ -77,7 +70,7 @@ def _seeds(atlas, region, rule, limit, source_radius, include_compromises=False)
         available=np.flatnonzero(usable.ravel())
         y,x=np.divmod(available,n)
         bins_xy=(y*fallback_bins//n)*fallback_bins+x*fallback_bins//n
-        order=np.lexsort((available,worst[available],distances[available],family[available],bins_xy))
+        order=np.lexsort((available,family[available],distances[available],worst[available],bins_xy))
         ordered_bins=bins_xy[order]
         first=np.r_[True,ordered_bins[1:]!=ordered_bins[:-1]]
         selected=set(kept)
@@ -205,8 +198,8 @@ def similarity_candidates(atlas, markers, rules, current_translation, board_shap
             diag['evaluated_transforms']+=len(a)
             diag['pair_evaluated_transforms'][pair_key]+=len(a)
             ids=np.flatnonzero(passed)
-            # Keep a bounded pool for the more costly neighborhood check. Include
-            # source-island quality so exact but brittle pixels cannot fill it.
+            # Keep a bounded pool for the joint neighborhood check. Pair seed
+            # risk is a screening score only, not a full three-region bound.
             risk=pair_risk[ii,jj]
             hits,exact_max,exact_avg,_=exact_priority(colors,distances,rules)
             family_max,family_avg,_=family_priority(colors,rules)

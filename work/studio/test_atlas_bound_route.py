@@ -13,6 +13,8 @@ from test_atlas_pose_scoring import CoordinateAtlas
 
 
 class ConstantAtlas:
+    basis=np.diag([100.,100.])
+    resolution=16
     def sample(self,region,points,offset):
         return np.tile([17,34,51],(len(points),1)),np.ones(len(points),bool)
 
@@ -210,6 +212,32 @@ class BoundRouteTests(unittest.TestCase):
         self.assertTrue(result['family_consistent'])
         np.testing.assert_allclose(result['prediction_pose'],self.game.pose[:2])
         self.assertEqual(result['predicted_colors'],['#112233']*3)
+
+    def test_live_rebind_keeps_supported_route_across_a_family_boundary(self):
+        from atlas_live_adapter import default_current
+        from test_atlas_service import Owner
+        row=self.bind();perform=self.game.perform_gesture
+        self.assertTrue(row['family_consistent'])
+        def drift_once(gesture):
+            perform(gesture)
+            if len(self.game.sent)==1:
+                self.game.pose=homogeneous([[1,0,.9],[0,1,.1]])@self.game.pose
+        self.game.perform_gesture=drift_once
+        def rebound(*args,**kwargs):
+            ready,budget=bind_candidate(*args,**kwargs)
+            if ready is not None:
+                ready=dict(ready,family_consistent=False,cross_family_fallback=True)
+            return ready,budget
+        report=dict(batch=CandidateBatch([row],self.game.ctx,time.monotonic()+1000),
+                    adapter=self.game,reference=self.game.capture(),
+                    runtime=dict(atlas=self.atlas,capture_offset=[0,0]))
+        owner=Owner()
+        with patch('atlas_live_adapter.bind_candidate',side_effect=rebound), \
+             patch('atlas_live_adapter.reachable_candidates',side_effect=AssertionError('unexpected target replacement')):
+            result=default_current(owner,report,row,self.rules)
+        self.assertTrue(any(kind=='atlas_route_rebound' for kind,_ in owner.events))
+        self.assertTrue(result['verified'])
+        self.assertLessEqual(max(result['marker_errors']),1)
 
     def test_live_translation_fallback_preserves_measured_rotation_and_scale(self):
         from atlas_live_adapter import default_current
@@ -508,7 +536,7 @@ class BoundRouteTests(unittest.TestCase):
         np.testing.assert_array_equal(search.call_args.args[2],np.eye(3))
         self.assertEqual(built['candidates'][0]['execution_budget']['actions']['rotate'],0)
 
-    def test_live_builder_uses_cross_family_only_when_no_same_family_rows_exist(self):
+    def test_live_builder_uses_cross_family_after_searching_executable_same_family_rows(self):
         from atlas_live_adapter import build_current
         class CloseBlueAtlas(ConstantAtlas):
             def sample(self,region,points,offset):

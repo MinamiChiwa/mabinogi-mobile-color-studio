@@ -45,7 +45,7 @@ class UiLanguageTests(unittest.TestCase):
 
     def test_family_mismatch_messages_switch_without_missing_translations(self):
         messages=['存在色系偏离','部分区域与目标色系不符。',
-                  '本轮搜索未找到所有区域均保持目标色系的可执行组合，以下为偏色较少的妥协方案。']
+                  '本轮可执行方案均有区域偏离目标色系，以下按综合色差与落点稳定性排序。']
         original=i18n.language
         try:
             for language,translations in [('English',EN),('繁體中文',TW)]:
@@ -67,12 +67,13 @@ class UiLanguageTests(unittest.TestCase):
         self.assertEqual(len([heading for heading,_ in TUTORIAL if heading.startswith('Tips ')]),2)
         tips=dict(TUTORIAL)
         self.assertIn('设定的色差范围',tips['Tips 1 · 匹配方式'])
-        self.assertIn('优先保持各区域色系',tips['Tips 1 · 匹配方式'])
+        self.assertIn('稳定、均衡',tips['Tips 1 · 匹配方式'])
+        self.assertIn('整体质量相同时优先精准命中',tips['Tips 1 · 匹配方式'])
         self.assertIn('浮窗会显示进度',tips['Tips 2 · 等待与候选'])
         self.assertNotIn('ΔE≤8',section)
         self.assertEqual(EN[section],'Choose Exact or Similar for each region.')
         self.assertEqual(TW[section],'為每個區域選擇精準或相似模式。')
-        self.assertIn('preserving each region’s color family',EN[tips['Tips 1 · 匹配方式']])
+        self.assertIn('stable, balanced results',EN[tips['Tips 1 · 匹配方式']])
 
     def test_short_tutorial_copy_has_natural_english_and_traditional_versions(self):
         source=dict(TUTORIAL)['Tips 1 · 匹配方式']
@@ -80,10 +81,10 @@ class UiLanguageTests(unittest.TestCase):
         try:
             i18n.set_language('English')
             self.assertEqual(str(i18n.tr(source)),EN[source])
-            self.assertIn('preserving each region’s color family',EN[source])
+            self.assertIn('stable, balanced results',EN[source])
             i18n.set_language('繁體中文')
             self.assertEqual(str(i18n.tr(source)),TW[source])
-            self.assertIn('優先維持各區域色系',TW[source])
+            self.assertIn('穩定、均衡的結果',TW[source])
         finally:i18n.set_language(original)
 
     def test_risk_notice_uses_courteous_language(self):

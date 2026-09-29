@@ -14,11 +14,13 @@ from candidate_ranking import candidate_rank
 from atlas_pose import candidate_pose, homogeneous, marker_errors, pose_fields, relative_candidate
 from planner import decompose_gestures
 from input_gestures import planned_gesture
+from atlas_stage_budget import StageBudgetExceeded
 
 
 # Below this screen-space marker displacement, integer mouse coordinates cannot
 # provide a reliable feature-registration measurement.
 MICRO_ROTATION_PIXELS = 3.0
+POSITION_TOLERANCE = 1.0
 
 
 class CandidateExpired(RuntimeError):
@@ -122,7 +124,23 @@ def _estimate_candidate_motion(candidate, board, markers, max_steps):
 
     for step in range(max_steps+1):
         errors=marker_errors(target,actual,local_markers)
-        if float(np.max(errors))<=.65:
+        if float(np.max(errors))<=POSITION_TOLERANCE:
+            # Finish at the best neighbouring integer translation, including
+            # a valid no-op. A continuous proposal inside the final tolerance
+            # must not be rejected because its rounded residual is zero.
+            points=np.column_stack((local_markers,np.ones(len(local_markers))))
+            shifts=points[:,:2]-(points@(actual@np.linalg.inv(target)).T)[:,:2]
+            centres=[shifts.mean(axis=0),*shifts]
+            moves=np.unique(np.concatenate([np.rint(c)+[[x,y] for x in (-1,0,1)
+                                                       for y in (-1,0,1)] for c in centres]),axis=0)
+            move_errors=np.linalg.norm(shifts[None]-moves[:,None],axis=2).max(axis=1)
+            best=int(np.argmin(move_errors));move=moves[best]
+            if (np.any(move) and step<max_steps and translation_steps<10 and
+                    move_errors[best]<float(np.max(errors))-1e-9):
+                gesture=compile_input('drag',move)
+                actual=homogeneous(np.column_stack((np.eye(2),gesture.translation)))@actual
+                actions['drag']+=1;translation_steps+=1
+                continue
             return dict(steps=step,actions=actions,reachable=True,
                         actual_pose=actual[:2].tolist(),marker_errors=errors.tolist(),
                         input_route=input_route,
@@ -414,39 +432,76 @@ def _refresh_prediction(adapter,candidate,actual,rules,emit):
 
 
 def _recover_current_result(adapter, candidate, rules, actual, markers, target,
-                            emit, reason):
+                            emit, reason, pose_frame=None, stage_budget=None, pose_current=False):
     """Read the colour currently under the picker without sending input.
 
     A live action can fail after the game has accepted part of the gesture.
-    Retrying from an unverified pose is unsafe, so the recovery path only
-    captures and performs the existing two-frame HEX check.  The result is
-    deliberately marked incomplete; callers may display it and offer a new
-    candidate, but it can never be presented as a successful positioning.
+    The recovery reads two HEX frames and attempts registration against the
+    last known pose. Only a newly registered pose can support a later trial.
+    This observation remains incomplete and is never presented as successful
+    positioning of the original candidate.
     """
     if candidate is None or not getattr(adapter, 'recovery_enabled', False):
         return None
+    def pose_only():
+        return dict(candidate_id=candidate['id'],actual_pose=actual[:2].tolist(),
+            marker_errors=marker_errors(target,actual,markers).tolist(),
+            verified=False,accepted=False,pose_reliable=True,recovered=True,
+            positioning_complete=False,recovery_reason=str(reason),
+            actual_colors=[None]*3,actual_deltas=[None]*3,
+            predicted_colors=[None]*3,predicted_deltas=[None]*3)
+    pose_observation=None
+    if pose_current and actual is not None and pose_frame is not None:
+        pose_observation=pose_only()
+        adapter.verified_frame=pose_frame
     try:
         adapter.check()
+        if stage_budget is not None:stage_budget.check_observation()
         frame = adapter.capture()
+        # Measure first. OCR can exhaust its soft budget, but a registered
+        # reference still permits a newly checked return to the checkpoint.
+        if actual is not None and pose_frame is not None:
+            registration=adapter.motion(pose_frame,frame)
+            emit('atlas_registration',dict(phase='recovery',step=0,
+                passed=registration is not None,
+                diagnostics=deepcopy(getattr(adapter,'last_motion_diagnostics',None))))
+            if registration is not None:
+                actual=homogeneous(registration['matrix'])@actual
+                pose_frame=frame
+                pose_observation=pose_only()
+                adapter.verified_frame=frame
+        if stage_budget is not None:stage_budget.check_observation()
         first = adapter.read_codes(frame)
+        if stage_budget is not None:stage_budget.check_observation()
         adapter.pause(.2)
+        if stage_budget is not None:stage_budget.check_observation()
         second_frame = adapter.capture()
         second = adapter.read_codes(second_frame)
         adapter.check()
+        if stage_budget is not None:stage_budget.check_observation()
         if any(r['enabled'] and (first[i] is None or second[i] is None or
                                  first[i] != second[i]) for i,r in enumerate(rules)):
-            return None
+            return pose_observation
         # The interrupted route did not reach the proposal. Its colours cannot
         # be used as a prediction of this read-only recovery observation.
         observation=dict(candidate,colors=[None]*3,deltas=[None]*3)
         result = verify_result(observation, second, rules)
         result.update(proposal_colors=deepcopy(candidate['colors']),
                       prediction_pose_source='unverified_recovery_pose')
-        # A repeated frame after a wheel command is a known, bounded native
-        # zoom stop.  The pose accumulated before that command remains valid,
-        # so the service may safely rebase one of the other measured
-        # candidates from it.  Other failures leave the pose untrusted.
-        pose_reliable = actual is not None and 'native zoom limit' in str(reason).lower()
+        # Recover the actual response, including partial or delayed gestures.
+        # The requested transform is never evidence of the current pose.
+        pose_reliable = False
+        if actual is not None and pose_frame is not None:
+            # Re-observe from the last registered frame. A failed gesture or
+            # transient reading does not invalidate a newly measured pose.
+            # Never substitute the requested motion for this measurement.
+            registration=adapter.motion(pose_frame,second_frame)
+            emit('atlas_registration',dict(phase='recovery',step=0,
+                passed=registration is not None,
+                diagnostics=deepcopy(getattr(adapter,'last_motion_diagnostics',None))))
+            if registration is not None:
+                actual=homogeneous(registration['matrix'])@actual
+                pose_reliable=True
         pose = actual[:2].tolist() if pose_reliable else None
         errors = (marker_errors(target, actual, markers).tolist()
                   if actual is not None else None)
@@ -484,6 +539,9 @@ def _recover_current_result(adapter, candidate, rules, actual, markers, target,
         # recovery into an ordinary execution fault.
         if exc.__class__.__name__ in ('Interrupted','InterruptedError'):
             raise
+        if isinstance(exc,StageBudgetExceeded) and pose_observation is not None:
+            emit('atlas_recovery',dict(pose_observation,reason=str(exc)))
+            return pose_observation
         return None
 
 
@@ -505,13 +563,13 @@ def _adopt_bound_route(replacement,actual,context,max_steps):
 
 def execute_candidate(adapter,batch,batch_id,candidate_id,reference,rules,emit=lambda *args:None,
                       clock=time.monotonic,max_steps=80,reservation='legacy',
-                      verified_kind='atlas_verified'):
+                      verified_kind='atlas_verified',stage_budget=None):
     """Adapter: check/context/capture/motion/drag/read_codes/pause/release.
 
     Reference is the image used to publish this batch, not an old atlas image.
     Once claimed, failures invalidate the batch permanently; never blind retry.
     """
-    candidate=None; actual=None; target=None; markers=None
+    candidate=None; actual=None; target=None; markers=None; before=None;pose_current=False
     try:
         adapter.check()
         context=adapter.context()
@@ -522,6 +580,7 @@ def execute_candidate(adapter,batch,batch_id,candidate_id,reference,rules,emit=l
         else:
             candidate=batch.claim(batch_id,candidate_id,context)
         target=candidate_pose(candidate,batch.context.board)
+        markers=np.asarray(batch.context.markers,float)-np.asarray(batch.context.board[:2])
         bound=None;route_index=0;route_replan=False;route_rebinds=0
         original_target=target.copy();last_rebind_error=None
         if candidate.get('planned_route') is not None:
@@ -529,10 +588,11 @@ def execute_candidate(adapter,batch,batch_id,candidate_id,reference,rules,emit=l
             bound=bound_motion(candidate,batch.context.board,batch.context.markers,max_steps)
         before=adapter.capture()
         registration=_measured_motion(adapter,reference,before,emit,'reference')
+        actual=homogeneous(registration['matrix'])
+        pose_current=True
         moved=checked_translation(registration)
         if np.linalg.norm(moved)>1:
             raise CandidateExpired('Board moved while choosing; recompute candidates')
-        actual=homogeneous(registration['matrix'])
         l,t,r,b=batch.context.board
         markers=np.asarray(batch.context.markers,float)-[l,t]
         if np.max(marker_errors(np.eye(3),actual,markers))>1:
@@ -554,8 +614,9 @@ def execute_candidate(adapter,batch,batch_id,candidate_id,reference,rules,emit=l
             adapter.check()
             if adapter.context()!=batch.context:raise CandidateExpired('Session geometry changed')
             if clock()>=batch.deadline:raise CandidateExpired('Insufficient execution time')
-            if (np.max(marker_errors(target,actual,markers))<=.65 and
+            if (np.max(marker_errors(target,actual,markers))<=POSITION_TOLERANCE and
                     (bound is None or route_index>=len(bound['gestures']))):break
+            if stage_budget is not None:stage_budget.check_input()
             residual=target@np.linalg.inv(actual)
             fields=pose_fields(residual,batch.context.board)
             replan=getattr(adapter,'replan',None)
@@ -694,11 +755,17 @@ def execute_candidate(adapter,batch,batch_id,candidate_id,reference,rules,emit=l
             if anchor is not None:anchor=gesture.anchor
             emit('atlas_command',dict(step=step+1,action=kind,command=np.asarray(command).tolist(),
                                      anchor=anchor,gesture=gesture.record()))
+            if stage_budget is not None:stage_budget.check_input()
+            pose_current=False
             adapter.perform_gesture(gesture)
             adapter.pause(.15)
             after=adapter.capture()
             registration=_measured_motion(adapter,before,after,emit,'positioning',step+1)
             measured=homogeneous(registration['matrix'])
+            # Registration establishes the observed pose independently of
+            # whether the game followed the requested gesture. Retain it
+            # before response checks can fail or exhaust the recovery budget.
+            actual=measured@actual;before=after;pose_current=True
             response=pose_fields(measured,batch.context.board)
             if kind=='drag':
                 shift=checked_translation(registration)
@@ -739,22 +806,24 @@ def execute_candidate(adapter,batch,batch_id,candidate_id,reference,rules,emit=l
                             abs(response['scale']-1) < .0005):
                         adapter.pause(.35)
                         retry_after=adapter.capture()
+                        pose_current=False
                         retry_registration=_measured_motion(adapter,after,retry_after,
                                                            emit,'positioning_recheck',step+1)
                         retry_measured=homogeneous(retry_registration['matrix'])
+                        actual=retry_measured@actual;before=retry_after;pose_current=True
                         retry_response=pose_fields(retry_measured,batch.context.board)
                         if (abs(retry_response['angle']) <= .25 and
                                 abs(retry_response['scale']-1) < .0005):
                             raise RuntimeError('Unexpected or stalled wheel response (native zoom limit)')
-                        measured=retry_measured
-                        response=retry_response
+                        measured=retry_measured@measured
+                        response=pose_fields(measured,batch.context.board)
+                        after=retry_after
                     else:
                         raise RuntimeError('Unexpected or stalled wheel response')
                 if kind=='wheel':
                     zoom_tick=abs(np.log(response['scale'])/command)
                     zoom_ticks[1 if command>0 else -1]=zoom_tick
                     last_zoom_direction=1 if command>0 else -1
-            actual=measured@actual;before=after
             route_errors=None
             if bound is not None:
                 route_errors=marker_errors(bound['expected_poses'][route_index],actual,markers)
@@ -768,31 +837,38 @@ def execute_candidate(adapter,batch,batch_id,candidate_id,reference,rules,emit=l
                  bound_route_marker_errors=route_errors.tolist() if route_errors is not None else None,
                  marker_errors=marker_errors(target,actual,markers).tolist()))
         errors=marker_errors(target,actual,markers)
-        if np.max(errors)>1:raise RuntimeError('Positioning did not converge at all three markers')
+        if np.max(errors)>POSITION_TOLERANCE:raise RuntimeError('Positioning did not converge at all three markers')
         adapter.check()
         if clock()>=batch.deadline:raise CandidateExpired('No time for HEX verification')
         emit('atlas_progress',dict(stage='verify'))
+        if stage_budget is not None:stage_budget.check_observation()
         first=adapter.read_codes(before)
+        if stage_budget is not None:stage_budget.check_observation()
         adapter.pause(.2)
+        if stage_budget is not None:stage_budget.check_observation()
         verified_frame=adapter.capture()
         second=adapter.read_codes(verified_frame)
         adapter.check()
         if clock()>=batch.deadline:raise CandidateExpired('HEX verification exceeded the deadline')
         if any(r['enabled'] and first[i]!=second[i] for i,r in enumerate(rules)):
             raise RuntimeError('Game HEX changed between verification frames')
+        pose_current=False
         final_motion=_measured_motion(adapter,before,verified_frame,emit,'hex_verification')
+        previous_actual=actual
+        actual=homogeneous(final_motion['matrix'])@actual
+        before=verified_frame;pose_current=True
         checked_translation(final_motion)
-        final_pose=homogeneous(final_motion['matrix'])@actual
-        if np.max(marker_errors(actual,final_pose,markers))>1:
+        if np.max(marker_errors(previous_actual,actual,markers))>POSITION_TOLERANCE:
             raise CandidateExpired('Board moved during HEX verification')
-        actual=final_pose;errors=marker_errors(target,actual,markers)
-        if np.max(errors)>1:raise CandidateExpired('Marker alignment changed during verification')
+        errors=marker_errors(target,actual,markers)
+        if np.max(errors)>POSITION_TOLERANCE:raise CandidateExpired('Marker alignment changed during verification')
         adapter.check()
         if clock()>=batch.deadline:raise CandidateExpired('HEX verification exceeded the deadline')
         # The controller accepts a small alignment residual and may replan at
         # a measured detent. Neither case preserves the old predicted colours.
         # Resample at the final registered pose, independently of game HEX.
         candidate=_refresh_prediction(adapter,candidate,actual,rules,emit)
+        if stage_budget is not None:stage_budget.check_observation()
         if clock()>=batch.deadline:raise CandidateExpired('HEX verification exceeded the deadline')
         result=verify_result(candidate,second,rules)
         result.update(actual_pose=actual[:2].tolist(),marker_errors=errors.tolist(),
@@ -806,7 +882,17 @@ def execute_candidate(adapter,batch,batch_id,candidate_id,reference,rules,emit=l
         if verified_kind:emit(verified_kind,result)
         return result
     except Exception as exc:
-        recovered=_recover_current_result(adapter,candidate,rules,actual,markers,target,emit,exc)
+        # User/window/countdown interrupts must never trigger recovery reads.
+        if exc.__class__.__name__ in ('Interrupted','InterruptedError'):
+            batch.invalidate()
+            raise
+        # Before the first successful registration, the acquisition/choice
+        # reference itself is the known identity pose. Recovery can measure
+        # from it again; an unsuccessful first read need not end the session.
+        recovery_actual=np.eye(3) if actual is None and candidate is not None else actual
+        recovery_frame=reference if actual is None else before
+        recovered=_recover_current_result(adapter,candidate,rules,recovery_actual,markers,target,
+            emit,exc,pose_frame=recovery_frame,stage_budget=stage_budget,pose_current=pose_current)
         if recovered is not None:
             return recovered
         batch.invalidate()
