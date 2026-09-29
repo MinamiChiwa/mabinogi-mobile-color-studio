@@ -98,11 +98,11 @@ class MatchingTests(unittest.TestCase):
 
     def test_rotation_presses_at_requested_pivot_then_traces_safe_arc(self):
         game=Game.__new__(Game);record=[]
-        game.path=lambda points,**kwargs:record.append((points,kwargs))
+        game.perform_gesture=record.append
         game.rotate((0,0,500,400),60,anchor=(115,270))
-        points,options=record[0]
+        gesture=record[0];points=gesture.points
         self.assertEqual(points[0],(115,270))
-        self.assertTrue(options['right']);self.assertTrue(options['absolute'])
+        self.assertTrue(gesture.right);self.assertTrue(gesture.absolute)
         radii=[np.linalg.norm(np.array(p)-[115,270]) for p in points[8:]]
         self.assertLess(max(radii)-min(radii),1.5)
         self.assertTrue(all(0<x<500 and 0<y<400 for x,y in points))

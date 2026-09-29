@@ -3,6 +3,7 @@ import numpy as np
 from periodic_atlas import PeriodicAtlas, translation_candidates
 from atlas_similarity import similarity_candidates, captured_scale_levels
 from vision import rgb
+from candidate_ranking import candidate_rank
 
 
 class SimilarityTests(unittest.TestCase):
@@ -46,8 +47,11 @@ class SimilarityTests(unittest.TestCase):
         rows=self.solve(include_compromises=True)
         self.assertTrue(rows)
         self.assertFalse(any(r['accepted'] or r['verified'] for r in rows))
-        self.assertTrue(all(r['deltas'][2]>8 for r in rows))
-        self.assertEqual([r['maximum'] for r in rows],sorted(r['maximum'] for r in rows))
+        self.assertTrue(all(max(r['deltas'])>8 for r in rows))
+        self.assertEqual(rows,sorted(rows,key=candidate_rank))
+        # Any pair may anchor a compromise; the third region is no longer
+        # unconditionally sacrificed to the first two regions.
+        self.assertTrue(any(r['deltas'][2]==0 for r in rows))
 
     def test_compromise_never_uses_an_unobserved_region(self):
         self.atlas.count[2]=0
@@ -77,10 +81,51 @@ class SimilarityTests(unittest.TestCase):
         self.assertTrue(self.solve(scale_levels=[.75]))
         self.assertEqual(self.solve(scale_levels=[.7,.8]),[])
 
+    def test_unreachable_exact_pair_does_not_hide_other_region_pairs(self):
+        self.points=np.array([[5.5,5.5],[5.5,5.5],[15.5,5.5]])
+        atlas=PeriodicAtlas([[32,0],[0,32]],resolution=32)
+        for i,p in enumerate(self.points):
+            image=np.full((32,32,3),100,np.uint8)
+            x,y=np.floor(p).astype(int);image[y,x]=rgb(self.targets[i])
+            masks=np.zeros((3,32,32),bool);masks[i]=True;atlas.add(image,masks)
+        markers=np.array([[12.,12.],[12.,15.],[12.,19.5]])
+        diag={}
+        rows=similarity_candidates(atlas,markers,self.rules,(0,0),(32,32),
+            scale_bounds=(.7,.8),scale_levels=[.75],include_compromises=True,
+            diagnostics=diag)
+        self.assertTrue(rows)
+        self.assertGreaterEqual(rows[0]['exact_matches'],2)
+        self.assertEqual(rows[0]['deltas'][0],0)
+        self.assertEqual(rows[0]['deltas'][2],0)
+        self.assertEqual(set(diag['pair_evaluated_transforms']),{'1-2','1-3','2-3'})
+
+    def test_two_unreachable_exact_islands_keep_one_exact_compromise(self):
+        atlas=PeriodicAtlas([[32,0],[0,32]],resolution=32)
+        for i in range(2):
+            image=np.full((32,32,3),100,np.uint8)
+            image[5,5]=rgb(self.targets[i])
+            masks=np.zeros((3,32,32),bool);masks[i]=True;atlas.add(image,masks)
+        rules=[dict(r,enabled=i<2) for i,r in enumerate(self.rules)]
+        rows=similarity_candidates(atlas,self.markers,rules,(0,0),(32,32),
+            scale_bounds=(.7,.8),scale_levels=[.75],include_compromises=True)
+        self.assertTrue(rows)
+        self.assertEqual(rows[0]['exact_matches'],1)
+        self.assertFalse(rows[0]['accepted'])
+        self.assertTrue(all(abs(row['scale']-.75)<1e-12 for row in rows))
+
     def test_zoom_levels_require_this_sessions_measured_capture_range(self):
-        levels,tick=captured_scale_levels([dict(kind='sampling_zoom',steps=4,scale=1.01**4)])
-        np.testing.assert_allclose(levels,1.01**-np.arange(5,dtype=float))
-        self.assertAlmostEqual(tick,np.log(1.01))
+        log=[dict(kind='sampling_zoom',steps=48,scale=1.01**48)]
+        # UP-only observations cannot establish a reachable DOWN route.
+        self.assertEqual(captured_scale_levels(log),([1.],None))
+        log.append(dict(kind='zoom_calibration',passed=True,
+                        down_log_step=-np.log(.99),up_log_step=np.log(1.01)))
+        levels,tick=captured_scale_levels(log)
+        np.testing.assert_allclose(levels,.99**np.arange(48,dtype=float))
+        self.assertAlmostEqual(tick,-np.log(.99))
+        self.assertGreaterEqual(levels[-1],1/1.01**48)
+        self.assertGreater(abs(levels[35]-1.01**-35),.002)
+        log[-1]['passed']=False
+        self.assertEqual(captured_scale_levels(log),([1.],None))
         self.assertEqual(captured_scale_levels([]),([1.],None))
 
 

@@ -33,6 +33,16 @@ class BudgetTests(unittest.TestCase):
         return dict(game=g,deadline=160,image=None,
                     scene=SimpleNamespace(board=(0,0,100,100),markers=((1,1),)*3))
 
+    def scored_report(self):
+        # A live batch now requires an atlas and endpoint-scored candidates.
+        atlas=SimpleNamespace(sample=lambda region,points,offset:
+                              ([[17,34,51]]*len(points),[True]*len(points)))
+        return dict(candidates=[dict(id=0,dx=0,dy=0)],
+                    runtime=dict(atlas=atlas,capture_offset=[0,0]))
+
+    def rules(self):
+        return [dict(enabled=True,exact=False,tolerance=8,colors=['#112233'])]*3
+
     def test_expired_build_never_publishes_batch(self):
         capture=self.capture()
         with patch('atlas_live_adapter.time.monotonic',side_effect=[150,161]), \
@@ -58,8 +68,8 @@ class BudgetTests(unittest.TestCase):
         for override,expected in ((200,160),(150,150)):
             capture=self.capture()
             with patch('atlas_live_adapter.time.monotonic',return_value=140), \
-                 patch('atlas_live_adapter.build_from_capture',return_value={'candidates':[{'id':0}]}):
-                report=build_current(capture,[],selection_deadline=override)
+                 patch('atlas_live_adapter.build_from_capture',return_value=self.scored_report()):
+                report=build_current(capture,self.rules(),selection_deadline=override)
             self.assertEqual(capture['game'].until,expected)
             self.assertEqual(report['batch'].deadline,expected)
             self.assertEqual(report['selection_deadline'],expected)
@@ -78,8 +88,8 @@ class BudgetTests(unittest.TestCase):
     def test_earlier_existing_guard_is_preserved_in_candidate_batch(self):
         capture=self.capture();capture['game'].until=145
         with patch('atlas_live_adapter.time.monotonic',return_value=140), \
-             patch('atlas_live_adapter.build_from_capture',return_value={'candidates':[{'id':0}]}):
-            report=build_current(capture,[],selection_deadline=200)
+             patch('atlas_live_adapter.build_from_capture',return_value=self.scored_report()):
+            report=build_current(capture,self.rules(),selection_deadline=200)
         self.assertEqual(report['batch'].deadline,145)
         self.assertEqual(report['selection_deadline'],145)
 

@@ -22,6 +22,38 @@ def fake_class(name):
 
 
 class UiLanguageTests(unittest.TestCase):
+    def test_best_result_protection_messages_are_fully_translated(self):
+        from runtime_messages import EN as runtime_en,TW as runtime_tw
+        messages=['正在恢复本轮已实测的最佳方案。','先前最佳实测（未恢复）',
+                  '未能恢复先前最佳结果，请以游戏当前颜色为准。']
+        original=i18n.language
+        try:
+            for language,translations in [('English',runtime_en),('繁體中文',runtime_tw)]:
+                i18n.set_language(language)
+                for message in messages:self.assertEqual(str(i18n.tr(message)),translations[message])
+        finally:i18n.set_language(original)
+
+    def test_unreachable_choice_message_has_complete_runtime_translations(self):
+        from runtime_messages import EN as runtime_en,TW as runtime_tw
+        message='所选方案无法从当前位置可靠到达，已保留当前颜色。'
+        original=i18n.language
+        try:
+            for language,translations in [('English',runtime_en),('繁體中文',runtime_tw)]:
+                i18n.set_language(language)
+                self.assertEqual(str(i18n.tr(message)),translations[message])
+        finally:i18n.set_language(original)
+
+    def test_family_mismatch_messages_switch_without_missing_translations(self):
+        messages=['存在色系偏离','部分区域与目标色系不符。',
+                  '本轮搜索未找到所有区域均保持目标色系的可执行组合，以下为偏色较少的妥协方案。']
+        original=i18n.language
+        try:
+            for language,translations in [('English',EN),('繁體中文',TW)]:
+                i18n.set_language(language)
+                for message in messages:
+                    self.assertEqual(str(i18n.tr(message)),translations[message])
+        finally:i18n.set_language(original)
+
     def test_main_screen_does_not_show_removed_explanatory_copy(self):
         from pathlib import Path
         source=Path(__file__).with_name('app.py').read_text(encoding='utf-8')
@@ -35,23 +67,23 @@ class UiLanguageTests(unittest.TestCase):
         self.assertEqual(len([heading for heading,_ in TUTORIAL if heading.startswith('Tips ')]),2)
         tips=dict(TUTORIAL)
         self.assertIn('设定的色差范围',tips['Tips 1 · 匹配方式'])
-        self.assertIn('精准区域优先于相似区域',tips['Tips 1 · 匹配方式'])
+        self.assertIn('优先保持各区域色系',tips['Tips 1 · 匹配方式'])
         self.assertIn('浮窗会显示进度',tips['Tips 2 · 等待与候选'])
         self.assertNotIn('ΔE≤8',section)
         self.assertEqual(EN[section],'Choose Exact or Similar for each region.')
         self.assertEqual(TW[section],'為每個區域選擇精準或相似模式。')
-        self.assertIn('Exact regions take priority',EN[tips['Tips 1 · 匹配方式']])
+        self.assertIn('preserving each region’s color family',EN[tips['Tips 1 · 匹配方式']])
 
     def test_short_tutorial_copy_has_natural_english_and_traditional_versions(self):
-        source='每个区域都可单独选择精准或相似。精准区优先于相似区：先比较精准命中数，再比较精准区色差，最后比较相似区色差。'
+        source=dict(TUTORIAL)['Tips 1 · 匹配方式']
         original=i18n.language
         try:
             i18n.set_language('English')
             self.assertEqual(str(i18n.tr(source)),EN[source])
-            self.assertIn('Exact regions take priority',EN[source])
+            self.assertIn('preserving each region’s color family',EN[source])
             i18n.set_language('繁體中文')
             self.assertEqual(str(i18n.tr(source)),TW[source])
-            self.assertIn('精準區優先於相似區',TW[source])
+            self.assertIn('優先維持各區域色系',TW[source])
         finally:i18n.set_language(original)
 
     def test_risk_notice_uses_courteous_language(self):

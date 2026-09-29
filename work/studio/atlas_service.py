@@ -5,12 +5,14 @@ events and refuses to publish candidates until the builder reports a passed
 quality gate.
 """
 from dataclasses import dataclass
+from copy import deepcopy
+import math
 import time
 import uuid
 from atlas_execution import reposition_budget
 from workflow_budget import earliest_deadline
-from candidate_ranking import candidate_rank
-from atlas_pose import relative_candidate
+from candidate_ranking import candidate_rank,candidate_quality
+from atlas_pose import relative_candidate, candidate_pose, homogeneous, pose_fields
 
 
 @dataclass
@@ -20,6 +22,7 @@ class AtlasCallbacks:
     default: object
     choice: object
     select: object=None
+    prepare: object=None
 
 
 def quality_failure_message(gate):
@@ -39,9 +42,74 @@ def _is_safety_interrupt(exc):
     return exc.__class__.__name__ in ('Interrupted','InterruptedError')
 
 
+def _measured_quality(result):
+    """Incomplete observations cannot justify leaving a measured result."""
+    if not result.get('verified'):return None
+    try:quality=candidate_quality(result)
+    except (TypeError,ValueError):return None
+    return quality if all(math.isfinite(value) for value in quality) else None
+
+
+def _protected_route(row,budget):
+    """Publication permits measured feedback; an optional trial needs more.
+
+    Do not risk an existing HEX result on an uncalibrated transform, even if
+    its nominal endpoint passed the ordinary candidate publication gate.
+    """
+    stability=row.get('route_stability',{})
+    actions=budget.get('actions',{})
+    transforms=actions.get('rotate',0) or actions.get('wheel',0)
+    return (budget.get('allowed',False) and stability.get('passed',False) and
+            (not transforms or stability.get('response_profile_verified',False)))
+
+
 class AtlasService:
     def __init__(self, callbacks):
         self.callbacks=callbacks
+
+    def _prepare_protected(self,owner,report,target,source_pose,rules,context):
+        if not callable(self.callbacks.prepare):return None
+        move=relative_candidate(target,source_pose,report['board'])
+        row,budget=self.callbacks.prepare(owner,report,move,rules,
+            **dict(context,reference_pose=source_pose))
+        if row is None or not _protected_route(row,budget):
+            owner.event('atlas_trial_route_unavailable',candidate_id=target['id'],
+                budget={k:v for k,v in budget.items() if k!='input_route'},
+                route_stability=row.get('route_stability') if row is not None else None)
+            return None
+        # Rebinding may correct the same endpoint, but cannot replace it with
+        # a new search result while an observed checkpoint is at risk.
+        return dict(row,protect_observed_result=True),budget
+
+    def _restore_observed(self,owner,report,current,best,target,rules,context):
+        """Keep historical HEX distinct from the actual board after a trial."""
+        result=current;attempted=False;detail=None
+        reliable=(current.get('verified') and current.get('actual_pose') is not None and
+                  (not (current.get('recovered') or current.get('positioning_complete') is False)
+                   or current.get('pose_reliable')))
+        if reliable:
+            try:
+                prepared=self._prepare_protected(owner,report,target,current['actual_pose'],rules,context)
+                if prepared is not None:
+                    owner.event('atlas_status',message='正在恢复本轮已实测的最佳方案。')
+                    attempted=True
+                    restored=self.callbacks.choice(owner,report,prepared[0],rules,**context)
+                    result=(restored if isinstance(restored,dict) else
+                            dict(verified=False,actual_pose=None,candidate_id=best['candidate_id']))
+                    quality=_measured_quality(result)
+                    if (quality is not None and quality<=_measured_quality(best) and
+                            result.get('actual_pose') is not None and not result.get('recovered') and
+                            result.get('positioning_complete') is not False):
+                        return dict(result,best_result_current=True,restored_best=True)
+            except Exception as exc:
+                if _is_safety_interrupt(exc):raise
+                detail=str(exc)
+                if attempted:
+                    result=dict(verified=False,actual_pose=None,candidate_id=best['candidate_id'])
+        result=dict(result,best_result=deepcopy(best),best_result_current=False,
+                    restore_attempted=attempted,restore_detail=detail)
+        owner.event('atlas_best_not_restored',**result)
+        return result
 
     def run(self, owner, rules, **context):
         emit=owner.event
@@ -84,6 +152,7 @@ class AtlasService:
         compromise_rows=[row for row in raw_rows if row not in raw_accepted]
         best_compromise=min(compromise_rows,key=candidate_rank) if compromise_rows else None
         emit('atlas_search_summary',raw_count=len(raw_rows),
+             family_consistent_count=sum(row.get('family_consistent',False) for row in raw_rows),
              predicted_accepted_count=len(raw_accepted),
              compromise_count=len(compromise_rows),
              best_compromise_max=best_compromise.get('maximum') if best_compromise else None,
@@ -91,8 +160,14 @@ class AtlasService:
              search_diagnostics=report.get('search_diagnostics',{}))
         compromise_only=not bool(raw_accepted)
         if not rows:
-            message='本轮搜索没有可测量的落点；无法生成自动或妥协方案。'
-            emit('atlas_invalidated',reason='bounded_search_no_match',search_performed=True,message=message,
+            diagnostics=report.get('search_diagnostics',{})
+            stable_count=diagnostics.get('stable_route_count',0)
+            message=('本轮没有在预测阶段确认稳定可达的方案，未发送自动移动。'
+                     if diagnostics.get('stability_required') else
+                     '本轮搜索没有可测量的落点；无法生成自动或妥协方案。')
+            emit('atlas_invalidated',reason=('stable_route_unavailable' if diagnostics.get('stability_required')
+                                             else 'bounded_search_no_match'),search_performed=True,message=message,
+                 stable_route_count=stable_count,
                  search_diagnostics=report.get('search_diagnostics',{}))
             return None
         rows=sorted(rows,key=candidate_rank)
@@ -113,9 +188,16 @@ class AtlasService:
             if batch is not None:batch.invalidate()
             emit('atlas_default_unavailable',message='剩余时间不足以安全定位并复核自动最佳方案，未发送定位操作。',budget=default_budget)
             return None
+        # Only publish routes that passed the complete motion simulation and
+        # fit the remaining game time. Raw search results stay in diagnostics.
+        rows=[row for row,_budget in available]
+        family_unavailable=all(row.get('family_consistent') is False for row in rows)
         emit('atlas_candidates',batch_id=batch_id,candidates=rows,default_id=default['id'],
              compromise_only=compromise_only,
-             message=('未找到满足所设目标的组合，正在定位最接近的妥协方案。'
+             family_unavailable=family_unavailable,
+             message=('本轮搜索未找到所有区域均保持目标色系的可执行组合，以下为偏色较少的妥协方案。'
+                      if family_unavailable else
+                      '未找到满足所设目标的组合，正在定位最接近的妥协方案。'
                       if compromise_only else None))
         try:
             result=self.callbacks.default(owner,report,default,rules,**context)
@@ -136,7 +218,7 @@ class AtlasService:
                  message='自动方案未返回可验证结果，已停止自动移动并保留游戏当前画面。',
                  detail='default callback returned no result', candidate_id=default.get('id'))
             return None
-        result=dict(result, predicted_accepted=bool(default.get('accepted')),
+        result=dict(result, predicted_accepted=result.get('predicted_accepted',bool(default.get('accepted'))),
                     compromise=compromise_only or not bool(default.get('accepted')),
                     candidate_id=default['id'])
         # Recovery is terminal unless the repeated frame proves that the
@@ -154,49 +236,75 @@ class AtlasService:
                  detail='missing verified pose', candidate_id=default.get('id'))
             return result if result.get('verified') else None
         attempted={default['id']}
-        # A successful geometric move is not a successful color match. Try
-        # other predicted candidates only after a complete, measured HEX read.
-        # Input/registration/OCR failures propagate and never trigger a retry.
-        while (result.get('verified') and not result.get('accepted') and
-               (default.get('accepted') or result.get('recovered'))):
-            emit('atlas_candidate_failed',**result)
-            if result.get('actual_pose') is None:break
+        best_result=deepcopy(result);best_candidate=default
+        def checkpoint_target():
+            # Restore the measured endpoint, which may differ from the
+            # originally published candidate after execution replanning.
+            return dict(best_candidate,**pose_fields(best_result['actual_pose'],board))
+        while not (result.get('accepted') or result.get('observed_accepted')):
+            best_quality=_measured_quality(best_result)
+            if best_quality is None:break
             next_move=None
             for candidate in rows:
                 if candidate['id'] in attempted:continue
-                if candidate.get('exact_matches',0)<result.get('exact_matches',0):continue
+                if candidate_quality(candidate)>=best_quality:continue
                 try:
-                    move=relative_candidate(candidate,result['actual_pose'],board)
-                    budget=reposition_budget(move,time.monotonic(),deadline,board,markers=markers)
+                    prepared=self._prepare_protected(owner,report,candidate,result['actual_pose'],rules,context)
+                    if prepared is None:continue
+                    move,budget=prepared
+                    # The fresh endpoint, not the old list prediction, must
+                    # improve on the best observed game HEX.
+                    if candidate_quality(move)>=best_quality:continue
+                    endpoint=(candidate_pose(move,board)@homogeneous(result['actual_pose']))[:2].tolist()
+                    returning=self._prepare_protected(owner,report,checkpoint_target(),endpoint,rules,context)
+                    if returning is None:continue
+                    if time.monotonic()+budget['needed']+returning[1]['needed']>=deadline:continue
                 except Exception as exc:
+                    if _is_safety_interrupt(exc):raise
                     emit('atlas_candidate_unavailable',candidate_id=candidate.get('id'),detail=str(exc))
                     continue
-                if budget['allowed']:
-                    next_move=move;default=candidate;break
+                next_move=move;default=candidate
+                trial_deadline=deadline-returning[1]['needed']
+                break
             if next_move is None:break
+            emit('atlas_candidate_failed',**result)
             attempted.add(default['id'])
+            emit('atlas_best_observed',**best_result)
             emit('atlas_status',message='当前候选实测未达标，正在定位并复核下一候选。')
             try:
-                result=self.callbacks.choice(owner,report,next_move,rules,**context)
+                trial=self.callbacks.choice(owner,report,next_move,rules,
+                    **dict(context,selection_deadline=trial_deadline))
             except Exception as exc:
                 if _is_safety_interrupt(exc):raise
-                emit('atlas_recovery_unavailable',
-                     message='备用方案未能可靠复核，已保留当前游戏画面。',
-                     detail=str(exc), candidate_id=default.get('id'))
                 if batch is not None:batch.invalidate()
-                return result
-            if not isinstance(result,dict):
+                return self._restore_observed(owner,report,dict(candidate_id=default['id'],
+                    verified=False,actual_pose=None,detail=str(exc)),best_result,
+                    checkpoint_target(),rules,context)
+            if not isinstance(trial,dict):
                 if batch is not None:batch.invalidate()
-                emit('atlas_recovery_unavailable',
-                     message='备用方案未返回可验证结果，已保留当前游戏画面。',
-                     detail='choice callback returned no result', candidate_id=default.get('id'))
-                return result
-            result=dict(result, predicted_accepted=bool(default.get('accepted')),
-                        compromise=not bool(default.get('accepted')),
+                return self._restore_observed(owner,report,dict(candidate_id=default['id'],
+                    verified=False,actual_pose=None,detail='choice callback returned no result'),
+                    best_result,checkpoint_target(),rules,context)
+            result=dict(trial, predicted_accepted=trial.get('predicted_accepted',bool(default.get('accepted'))),
+                        compromise=not bool(trial.get('accepted')),
                         candidate_id=default['id'])
+            quality=_measured_quality(result)
+            if quality is not None and quality<best_quality:
+                best_result=deepcopy(result);best_candidate=default
+            else:
+                # One regression ends exploration. Only a newly bound return
+                # from a trusted measured pose may restore the checkpoint.
+                result=self._restore_observed(owner,report,result,best_result,
+                    checkpoint_target(),rules,context)
+                if result.get('best_result_current'):
+                    default=best_candidate
+                    best_result=deepcopy(result)
+                    break
+                if batch is not None:batch.invalidate()
+                return result
             if result.get('recovered') and not result.get('pose_reliable'):
                 if batch is not None:batch.invalidate()
-                return result
+                return dict(result,best_result=deepcopy(best_result),best_result_current=True)
             if not result.get('verified') or result.get('actual_pose') is None:
                 if batch is not None:batch.invalidate()
                 emit('atlas_recovery_unavailable',
@@ -206,14 +314,11 @@ class AtlasService:
         if result.get('recovered'):
             if batch is not None:batch.invalidate()
             return result
-        if result.get('verified') and not result.get('accepted') and default.get('accepted'):
-            if batch is not None:batch.invalidate()
-            emit('atlas_verified',**result)
-            return result
         # A compromise deliberately exceeds a configured target. Keep the
         # highest-ranked affordable proposal and enable choices instead of
         # walking through successively worse predictions.
-        result=dict(result,compromise=not bool(result.get('accepted')))
+        result=dict(result,compromise=not bool(result.get('accepted')),
+                    best_result=deepcopy(best_result),best_result_current=True)
         emit('atlas_default_verified',**result)
         try:
             if self.callbacks.select:
@@ -263,7 +368,9 @@ class AtlasService:
                  predicted_maximum=candidate.get('maximum'),
                  predicted_average=candidate.get('average'),
                  exact_matches=candidate.get('exact_matches'),
-                 message='剩余时间不足，保持自动最佳方案。',budget=budget)
+                 message=('剩余时间不足，保持自动最佳方案。'
+                          if budget.get('reason') in ('deadline','insufficient_time') else
+                          '所选方案无法从当前位置可靠到达，已保留当前颜色。'),budget=budget)
             return result
         try:
             choice=self.callbacks.choice(owner,report,move,rules,**context)
@@ -285,8 +392,8 @@ class AtlasService:
                  message='所选方案未能完成位置复核，已保留自动方案。',
                  detail='missing verified pose', candidate_id=candidate.get('id'))
             return result
-        choice=dict(choice, predicted_accepted=bool(candidate.get('accepted')),
-                    compromise=not bool(candidate.get('accepted')),
+        choice=dict(choice, predicted_accepted=choice.get('predicted_accepted',bool(candidate.get('accepted'))),
+                    compromise=not bool(choice.get('accepted')),
                     candidate_id=candidate['id'])
         emit('atlas_verified',**choice)
         return choice

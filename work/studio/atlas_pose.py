@@ -43,7 +43,12 @@ def pose_fields(matrix, board):
 def relative_candidate(candidate, actual_pose, board):
     """Rebase from a measured pose, never subtract center displacements."""
     relative = candidate_pose(candidate, board)@np.linalg.inv(homogeneous(actual_pose))
-    return dict(candidate, **pose_fields(relative, board))
+    row=dict(candidate, **pose_fields(relative, board))
+    # A route is tied to its starting reference, including its integer pivots.
+    # Selecting a candidate after moving must compile a fresh binding.
+    for name in ('planned_route','input_route','execution_budget'):
+        row.pop(name,None)
+    return row
 
 
 def marker_errors(target, actual, markers):

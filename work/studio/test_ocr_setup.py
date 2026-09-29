@@ -18,12 +18,15 @@ class OcrSetupTests(unittest.TestCase):
         self.addCleanup(setattr,vision.pytesseract.pytesseract,'tesseract_cmd',self.old_command)
 
     def test_project_local_ocr_is_found_after_moving_checkout(self):
-        expected=vision.Path(vision.__file__).resolve().parents[2]/'outputs/dependencies/ocr/tesseract.exe'
-        with patch.object(vision.Path,'is_file',autospec=True,side_effect=lambda p:p==expected), \
-             patch('vision.subprocess.run',return_value=CompletedProcess([],0,b'Languages:\neng\n')):
-            self.assertTrue(vision.configure_ocr(strict=True))
-        self.assertEqual(vision.pytesseract.pytesseract.tesseract_cmd,str(expected))
-        self.assertTrue(vision.OCR_AVAILABLE)
+        root=vision.Path(vision.__file__).resolve()
+        for expected in (root.parent/'bundle/ocr/tesseract.exe',
+                         root.parents[2]/'outputs/dependencies/ocr/tesseract.exe'):
+            with self.subTest(path=expected), \
+                 patch.object(vision.Path,'is_file',autospec=True,side_effect=lambda p:p==expected), \
+                 patch('vision.subprocess.run',return_value=CompletedProcess([],0,b'Languages:\neng\n')):
+                self.assertTrue(vision.configure_ocr(strict=True))
+            self.assertEqual(vision.pytesseract.pytesseract.tesseract_cmd,str(expected))
+            self.assertTrue(vision.OCR_AVAILABLE)
 
     def test_missing_english_data_blocks_formal_capture(self):
         with patch.object(vision.Path,'is_file',return_value=True), \

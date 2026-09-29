@@ -33,7 +33,7 @@ from ui_typography import FONT_FAMILY,TITLE_FONT,SECTION_FONT,BODY_FONT,SMALL_FO
 from resize_rendering import TopLevelResizeRedrawOptimization
 from display_geometry import logical_size,work_area
 
-APP_VERSION='0.3.3'
+APP_VERSION='0.3.4'
 CARD_WIDTH=344
 CARD_HEIGHT=400
 CARD_GAP=6
@@ -553,13 +553,17 @@ class App(ct.CTk):
                 title,body=progress_text(d)
                 self.status.configure(text=tr(title));self.set_detail(tr(body))
             elif k=='atlas_status':
-                self.status.configure(text=tr('正在采集本局颜色板'))
+                self.status.configure(text=tr('自动染色'))
                 self.set_detail(tr(d.get('message','')))
             elif k=='atlas_ready':self.status.configure(text=tr('本局颜色板质量门槛通过，正在准备自动最佳方案。'))
             elif k in ('atlas_default_verified','atlas_verified'):
                 colors=d.get('actual_colors',d.get('colors',[]))
                 for card,color in zip(self.cards,colors):card.current.configure(text='当前颜色  '+(color or '读取失败'))
                 self.status.configure(text='当前结果已达到所设目标，请在游戏内手动确认。' if d.get('accepted') else '当前结果未达到全部目标；请先查看妥协方案，再在游戏内手动确认是否套用。')
+            elif k=='atlas_best_not_restored':
+                for card,color in zip(self.cards,d.get('actual_colors') or [None]*3):
+                    card.current.configure(text='当前颜色  '+(color or '读取失败'))
+                self.status.configure(text=tr('未能恢复先前最佳结果，请以游戏当前颜色为准。'))
             elif k=='atlas_default_unavailable':self.status.configure(text=tr(d.get('message','剩余时间不足，未发送定位操作。')))
             elif k=='atlas_invalidated':self.status.configure(text=tr(d.get('message','颜色板质量未达标，未发布候选。')))
             elif k=='atlas_choice_rejected':self.status.configure(text=tr(d.get('message','剩余时间不足，保持自动最佳方案。')))

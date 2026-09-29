@@ -13,6 +13,7 @@ from vision import accepted, error
 from candidate_ranking import candidate_rank
 from atlas_pose import candidate_pose, homogeneous, marker_errors, pose_fields, relative_candidate
 from planner import decompose_gestures
+from input_gestures import planned_gesture
 
 
 # Below this screen-space marker displacement, integer mouse coordinates cannot
@@ -25,22 +26,35 @@ class CandidateExpired(RuntimeError):
 
 
 def _nearest_detent_translation(target,actual,fields,markers,zoom_tick):
-    """Return a center drag if the nearest wheel detent is safely close.
+    """Return an integer picker-aligned drag at a sufficiently close detent.
 
     Atlas scale levels are estimated from capture measurements, while live
     wheel detents can differ slightly. If one click has crossed the continuous
     target, accept the nearer detent only when it is within half a measured
-    click and a center translation can still put all markers within 1 pixel.
+    click and a shared translation can still put all markers within 1 pixel.
     Final game HEX verification remains mandatory.
     """
     scale_error=abs(float(np.log(fields['scale'])))
     if not np.isfinite(scale_error) or scale_error>float(zoom_tick)*.55:
         return None
-    center_drag=homogeneous([[1,0,fields['dx']],[0,1,fields['dy']]])
+    points=np.column_stack((markers,np.ones(len(markers))))
+    shifts=points[:,:2]-(points@(actual@np.linalg.inv(target)).T)[:,:2]
+    # Use the picker geometry rather than the unrelated board center.
+    centers=[shifts.mean(axis=0),*shifts]
+    centers.extend((a+b)/2 for i,a in enumerate(shifts) for b in shifts[i+1:])
+    if len(shifts)==3:
+        a=2*(shifts[1:]-shifts[0])
+        if abs(np.linalg.det(a))>1e-10:
+            centers.append(np.linalg.solve(a,(shifts[1:]**2).sum(axis=1)-(shifts[0]**2).sum()))
+    moves=np.unique(np.concatenate([np.rint(c)+[[x,y] for x in (-1,0,1) for y in (-1,0,1)]
+                                    for c in centers]),axis=0)
+    best=int(np.argmin(np.linalg.norm(shifts[None]-moves[:,None],axis=2).max(axis=1)))
+    dx,dy=moves[best]
+    center_drag=homogeneous([[1,0,dx],[0,1,dy]])
     errors=marker_errors(target,center_drag@actual,markers)
     if not np.isfinite(errors).all() or float(np.max(errors))>1.:
         return None
-    return dict(dx=float(fields['dx']),dy=float(fields['dy']),
+    return dict(dx=float(dx),dy=float(dy),
                 scale_error=scale_error,marker_errors=errors.tolist())
 
 
@@ -48,7 +62,9 @@ def _measured_motion(adapter, before, after, emit, phase, step=0):
     registration = adapter.motion(before, after)
     diagnostics = deepcopy(getattr(adapter, 'last_motion_diagnostics', None))
     emit('atlas_registration', dict(phase=phase, step=step,
-                                   passed=registration is not None, diagnostics=diagnostics))
+                                   passed=registration is not None, diagnostics=diagnostics,
+                                   measured=(np.asarray(registration['matrix']).tolist()
+                                             if registration is not None and 'matrix' in registration else None)))
     if registration is None:
         reasons = {
             'insufficient_features': '可识别纹理特征不足',
@@ -66,6 +82,10 @@ def _measured_motion(adapter, before, after, emit, phase, step=0):
 
 def _estimate_candidate_motion(candidate, board, markers, max_steps):
     """Simulate the same rotate/zoom/drag order used by execute_candidate.
+
+    Input descriptors are exact. Rotation uses the grouped integer arc, with
+    limited live evidence, and zoom uses this session's directional estimate.
+    The result still needs measured feedback and final-pose colour scoring.
 
     The previous budget estimate added a separate worst-case pivot translation
     to the rotation and zoom counts. In practice decompose_gestures chooses a
@@ -89,15 +109,25 @@ def _estimate_candidate_motion(candidate, board, markers, max_steps):
         local_markers-local_markers.mean(axis=0),axis=1))))
     zoom_tick=abs(float(candidate.get('zoom_log_step',np.log(1.01))))
     actions=dict(rotate=0,wheel=0,drag=0)
+    input_route=[]
+    def compile_input(kind,command,anchor=None):
+        gesture=planned_gesture(kind,board,command,anchor)
+        input_route.append(gesture.record())
+        return gesture
     translation_steps=0
     last_zoom_direction=0
     if not np.isfinite(zoom_tick) or zoom_tick<1e-5:
         zoom_tick=float(np.log(1.01))
+    zoom_ticks={-1:zoom_tick,1:float(candidate.get('zoom_log_step_up',zoom_tick))}
 
     for step in range(max_steps+1):
         errors=marker_errors(target,actual,local_markers)
         if float(np.max(errors))<=.65:
-            return dict(steps=step,actions=actions,reachable=True)
+            return dict(steps=step,actions=actions,reachable=True,
+                        actual_pose=actual[:2].tolist(),marker_errors=errors.tolist(),
+                        input_route=input_route,
+                        response_model='grouped_integer_arc_and_directional_zoom',
+                        game_response_verified=False)
         if step>=max_steps:
             break
         residual=target@np.linalg.inv(actual)
@@ -107,12 +137,20 @@ def _estimate_candidate_motion(candidate, board, markers, max_steps):
         if abs(np.radians(fields['angle']))*radius>.3:
             kind='rotate'
             command=float(np.clip(fields['angle'],-12,12))
-            theta=np.radians(command)
+            gesture=compile_input(kind,command,gestures['rotation_anchor'])
+            if not gesture.has_effect:
+                return dict(steps=step,actions=actions,reachable=False,
+                            reason='rotation_quantized',input_route=input_route)
+            # Controlled comparisons support this geometric forecast for the
+            # sampled grouped arcs, not an arbitrary-angle response guarantee.
+            # The requested angle is never substituted for the integer arc.
+            theta=np.radians(gesture.arc_degrees)
             scale=1.
-            anchor=np.asarray(gestures['rotation_anchor'],float)-[l,t]
+            anchor=np.asarray(gesture.anchor,float)-[l,t]
         elif abs(np.log(fields['scale']))*radius>.3:
             kind='wheel'
             direction=1 if fields['scale']>1 else -1
+            zoom_tick=zoom_ticks[direction]
             if last_zoom_direction and direction!=last_zoom_direction:
                 detent=_nearest_detent_translation(target,actual,fields,local_markers,
                                                     zoom_tick)
@@ -129,14 +167,18 @@ def _estimate_candidate_motion(candidate, board, markers, max_steps):
                     return dict(steps=max_steps+1,actions=actions,reachable=False,
                                 reason='translation_limit')
                 translation_steps+=1
+                gesture=compile_input(kind,command)
+                command=np.asarray(gesture.translation)
                 actions[kind]+=1
                 actual=homogeneous(np.column_stack((np.eye(2),command)))@actual
                 continue
             last_zoom_direction=direction
             command=direction*min(4,max(1,int(abs(np.log(fields['scale']))/zoom_tick+.1)))
+            gesture=compile_input(kind,command,gestures['zoom_anchor'])
+            command=gesture.wheel_steps
             theta=0.
             scale=np.exp(command*zoom_tick)
-            anchor=np.asarray(gestures['zoom_anchor'],float)-[l,t]
+            anchor=np.asarray(gesture.anchor,float)-[l,t]
         else:
             kind='drag'
             remaining=residual[:2,:2]@center+residual[:2,2]-center
@@ -151,6 +193,8 @@ def _estimate_candidate_motion(candidate, board, markers, max_steps):
                 return dict(steps=max_steps+1,actions=actions,reachable=False,
                             reason='translation_limit')
             translation_steps+=1
+            gesture=compile_input(kind,command)
+            command=np.asarray(gesture.translation)
             actions[kind]+=1
             measured=homogeneous(np.column_stack((np.eye(2),command)))
             actual=measured@actual
@@ -175,11 +219,16 @@ def reposition_budget(candidate, now, deadline, board, step_seconds=None,
     executor still checks the game deadline before every input and verification.
     """
     if deadline <= now:return dict(allowed=False,reason='deadline')
-    plan=_estimate_candidate_motion(candidate,board,markers,max_steps)
+    if candidate.get('planned_route') is not None:
+        from atlas_bound_route import bound_motion
+        plan=bound_motion(candidate,board,markers,max_steps)
+    else:
+        plan=_estimate_candidate_motion(candidate,board,markers,max_steps)
     actions=plan['actions'];steps=plan['steps']
     if step_seconds is None:
         movement=(actions['rotate']*1.2+actions['wheel']*.5+
                   actions['drag']*1.05)
+        movement=max(movement,sum(g['input_seconds']+.15 for g in plan.get('input_route',[])))
     else:
         movement=steps*float(step_seconds)
     needed=movement+float(verify_seconds)+float(safety_seconds)
@@ -189,7 +238,12 @@ def reposition_budget(candidate, now, deadline, board, step_seconds=None,
     elif not plan['reachable']:reason=plan.get('reason','unreachable')
     else:reason='insufficient_time'
     return dict(allowed=allowed,reason=reason,steps=steps,actions=actions,
-                needed=needed,remaining=remaining)
+                needed=needed,remaining=remaining,
+                input_route=plan.get('input_route',[]),
+                response_model=plan.get('response_model','unverified'),
+                game_response_verified=False,
+                planned_pose=plan.get('actual_pose'),
+                planned_marker_errors=plan.get('marker_errors'))
 
 
 @dataclass(frozen=True)
@@ -310,18 +364,53 @@ def checked_translation(motion):
 
 
 def verify_result(candidate,actual,rules):
+    from color_family import family_priority, family_fields
+    from vision import rgb
     if len(actual)!=3 or any(r['enabled'] and actual[i] is None for i,r in enumerate(rules)):
         raise RuntimeError('Game HEX could not be read reliably')
     deltas=[error(actual[i],r['colors'],False) if r['enabled'] else None for i,r in enumerate(rules)]
-    prediction_errors=[error(actual[i],[candidate['colors'][i]],False) if r['enabled'] else None for i,r in enumerate(rules)]
+    prediction_errors=[error(actual[i],[candidate['colors'][i]],False)
+                       if r['enabled'] and candidate['colors'][i] is not None else None
+                       for i,r in enumerate(rules)]
     values=[v for v in deltas if v is not None]
     exact_regions=[i for i,r in enumerate(rules) if r['enabled'] and r.get('exact')]
     exact_matches=sum(actual[i].upper() in [c.upper() for c in rules[i]['colors']] for i in exact_regions)
+    family=family_priority([[rgb(actual[i])] if r['enabled'] else None for i,r in enumerate(rules)],rules)
     return dict(candidate_id=candidate['id'],predicted_colors=candidate['colors'],
                 predicted_deltas=candidate['deltas'],actual_colors=actual,actual_deltas=deltas,
                 prediction_errors=prediction_errors,maximum=max(values),average=float(np.mean(values)),
-                accepted=accepted(actual,rules),verified=True,
-                exact_matches=exact_matches,exact_total=len(exact_regions))
+                accepted=accepted(actual,rules),verified=True,**family_fields(*family,0),
+                exact_matches=exact_matches,exact_total=len(exact_regions),
+                exact_maximum=max((deltas[i] for i in exact_regions),default=0.),
+                exact_average=float(np.mean([deltas[i] for i in exact_regions])) if exact_regions else 0.)
+
+
+def _refresh_prediction(adapter,candidate,actual,rules,emit):
+    rescore=getattr(adapter,'rescore',None)
+    if not callable(rescore):return candidate
+    proposal_colors=deepcopy(candidate['colors'])
+    failure=None
+    try:
+        refreshed=rescore(actual,candidate,rules)
+    except Exception as exc:
+        if exc.__class__.__name__ in ('Interrupted','InterruptedError'):
+            raise
+        # Atlas diagnostics must not discard a successful two-frame game HEX
+        # observation. Missing predictions remain explicitly unavailable.
+        refreshed=None;failure=str(exc)
+    adapter.check()
+    if refreshed is None:
+        candidate=dict(candidate,colors=[None]*3,deltas=[None]*3,
+                       accepted=False,prediction_pose=None,
+                       prediction_pose_source=('rescore_failed' if failure else 'unsupported_measured_pose'))
+    else:candidate=refreshed
+    emit('atlas_prediction_updated',dict(candidate_id=candidate['id'],
+         candidate=candidate if refreshed is not None else None,
+         proposal_colors=proposal_colors,colors=candidate['colors'],
+         deltas=candidate['deltas'],error=failure,
+         prediction_pose_source=candidate.get('prediction_pose_source'),
+         measured_pose=actual[:2].tolist()))
+    return candidate
 
 
 def _recover_current_result(adapter, candidate, rules, actual, markers, target,
@@ -347,7 +436,12 @@ def _recover_current_result(adapter, candidate, rules, actual, markers, target,
         if any(r['enabled'] and (first[i] is None or second[i] is None or
                                  first[i] != second[i]) for i,r in enumerate(rules)):
             return None
-        result = verify_result(candidate, second, rules)
+        # The interrupted route did not reach the proposal. Its colours cannot
+        # be used as a prediction of this read-only recovery observation.
+        observation=dict(candidate,colors=[None]*3,deltas=[None]*3)
+        result = verify_result(observation, second, rules)
+        result.update(proposal_colors=deepcopy(candidate['colors']),
+                      prediction_pose_source='unverified_recovery_pose')
         # A repeated frame after a wheel command is a known, bounded native
         # zoom stop.  The pose accumulated before that command remains valid,
         # so the service may safely rebase one of the other measured
@@ -393,6 +487,22 @@ def _recover_current_result(adapter, candidate, rules, actual, markers, target,
         return None
 
 
+def _adopt_bound_route(replacement,actual,context,max_steps):
+    """Lift a route bound at the measured pose into the execution reference.
+
+    Inputs and their local binding stay unchanged. Target and expected poses
+    must include all motion already performed in this execution attempt.
+    """
+    from atlas_bound_route import bound_motion
+    bound=bound_motion(replacement,context.board,context.markers,max_steps)
+    target=candidate_pose(replacement,context.board)@actual
+    bound['expected_poses']=[pose@actual for pose in bound['expected_poses']]
+    candidate=dict(replacement,**pose_fields(target,context.board),
+        rebound_route=dict(start_pose=actual[:2].tolist(),route=replacement['planned_route']))
+    candidate.pop('planned_route',None);candidate.pop('execution_budget',None)
+    return candidate,target,bound
+
+
 def execute_candidate(adapter,batch,batch_id,candidate_id,reference,rules,emit=lambda *args:None,
                       clock=time.monotonic,max_steps=80,reservation='legacy',
                       verified_kind='atlas_verified'):
@@ -412,6 +522,11 @@ def execute_candidate(adapter,batch,batch_id,candidate_id,reference,rules,emit=l
         else:
             candidate=batch.claim(batch_id,candidate_id,context)
         target=candidate_pose(candidate,batch.context.board)
+        bound=None;route_index=0;route_replan=False;route_rebinds=0
+        original_target=target.copy();last_rebind_error=None
+        if candidate.get('planned_route') is not None:
+            from atlas_bound_route import bound_motion
+            bound=bound_motion(candidate,batch.context.board,batch.context.markers,max_steps)
         before=adapter.capture()
         registration=_measured_motion(adapter,reference,before,emit,'reference')
         moved=checked_translation(registration)
@@ -422,27 +537,122 @@ def execute_candidate(adapter,batch,batch_id,candidate_id,reference,rules,emit=l
         markers=np.asarray(batch.context.markers,float)-[l,t]
         if np.max(marker_errors(np.eye(3),actual,markers))>1:
             raise CandidateExpired('Board moved while choosing; recompute candidates')
+        if bound is not None and np.max(marker_errors(np.eye(3),actual,markers))>.65:
+            route_replan=True
         center=np.array([(r-l)/2,(b-t)/2])
         radius=max(1.,float(np.max(np.linalg.norm(markers-markers.mean(axis=0),axis=1))))
         cap=np.array([r-l,b-t])*.16
         if np.any(cap<2):raise ValueError('Board too small')
-        last_zoom_direction=0; translation_steps=0
+        last_zoom_direction=0; translation_steps=0;pose_replanned=False;rotation_quantized=False
+        linear_move=not np.allclose(target[:2,:2],np.eye(2),atol=1e-6)
         zoom_tick=abs(float(candidate.get('zoom_log_step',np.log(1.01))))
         if not np.isfinite(zoom_tick) or zoom_tick<1e-5:raise ValueError('Invalid wheel scale estimate')
+        zoom_ticks={-1:zoom_tick,1:float(candidate.get('zoom_log_step_up',zoom_tick))}
+        if any(not np.isfinite(v) or v<1e-5 for v in zoom_ticks.values()):
+            raise ValueError('Invalid wheel scale estimate')
         for step in range(max_steps):
             adapter.check()
             if adapter.context()!=batch.context:raise CandidateExpired('Session geometry changed')
             if clock()>=batch.deadline:raise CandidateExpired('Insufficient execution time')
-            if np.max(marker_errors(target,actual,markers))<=.65:break
+            if (np.max(marker_errors(target,actual,markers))<=.65 and
+                    (bound is None or route_index>=len(bound['gestures']))):break
             residual=target@np.linalg.inv(actual)
             fields=pose_fields(residual,batch.context.board)
-            gestures=decompose_gestures(fields,batch.context.board,batch.context.markers)
+            replan=getattr(adapter,'replan',None)
+            if bound is not None and (route_replan or route_index>=len(bound['gestures'])):
+                # Remaining inputs were tied to a forecast that no longer
+                # agrees with the observed pose. Never replay them blindly.
+                emit('atlas_route_discarded',dict(candidate_id=candidate['id'],
+                     completed=route_index,remaining=len(bound['gestures'])-route_index,
+                     actual_pose=actual[:2].tolist()))
+                emit('atlas_progress',dict(stage='search'))
+                # Small accumulated drift invalidates the old inputs, not
+                # necessarily the target. Recompile from the observed pose,
+                # rescore that integer endpoint, and keep measuring each step.
+                # Never retry a stalled rotation or reverse the wheel to chase
+                # an unreachable detent. Allow a longer route to rebind again
+                # only after multiple measured actions made fresh progress;
+                # a fixed two-correction cap discards healthy long rotations.
+                rebind=getattr(adapter,'rebind',None)
+                rebound=None
+                progress_error=float(np.max(marker_errors(original_target,actual,markers)))
+                progressing=(route_index>=2 and last_rebind_error is not None and
+                             progress_error<last_rebind_error-.65)
+                if callable(rebind) and (route_rebinds<2 or progressing) and not rotation_quantized:
+                    route_rebinds+=1
+                    proposal=dict(candidate,zoom_log_step=zoom_ticks[-1],zoom_log_step_up=zoom_ticks[1])
+                    rebound=rebind(actual,proposal,rules)
+                    adapter.check()
+                if rebound is not None:
+                    from atlas_bound_route import bound_motion
+                    fresh=bound_motion(rebound,batch.context.board,batch.context.markers,max_steps-step)
+                    reversing=any(g.kind=='wheel' and last_zoom_direction and
+                                  np.sign(g.wheel_steps)!=last_zoom_direction for g in fresh['gestures'])
+                    if not reversing:
+                        original=candidate
+                        candidate,target,bound=_adopt_bound_route(rebound,actual,batch.context,max_steps-step)
+                        route_index=0;route_replan=False;pose_replanned=True
+                        last_rebind_error=progress_error
+                        emit('atlas_route_rebound',dict(candidate_id=candidate['id'],
+                            correction=route_rebinds,remaining=len(bound['gestures']),
+                            actual_pose=actual[:2].tolist(),candidate=candidate,
+                            measured_target_error=progress_error,progress_extension=route_rebinds>2))
+                        emit('atlas_replanned',dict(candidate_id=candidate['id'],
+                            original_colors=original['colors'],candidate=candidate,
+                            measured_pose=actual[:2].tolist()))
+                        continue
+                replacement=replan(actual,candidate,rules) if callable(replan) else None
+                adapter.check()
+                if replacement is None:
+                    raise RuntimeError('No measured-pose fallback after route response changed')
+                original=candidate
+                if replacement.get('planned_route') is not None:
+                    candidate,target,bound=_adopt_bound_route(replacement,actual,batch.context,max_steps-step)
+                else:
+                    candidate=replacement;target=candidate_pose(candidate,batch.context.board);bound=None
+                route_index=0;route_replan=False;pose_replanned=True;rotation_quantized=True
+                original_target=target.copy();last_rebind_error=None;route_rebinds=0;translation_steps=0
+                emit('atlas_replanned',dict(candidate_id=candidate['id'],
+                     original_colors=original['colors'],candidate=candidate,
+                     measured_pose=actual[:2].tolist()))
+                continue
+            angular_ready=rotation_quantized or abs(np.radians(fields['angle']))*radius<=.3
+            crossing=(last_zoom_direction and (1 if fields['scale']>1 else -1)!=last_zoom_direction)
+            if (bound is None and linear_move and callable(replan) and not pose_replanned and angular_ready and
+                    (crossing or abs(np.log(fields['scale']))*radius<=.3)):
+                # The measured linear transform is reachable. Search the
+                # original atlas at that scale/angle, then translate only.
+                emit('atlas_progress',dict(stage='search'))
+                replacement=replan(actual,candidate,rules)
+                adapter.check()
+                if replacement is not None:
+                    original=candidate
+                    if replacement.get('planned_route') is not None:
+                        candidate,target,bound=_adopt_bound_route(replacement,actual,batch.context,max_steps-step)
+                    else:
+                        candidate=replacement;target=candidate_pose(candidate,batch.context.board)
+                    route_index=0;route_replan=False;translation_steps=0
+                    original_target=target.copy();last_rebind_error=None;route_rebinds=0
+                    pose_replanned=True
+                    emit('atlas_replanned',dict(candidate_id=candidate['id'],
+                         original_colors=original['colors'],candidate=candidate,
+                         measured_pose=actual[:2].tolist()))
+                    continue
+            gestures=(decompose_gestures(fields,batch.context.board,batch.context.markers)
+                      if bound is None else None)
             anchor=None
-            if abs(np.radians(fields['angle']))*radius>.3:
+            if bound is not None:
+                gesture=bound['gestures'][route_index]
+                kind=gesture.kind
+                command=(np.asarray(gesture.translation) if kind=='drag' else
+                         gesture.wheel_steps if kind=='wheel' else gesture.requested_angle)
+                anchor=gesture.anchor if kind!='drag' else None
+            elif not rotation_quantized and abs(np.radians(fields['angle']))*radius>.3:
                 kind='rotate'; command=float(np.clip(fields['angle'],-12,12))
                 anchor=gestures['rotation_anchor']
             elif abs(np.log(fields['scale']))*radius>.3:
                 kind='wheel'; direction=1 if fields['scale']>1 else -1
+                zoom_tick=zoom_ticks[direction]
                 if last_zoom_direction and direction!=last_zoom_direction:
                     detent=_nearest_detent_translation(target,actual,fields,markers,zoom_tick)
                     if detent is None:
@@ -469,11 +679,22 @@ def execute_candidate(adapter,batch,batch_id,candidate_id,reference,rules,emit=l
                 if not np.any(command):break
                 if translation_steps>=10:raise RuntimeError('Translation did not converge')
                 translation_steps+=1
+            if bound is None:
+                gesture=planned_gesture(kind,batch.context.board,command,anchor)
+            if kind=='rotate' and not gesture.has_effect:
+                # No right-button down for a rounded arc with no angular motion.
+                # Keep the measured pose and enter the existing atlas replan.
+                rotation_quantized=True
+                emit('atlas_micro_rotation',dict(step=step+1,command=float(command),
+                     marker_pixels=float(abs(np.radians(command))*radius),
+                     input_sent=False,gesture=gesture.record()))
+                continue
+            if kind=='drag':command=np.asarray(gesture.translation)
+            elif kind=='wheel':command=gesture.wheel_steps
+            if anchor is not None:anchor=gesture.anchor
             emit('atlas_command',dict(step=step+1,action=kind,command=np.asarray(command).tolist(),
-                                     anchor=None if anchor is None else np.asarray(anchor).tolist()))
-            if kind=='drag':adapter.drag(*command)
-            elif kind=='rotate':adapter.rotate(command,anchor)
-            else:adapter.wheel(command,anchor)
+                                     anchor=anchor,gesture=gesture.record()))
+            adapter.perform_gesture(gesture)
             adapter.pause(.15)
             after=adapter.capture()
             registration=_measured_motion(adapter,before,after,emit,'positioning',step+1)
@@ -485,7 +706,7 @@ def execute_candidate(adapter,batch,batch_id,candidate_id,reference,rules,emit=l
                 if np.dot(shift,command)<=0 or np.linalg.norm(shift)>np.linalg.norm(command)*2+2:
                     raise RuntimeError('Unexpected image displacement')
             else:
-                anchor=np.array(gestures['rotation_anchor' if kind=='rotate' else 'zoom_anchor'])-[l,t]
+                anchor=np.array(gesture.anchor)-[l,t]
                 if np.linalg.norm(measured[:2,:2]@anchor+measured[:2,2]-anchor)>3:
                     raise RuntimeError('Gesture pivot moved unexpectedly')
                 if kind=='rotate':
@@ -494,19 +715,17 @@ def execute_candidate(adapter,batch,batch_id,candidate_id,reference,rules,emit=l
                     if stalled:
                         # A final arc can be smaller than one screen pixel after
                         # integer coordinate rounding. Accept only this bounded
-                        # identity measurement and carry the commanded pose
-                        # forward; larger stalled rotations remain failures.
+                        # identity measurement for replanning; larger stalled
+                        # rotations remain failures.
                         marker_pixels=abs(np.radians(command))*radius
                         identity=(abs(response['angle'])<.025 and
                                   abs(response['scale']-1)<=.003)
-                        if not (identity and marker_pixels<=MICRO_ROTATION_PIXELS):
+                        if not (identity and (marker_pixels<=MICRO_ROTATION_PIXELS or
+                                             (bound is not None and callable(replan)))):
                             raise RuntimeError('Unexpected or stalled rotation')
-                        theta=np.radians(command)
-                        pivot=np.asarray(gestures['rotation_anchor'],float)-[l,t]
-                        matrix=np.array([[np.cos(theta),-np.sin(theta)],
-                                         [np.sin(theta),np.cos(theta)]])
-                        measured=homogeneous(np.column_stack((matrix,pivot-matrix@pivot)))
-                        response=pose_fields(measured,batch.context.board)
+                        # Do not replace a measured identity with a requested
+                        # rotation. The live replan uses the actual angle.
+                        rotation_quantized=True
                         emit('atlas_micro_rotation',dict(step=step+1,command=float(command),
                                                          marker_pixels=float(marker_pixels)))
                 elif (np.log(response['scale'])*command<=0 or abs(response['scale']-1)<.0005 or
@@ -531,10 +750,22 @@ def execute_candidate(adapter,batch,batch_id,candidate_id,reference,rules,emit=l
                         response=retry_response
                     else:
                         raise RuntimeError('Unexpected or stalled wheel response')
-                if kind=='wheel':zoom_tick=abs(np.log(response['scale'])/command)
+                if kind=='wheel':
+                    zoom_tick=abs(np.log(response['scale'])/command)
+                    zoom_ticks[1 if command>0 else -1]=zoom_tick
+                    last_zoom_direction=1 if command>0 else -1
             actual=measured@actual;before=after
+            route_errors=None
+            if bound is not None:
+                route_errors=marker_errors(bound['expected_poses'][route_index],actual,markers)
+                route_index+=1
+                # Existing positioning tolerance, not the .09 px error seen
+                # in one probe and not a universal response confidence bound.
+                route_replan=bool(np.max(route_errors)>.65 or rotation_quantized)
             emit('atlas_positioning',dict(step=step+1,action=kind,command=np.asarray(command).tolist(),
+                 gesture=gesture.record(),
                  measured=measured[:2].tolist(),actual_pose=actual[:2].tolist(),
+                 bound_route_marker_errors=route_errors.tolist() if route_errors is not None else None,
                  marker_errors=marker_errors(target,actual,markers).tolist()))
         errors=marker_errors(target,actual,markers)
         if np.max(errors)>1:raise RuntimeError('Positioning did not converge at all three markers')
@@ -558,8 +789,16 @@ def execute_candidate(adapter,batch,batch_id,candidate_id,reference,rules,emit=l
         if np.max(errors)>1:raise CandidateExpired('Marker alignment changed during verification')
         adapter.check()
         if clock()>=batch.deadline:raise CandidateExpired('HEX verification exceeded the deadline')
+        # The controller accepts a small alignment residual and may replan at
+        # a measured detent. Neither case preserves the old predicted colours.
+        # Resample at the final registered pose, independently of game HEX.
+        candidate=_refresh_prediction(adapter,candidate,actual,rules,emit)
+        if clock()>=batch.deadline:raise CandidateExpired('HEX verification exceeded the deadline')
         result=verify_result(candidate,second,rules)
-        result.update(actual_pose=actual[:2].tolist(),marker_errors=errors.tolist())
+        result.update(actual_pose=actual[:2].tolist(),marker_errors=errors.tolist(),
+                      replanned=pose_replanned,predicted_accepted=bool(candidate.get('accepted')),
+                      prediction_pose_source=candidate.get('prediction_pose_source','proposal'),
+                      prediction_pose=candidate.get('prediction_pose'))
         adapter.verified_frame=verified_frame
         if reservation=='choice':
             batch.actual_pose=actual@homogeneous(batch.actual_pose)

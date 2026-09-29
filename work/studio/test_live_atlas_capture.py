@@ -18,6 +18,35 @@ from window_target import WindowUnavailable, MultipleWindows
 
 
 class CaptureGuardTests(unittest.TestCase):
+    def test_response_diagnostic_uses_manual_entry_without_starting_grid_or_clicking(self):
+        image=np.zeros((960,1280,3),np.uint8)
+        scene=SimpleNamespace(board=(100,300,600,800),markers=[(180,450),(350,650),(510,500)],
+                              cards=[],seconds=120)
+        game=SimpleNamespace(initial=(0,0,1280,960),hwnd=123,until=float('inf'),
+            geometry=lambda:(0,0,1280,960),capture=lambda:image,capture_waiting=lambda:image,
+            check=MagicMock(),pause=MagicMock(),click=MagicMock(),wheel=MagicMock(),
+            drag=MagicMock(),move_to=MagicMock(),send=MagicMock())
+        outcome=dict(status='complete',completed=1,response_model_installed=False)
+        with tempfile.TemporaryDirectory() as tmp, \
+             patch('live_atlas_capture.CaptureGame',return_value=game), \
+             patch('live_atlas_capture.configure_ocr'), \
+             patch('live_atlas_capture.recognize',return_value=scene), \
+             patch('live_atlas_capture.measure_board_motion',return_value={'scale':1.02}), \
+             patch('live_atlas_capture.CaptureWorker') as worker, \
+             patch('live_atlas_capture.grid_scan_plan') as grid, \
+             patch('gesture_response_probe.run_response_probe',return_value=(image,outcome)) as probe, \
+             patch.object(u,'GetDpiForWindow',return_value=144), \
+             contextlib.redirect_stdout(io.StringIO()):
+            artifact=acquire(Path(tmp)/'capture',strategy='response',stop=threading.Event())
+            records=json.loads((Path(tmp)/'capture/log.json').read_text(encoding='utf8'))
+        self.assertIs(artifact['outcome'],outcome)
+        self.assertEqual(game.response_probe_dpi,144)
+        self.assertEqual(probe.call_count,1)
+        self.assertEqual(records[-1]['strategy'],'response')
+        worker.assert_not_called();grid.assert_not_called()
+        game.click.assert_not_called();game.drag.assert_not_called()
+        self.assertEqual([call.args[0] for call in game.send.call_args_list],[4,16])
+
     def test_late_manual_entry_and_failed_activation_do_not_abort_waiting(self):
         class Clock:
             now=0.
@@ -232,7 +261,7 @@ class CaptureGuardTests(unittest.TestCase):
             folder=Path(tmp)/'capture'
             with patch('live_atlas_capture.CaptureGame',FakeGame), \
                  patch('live_atlas_capture.time.monotonic',side_effect=monotonic), \
-                 patch('live_atlas_capture.recognize',return_value=scene), \
+                 patch('live_atlas_capture.recognize',return_value=scene) as recognize, \
                  patch('live_atlas_capture.measure_board_motion',return_value={'scale':1.02}), \
                  contextlib.redirect_stdout(io.StringIO()):
                 with patch('live_atlas_capture.configure_ocr'):
@@ -241,6 +270,9 @@ class CaptureGuardTests(unittest.TestCase):
             self.assertTrue((folder/'log.json').is_file())
             records=json.loads((folder/'log.json').read_text())
             timer=next(row for row in records if row['kind']=='timer')
+            for call in recognize.call_args_list:
+                if call.kwargs['with_ocr']:
+                    self.assertFalse(call.kwargs['read_colors'])
             self.assertEqual(timer['seconds'],120)
             self.assertIn('elapsed_seconds',timer)
 
@@ -255,11 +287,20 @@ class CaptureGuardTests(unittest.TestCase):
         self.assertAlmostEqual(artifact['deadline']-artifact['ready_at'],120.,places=2)
         self.assertEqual(artifact['game_deadline'],artifact['deadline'])
         self.assertEqual(artifact['game'].stage_until,float('inf'))
+        scan_frames=[row for row in records if row['kind']=='frame' and row['name'].startswith('grid_')]
+        self.assertEqual(len(scan_frames),48)
+        self.assertTrue(all(row['scan_timing']['selected']=='baseline' for row in scan_frames))
+        self.assertTrue(all(len(row['settling_probe_files'])==2 for row in scan_frames))
+        self.assertEqual(sum(row['kind']=='command' for row in records),48)
+        summary=next(row for row in records if row['kind']=='scan_settling_summary')
+        self.assertEqual(summary['mode'],'observe_only')
+        self.assertEqual(summary['potential_saving_seconds'],0)  # static fake board
         self.assertEqual(timer['effective_deadline_elapsed_seconds'],
                          timer['sampling_deadline_elapsed_seconds'])
         zoom=next(row for row in records if row['kind']=='sampling_zoom')
         self.assertEqual(zoom['stop_reason'],'step_limit')
         self.assertFalse(zoom['game_limit_observed'])
+        self.assertEqual([call[1] for call in calls if call[0]=='wheel'],[4]*12+[-4,4])
         self.assertEqual([call[1] for call in calls if call[0]=='click'],[])
         self.assertEqual([call[1] for call in calls if call[0]=='send'],[4,16])
         first_drag=next(i for i,call in enumerate(calls) if call[0]=='drag')

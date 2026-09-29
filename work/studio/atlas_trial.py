@@ -143,6 +143,10 @@ def zoom_to_safe_maximum(g, scene, initial, deadline, max_notches=48):
 
 
 class Adapter:
+    def perform_gesture(self, gesture):
+        self.g.perform_gesture(gesture)
+        self.g.move_to((int(self.g.initial[2]*.5),int(self.g.initial[3]*.15)))
+
     def __init__(self,g,scene,session):self.g=g;self.scene=scene;self.session=session
     def check(self):self.g.check()
     def context(self):

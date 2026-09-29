@@ -1,9 +1,11 @@
 """DPI-aware Windows client capture and paced, cancellable SendInput."""
-import ctypes as C, time, math
+import ctypes as C, time
 from ctypes import wintypes as W
 import numpy as np
 from PIL import ImageGrab
 from window_target import resolve_target,valid_target,WindowUnavailable
+from input_gestures import (drag_gesture, grouped_rotation_gesture, rotation_path,
+                            wheel_gesture, path_gesture)
 
 u=C.windll.user32
 try:u.SetProcessDpiAwarenessContext(C.c_void_p(-4))
@@ -26,23 +28,6 @@ class Input(C.Structure):
 u.SendInput.argtypes=[W.UINT,C.POINTER(Input),C.c_int]; u.SendInput.restype=W.UINT
 
 class Interrupted(Exception):pass
-
-def rotation_path(board,anchor,angle):
-    """Use the longest safe arc to reduce angular error from integer pixels."""
-    l,t,r,b=board;cx,cy=map(round,anchor);best=None
-    if not(l+8<cx<r-8 and t+8<cy<b-8):raise ValueError('旋转按下点距离色板边缘太近。')
-    for base in range(0,360,15):
-        angles=np.radians(base+np.linspace(0,angle,49));vx=np.cos(angles);vy=np.sin(angles)
-        limits=[min(r-l,b-t)*.8]
-        for values,negative,positive in ((vx,cx-l-6,r-cx-6),(vy,cy-t-6,b-cy-6)):
-            if np.any(values>1e-6):limits.append(float(np.min(positive/values[values>1e-6])))
-            if np.any(values<-1e-6):limits.append(float(np.min(-negative/values[values<-1e-6])))
-        radius=min(limits)
-        if best is None or radius>best[0]:best=(radius,base)
-    radius,base=best;theta=math.radians(base)
-    points=[(round(cx+radius*i/8*math.cos(theta)),round(cy+radius*i/8*math.sin(theta))) for i in range(9)]
-    points += [(round(cx+radius*math.cos(math.radians(base+angle*i/24))),round(cy+radius*math.sin(math.radians(base+angle*i/24)))) for i in range(1,25)]
-    return points
 
 class Game:
     def __init__(self,stop,target=None):
@@ -85,43 +70,64 @@ class Game:
         vw,vh=u.GetSystemMetrics(78),u.GetSystemMetrics(79)
         self.send(0x8000|0x4000|1,round((x+p[0]-vx)*65535/max(1,vw-1)),round((y+p[1]-vy)*65535/max(1,vh-1)))
     def path(self,points,right=False,absolute=False):
-        self.check(); down,up=(8,16) if right else (2,4)
-        self.move_to(points[0]); time.sleep(.08); self.send(down)
+        return self.perform_gesture(path_gesture(points,right,absolute))
+    def perform_gesture(self,gesture):
+        """Send the already planned integer descriptor without regenerating it."""
+        self.check()
+        self.last_gesture=gesture
+        if not gesture.has_effect:return False
+        timing=gesture.timing;points=gesture.points
+        trace=[] if getattr(self,'capture_input_trace',False) else None
+        self.last_input_trace=trace
+        trace_origin=self.geometry()[:2] if trace is not None else None
+        trace_start=time.perf_counter() if trace is not None else None
+        def observe(slot):
+            if trace is None:return
+            try:
+                cursor=W.POINT()
+                if not u.GetCursorPos(C.byref(cursor)):raise OSError('GetCursorPos failed')
+                actual=[int(cursor.x-trace_origin[0]),int(cursor.y-trace_origin[1])]
+                error=None
+            except Exception as exc:
+                actual=None;error=str(exc)
+            trace.append(dict(slot=slot,requested=list(points[slot]),actual_client=actual,
+                              elapsed_seconds=time.perf_counter()-trace_start,error=error))
+        self.move_to(gesture.anchor)
+        if gesture.kind=='wheel':
+            observe(0)
+            for _ in range(abs(gesture.wheel_steps)):
+                self.check()
+                self.send(0x800,data=(1 if gesture.wheel_steps>0 else -1)*120)
+                time.sleep(timing.point_interval)
+            time.sleep(timing.after_wheel)
+            return True
+        down,up=(8,16) if gesture.right else (2,4)
+        time.sleep(timing.before_down)
+        observe(0)
         try:
-            time.sleep(.10)
+            self.send(down)
+            time.sleep(timing.after_down)
             previous=points[0]
-            for p in points[1:]:
+            for slot,p in enumerate(points[1:],1):
                 self.check()
                 # Relative MOUSEEVENTF_MOVE emits real movement events for game input.
                 dx,dy=round(p[0]-previous[0]),round(p[1]-previous[1])
                 if dx or dy:
-                    if absolute:self.move_to(p)
+                    if gesture.absolute:self.move_to(p)
                     else:self.send(1,dx,dy)
-                previous=p; time.sleep(.018)
-            time.sleep(.08)
+                previous=p; time.sleep(timing.point_interval)
+                observe(slot)
+            time.sleep(timing.before_up)
         finally:self.send(up)
+        return True
     def drag(self,board,dx,dy):
-        l,t,r,b=board; margin=12
-        dx=int(np.clip(dx,-(r-l)*.65,(r-l)*.65)); dy=int(np.clip(dy,-(b-t)*.65,(b-t)*.65))
-        sx=round((l+r-dx)/2); sy=round((t+b-dy)/2)
-        count=max(1,min(24,max(abs(dx),abs(dy))))
-        pts=[(round(sx+dx*i/count),round(sy+dy*i/count)) for i in range(count+1)]
-        self.path(pts,absolute=True)
+        return self.perform_gesture(drag_gesture(board,dx,dy))
     def rotate(self,board,angle=30,anchor=None):
-        l,t,r,b=board; cx,cy=anchor if anchor is not None else ((l+r)/2,(t+b)/2)
         # The game anchors rotation at right-button DOWN, not the arc's center.
         # Establish that anchor, move radially out while held, then trace the arc.
-        pts=rotation_path(board,(cx,cy),angle)
-        self.path(pts,right=True,absolute=True)
+        return self.perform_gesture(grouped_rotation_gesture(board,angle,anchor))
     def wheel(self,board,steps,anchor=None):
-        self.check(); l,t,r,b=board
-        point=anchor if anchor is not None else ((l+r)/2,(t+b)/2)
-        if not(l<point[0]<r and t<point[1]<b):raise ValueError('缩放中心必须位于色板内。')
-        self.move_to(point)
-        # Separate notches so the game receives each tick; cancellable during bursts.
-        for _ in range(min(32,abs(int(steps)))):
-            self.check();self.send(0x800,data=(1 if steps>0 else -1)*120);time.sleep(.018)
-        time.sleep(.10)
+        return self.perform_gesture(wheel_gesture(board,steps,anchor))
     def click(self,p):
         self.check(); self.move_to(p); time.sleep(.06); self.send(2)
         try:time.sleep(.09)

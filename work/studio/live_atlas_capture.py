@@ -22,6 +22,8 @@ from window_target import WindowUnavailable, MultipleWindows
 from vision import recognize, green_buttons, measure_board_motion, configure_ocr
 from atlas_masks import board_texture_mask
 from workflow_budget import WorkflowBudget
+from atlas_capture_worker import CaptureWorker
+from scan_settling import ScanSettlingObserver
 
 
 def sampling_frame_is_safe(scene, shape, margin=8):
@@ -48,6 +50,34 @@ def zoom_sampling_steps(scales, safe, max_steps=48):
     return chosen
 
 
+class ZoomMotionTracker:
+    """Reuse only the preceding immutable capture with identical geometry."""
+    def __init__(self):
+        self.features={}
+        self.geometry=None
+        self.mask=None
+
+    def measure(self,before,after,scene):
+        geometry=(tuple(scene.board),tuple(map(tuple,scene.markers)),
+                  tuple(map(tuple,getattr(scene,'cards',()))))
+        if geometry!=self.geometry:
+            self.features.clear()
+            self.mask=board_texture_mask(scene)
+            self.geometry=geometry
+        try:
+            return measure_board_motion(before,after,scene.board,
+                feature_cache=self.features,texture_mask=self.mask)
+        finally:
+            # measure_board_motion keeps source arrays alive to prevent ID
+            # reuse. Retain only the current frame, including on failed fits;
+            # a changed crop/mask cannot reuse features from old coordinates.
+            for key in list(self.features):
+                if key[0]!=id(after):del self.features[key]
+
+    def clear(self):
+        self.features.clear();self.mask=None;self.geometry=None
+
+
 class CaptureGame(Game):
     def __init__(self,stop,target=None):
         super().__init__(stop,target=target)
@@ -60,6 +90,13 @@ class CaptureGame(Game):
     def pause(self,seconds):
         end=time.monotonic()+seconds
         while time.monotonic()<end:self.check();time.sleep(.025)
+    def pause_until(self,end):
+        """Scan-only absolute wait; other input/calibration pacing is unchanged."""
+        while True:
+            self.check()
+            remaining=end-time.monotonic()
+            if remaining<=0:break
+            time.sleep(min(.025,remaining))
     def send(self,flags,dx=0,dy=0,data=0):
         # Base mouse paths contain short sleeps. Recheck at the final input
         # boundary so those sleeps cannot issue a new move/down past expiry.
@@ -231,13 +268,15 @@ def preflight(folder):
     return result
 
 
-def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=False,entry_size=None,emit=None,row_stagger=0.):
+def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=False,entry_size=None,emit=None,row_stagger=0.,response_protocol='baseline'):
     if not np.isfinite(row_stagger) or not 0 <= row_stagger <= .1:
         raise ValueError('row_stagger must be between 0 and 0.1')
+    if response_protocol not in ('baseline','rotation_compare') or (response_protocol!='baseline' and strategy!='response'):
+        raise ValueError('Comparison protocol requires response diagnostics')
     stop=stop or threading.Event();g=None
     folder.mkdir(parents=True,exist_ok=False)
     started=time.monotonic();records=[];game_deadline=None;session_scene=None;final_image=None
-    input_started=False
+    input_started=False;worker=None
     def log(kind,**data):
         row=dict(elapsed_seconds=time.monotonic()-started,kind=kind,**data)
         records.append(row)
@@ -253,8 +292,20 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
             elif kind=='grid_plan':emit('atlas_progress',stage='capture',current=0,total=39+data.get('supplemental_moves',0))
             elif kind=='frame' and data.get('name','').startswith('grid_'):
                 emit('atlas_progress',stage='capture',current=int(data['name'].split('_')[1]),total=48)
-    def snap(name,scene=None):
-        capture_started=time.monotonic();im=g.capture();captured_at=time.monotonic()
+        return row
+    def snap(name,scene=None,command=None,sample=None):
+        if sample is None:
+            capture_started=time.monotonic();im=g.capture();captured_at=time.monotonic()
+        else:
+            im=sample.image;capture_started=sample.capture_started;captured_at=sample.captured_at
+        if worker is not None:
+            record=log('frame',name=name,geometry=g.geometry(),captured_elapsed_seconds=captured_at-started,
+                       capture_seconds=captured_at-capture_started,png_seconds=None,
+                       png_compression=1,storage_error=None,background=True,
+                       scan_timing=sample.timing if sample is not None else None)
+            worker.submit(name,im,scene.board,record,command,g.check,
+                          probes=sample.probes if sample is not None else ())
+            return im
         # Lower compression changes PNG size/CPU cost, never RGB values.
         Image.fromarray(im).save(folder/(name+'.png'),compress_level=1)
         if scene is not None:
@@ -267,7 +318,7 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
     try:
         # Check before telling the user that manual entry can begin. Legacy
         # coordinates must never bypass the OCR precondition.
-        if strategy in ('grid','probe'):
+        if strategy in ('grid','probe','response'):
             configure_ocr(strict=True)
         next_window_notice=0.
         while g is None:
@@ -305,7 +356,9 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
                 waiting_frame_at=time.monotonic()
                 im=g.capture_waiting()
                 if im is None:continue
-                candidate=recognize(im,with_ocr=True)
+                recognition_started=time.monotonic()
+                candidate=recognize(im,with_ocr=True,read_colors=False)
+                recognition_seconds=time.monotonic()-recognition_started
                 if candidate.seconds is not None:
                     scene=candidate;break
             except WindowUnavailable:
@@ -315,21 +368,26 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
                 continue
         ready_at=time.monotonic()
         initial_game_deadline=waiting_frame_at+scene.seconds
-        log('ready',board=scene.board,markers=scene.markers,cards=scene.cards)
+        log('ready',board=scene.board,markers=scene.markers,cards=scene.cards,
+            recognition_seconds=recognition_seconds,
+            frame_elapsed_seconds=waiting_frame_at-started)
         original_at=time.monotonic()
         im=snap('original',scene)
-        if strategy in ('grid','probe'):
+        if strategy in ('grid','probe','response'):
             timed_scene=None
             timer_source='ocr'
             timer_attempts=4
+            timer_recognition_seconds=0.
             for attempt in range(timer_attempts):
                 if attempt:
                     if stop.wait(.25):raise Interrupted('已停止，鼠标已释放。')
                     g.check()
                     original_at=time.monotonic()
                     im=snap('timer_recheck_%02d'%attempt,scene)
-                try:timed_scene=recognize(im,with_ocr=True,previous=scene)
+                recognition_started=time.monotonic()
+                try:timed_scene=recognize(im,with_ocr=True,previous=scene,read_colors=False)
                 except (ValueError,RuntimeError):timed_scene=None
+                timer_recognition_seconds+=time.monotonic()-recognition_started
                 if timed_scene is not None and timed_scene.seconds is not None:break
                 log('timer_recheck',attempt=attempt+1,attempts=timer_attempts,recognized=False)
                 if emit:emit('atlas_progress',stage='zoom',message='正在复核倒计时识别')
@@ -358,6 +416,7 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
             g.stage_until=budget.sampling_deadline
             g.check()
             log('timer',seconds=timed_scene.seconds,source=timer_source,
+                recognition_seconds=timer_recognition_seconds,attempts=attempt+1,
                 deadline_elapsed_seconds=game_deadline-started,
                 workflow_deadline_elapsed_seconds=budget.workflow_deadline-started,
                 effective_deadline_elapsed_seconds=budget.deadline-started,
@@ -370,20 +429,31 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
             # the previous safe frame remains the sampling reference.
             zoomed=0;previous_scale=1.0;last=im;remaining=48
             zoom_stop_reason='step_limit'
+            zoom_tracker=ZoomMotionTracker()
+            zoom_timing=dict(input_wait_seconds=0.,capture_seconds=0.,
+                             recognition_seconds=0.,registration_seconds=0.)
             input_started=True
             while remaining:
                 probe=min(4,remaining)
+                tick=time.monotonic()
                 g.wheel(scene.board,probe);g.pause(.035)
+                zoom_timing['input_wait_seconds']+=time.monotonic()-tick
+                tick=time.monotonic()
                 candidate_im=g.capture()
+                zoom_timing['capture_seconds']+=time.monotonic()-tick
+                tick=time.monotonic()
                 try:candidate=recognize(candidate_im,with_ocr=False,previous=scene)
                 except (ValueError,RuntimeError):
+                    zoom_timing['recognition_seconds']+=time.monotonic()-tick
                     zoom_stop_reason='recognition_failed'
                     g.wheel(scene.board,-probe);g.pause(.06);break
+                zoom_timing['recognition_seconds']+=time.monotonic()-tick
                 if not sampling_frame_is_safe(candidate,candidate_im.shape):
                     zoom_stop_reason='unsafe_geometry'
                     g.wheel(scene.board,-probe);g.pause(.06);break
-                motion=measure_board_motion(last,candidate_im,scene.board,
-                                            texture_mask=board_texture_mask(scene))
+                tick=time.monotonic()
+                motion=zoom_tracker.measure(last,candidate_im,scene)
+                zoom_timing['registration_seconds']+=time.monotonic()-tick
                 if motion is None:
                     zoom_stop_reason='registration_failed'
                     g.wheel(scene.board,-probe);g.pause(.06);break
@@ -394,14 +464,49 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
                 scene=candidate;im=candidate_im;last=im
                 previous_scale*=scale;zoomed+=probe;remaining-=probe
             log('sampling_zoom',steps=zoomed,scale=previous_scale,stop_reason=zoom_stop_reason,
-                game_limit_observed=(zoom_stop_reason=='no_scale_change'))
+                game_limit_observed=(zoom_stop_reason=='no_scale_change'),timing=zoom_timing)
+            if strategy in ('grid','response') and zoomed>=4:
+                # The game's up/down ticks are not reciprocal (about 1.01
+                # and .99). Measure both before generating any joint route.
+                calibration=[]
+                for ticks in (-4,4):
+                    g.wheel(scene.board,ticks);g.pause(.035)
+                    observed=g.capture()
+                    measurement_error=None
+                    try:
+                        motion=zoom_tracker.measure(im,observed,scene)
+                    except Interrupted:raise
+                    except Exception as exc:
+                        motion=None;measurement_error=str(exc)
+                    calibration.append(dict(steps=ticks,motion=motion,error=measurement_error))
+                    im=observed
+                down,up=(row['motion'] for row in calibration)
+                passed=bool(down and up and 0<down['scale']<.998 and up['scale']>1.002 and
+                            abs(down.get('angle',0))<.25 and abs(up.get('angle',0))<.25)
+                log('zoom_calibration',passed=passed,measurements=calibration,
+                    down_log_step=abs(float(np.log(down['scale'])/4)) if passed else None,
+                    up_log_step=abs(float(np.log(up['scale'])/4)) if passed else None,
+                    current_scale=previous_scale*down['scale']*up['scale'] if passed else None)
+            zoom_tracker.clear()
             log('sampling_ready',board=scene.board,markers=scene.markers,cards=scene.cards)
             session_scene=scene
             # The last zoom probe leaves the cursor over the palette. Park it
             # outside the board before the reference frame so the captured
             # cursor sprite cannot be stitched into the periodic atlas.
             g.move_to((int(g.initial[2]*.5),int(g.initial[3]*.15)));g.pause(.16)
+            if strategy=='grid':
+                worker=CaptureWorker(folder,dict(board=list(scene.board),
+                                     markers=[list(p) for p in scene.markers]))
             final_image=snap('max_sampling',scene)
+            if strategy=='response':
+                from gesture_response_probe import run_response_probe
+                try:g.response_probe_dpi=int(u.GetDpiForWindow(g.hwnd)) or None
+                except (AttributeError,TypeError,ValueError,OSError):g.response_probe_dpi=None
+                final_image,outcome=run_response_probe(g,scene,final_image,snap,log,protocol=response_protocol)
+                log('CAPTURE_COMPLETE',strategy='response',outcome=outcome)
+                return dict(folder=folder,deadline=budget.deadline,game_deadline=game_deadline,
+                    workflow_deadline=budget.workflow_deadline,ready_at=ready_at,
+                    game=g,scene=scene,image=final_image,geometry=tuple(g.geometry()),outcome=outcome)
             if strategy=='probe':
                 from point_sampling_probe import run_point_probe
                 # Dedicated diagnostic budget, still bounded by the earlier
@@ -414,28 +519,32 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
                             workflow_deadline=budget.workflow_deadline,ready_at=ready_at,game=g,scene=scene,
                             image=final_image,geometry=tuple(g.geometry()))
             plan=grid_scan_plan(scene.board,row_stagger=row_stagger)
+            settling=ScanSettlingObserver(scene)
             log('grid_plan',columns=8,rows=5,row_stagger=row_stagger,
                 marker_column_fill=True,coverage_fill=True,
                 marker_column_fill_moves=sum(a['supplemental_kind']=='marker_column_fill' for a in plan),
                 coverage_fill_moves=sum(a['supplemental_kind']=='coverage_fill' for a in plan),
                 supplemental_moves=sum(a['supplemental'] for a in plan))
             for index,action in enumerate(plan,1):
-                g.check()
-                g.drag(scene.board,action['dx'],action['dy']);g.pause(.22)
-                g.move_to((int(g.initial[2]*.5),int(g.initial[3]*.15)));g.pause(.16)
-                final_image=snap('grid_%03d'%index,scene)
+                sample=settling.capture_step(g,scene,action,final_image)
+                final_image=snap('grid_%03d'%index,scene,command=action,sample=sample)
                 log('command',dx=action['dx'],dy=action['dy'],holdout=action['holdout'],
                     row=action['row'],column=action['column'],
                     supplemental=action['supplemental'],
                     supplemental_kind=action['supplemental_kind'])
             g.check()
+            processing_started=time.monotonic()
+            prepared=worker.close()
+            log('capture_processing',wait_seconds=time.monotonic()-processing_started,
+                alignment_seconds=worker.alignment.seconds,alignment_error=worker.error)
+            log('scan_settling_summary',**settling.summary())
             log('CAPTURE_COMPLETE',strategy='grid',message='No dye confirmation or cancel click sent. Inspect and cancel next.')
             # Only the completed sampling stage ends. The workflow's shared
             # deadline stays unchanged through building, default and choice.
             g.stage_until=float('inf')
             return dict(folder=folder,deadline=budget.deadline,game_deadline=game_deadline,
                         workflow_deadline=budget.workflow_deadline,ready_at=ready_at,game=g,scene=session_scene,
-                        image=final_image,geometry=tuple(g.geometry()))
+                            image=final_image,geometry=tuple(g.geometry()),prepared=prepared)
         g.until=time.monotonic()+90
         input_started=True
         for i in range(70):
@@ -460,6 +569,7 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
         log('ABORTED',message=str(e));raise
     finally:
         if input_started:g.send(4);g.send(16)
+        if worker is not None:worker.close()
     print(json.dumps(records[-1],indent=2))
     return dict(folder=folder,deadline=game_deadline,game=g,scene=session_scene,
                 image=final_image,geometry=tuple(g.geometry()))
@@ -469,7 +579,8 @@ if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('mode',choices=['preflight','acquire']);parser.add_argument('folder',type=Path)
     parser.add_argument('--entry',nargs=2,type=int)
-    parser.add_argument('--strategy',choices=['legacy','grid','probe'],default='legacy')
+    parser.add_argument('--strategy',choices=['legacy','grid','probe','response'],default='legacy')
+    parser.add_argument('--response-protocol',choices=['baseline','rotation_compare'],default='baseline')
     parser.add_argument('--row-stagger',type=float,default=0.,choices=(0.,.05),
                         help='Optional 5%% row offset for the next capture-only calibration')
     args=parser.parse_args()
@@ -481,5 +592,5 @@ if __name__=='__main__':
     try:
         if args.mode=='preflight':
             if not preflight(args.folder)['passed']:raise SystemExit(1)
-        else:acquire(args.folder,args.entry,args.strategy,row_stagger=args.row_stagger)
+        else:acquire(args.folder,args.entry,args.strategy,row_stagger=args.row_stagger,response_protocol=args.response_protocol)
     finally:kernel.CloseHandle(mutex)

@@ -26,8 +26,10 @@ def build_from_capture(capture_dir, rules):
     artifact=capture_dir if isinstance(capture_dir,dict) else {'folder':capture_dir}
     source=Path(artifact['folder'])
     game=artifact.get('game')
+    runtime={}
     analyze_capture(source, target_rules=rules,check=game.check if game is not None else None,
-                    atlas_resolution=1024,progress=artifact.get('progress'))
+                    atlas_resolution=1024,progress=artifact.get('progress'),runtime=runtime,
+                    prepared=artifact.get('prepared'))
     report_path=source/'analysis'/'report.json'
     if not report_path.is_file():raise RuntimeError('Atlas analysis did not produce report.json')
     report=json.loads(report_path.read_text(encoding='utf-8'))
@@ -37,6 +39,7 @@ def build_from_capture(capture_dir, rules):
     review=source/'analysis'/'expanded'/'review.json'
     data=json.loads(review.read_text(encoding='utf-8')) if review.is_file() else {}
     return dict(quality_gate=gate,candidates=data.get('candidates',[]),report=report,
+                runtime=runtime,
                 search_space=data.get('search_space'),search_diagnostics=data.get('search_diagnostics',{}),
                 board=report.get('scene',{}).get('board'),
                 selection_deadline=artifact.get('deadline'))

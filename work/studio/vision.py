@@ -1,11 +1,13 @@
 """Visual recognition only. Coordinates are physical client-image pixels."""
 from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import itertools, re, sys, os, shutil, subprocess, io, shlex
 import cv2
 import numpy as np
 import pytesseract
 from PIL import Image
+from marker_geometry import refine_marker_center
 
 OCR_AVAILABLE = None
 OCR_CONFIG = ''
@@ -16,6 +18,7 @@ def configure_ocr(strict=False):
     OCR_CONFIG = ''
     root=Path(getattr(sys,'_MEIPASS',Path(__file__).parent))
     candidates=[root/'ocr/tesseract.exe',
+                root/'bundle/ocr/tesseract.exe',
                 Path(__file__).resolve().parents[2]/'outputs/dependencies/ocr/tesseract.exe']
     if os.environ.get('TESSERACT_HOME'):
         candidates.append(Path(os.environ['TESSERACT_HOME'])/'tesseract.exe')
@@ -180,11 +183,12 @@ def read_codes(image,cards,markers=None,enabled=None):
             # marker: a 3x3 median there discards single-pixel target colors.
             cx=x+round(w*.50);cy=y+round(h*.43);rad=max(2,round(w*.04))
             samples=np.median(image[cy-rad:cy+rad+1,cx-rad:cx+rad+1].reshape(-1,3),axis=0)
-        candidates=[]
+        candidates=[];hash_seen=False
         for var in variants:
             var=cv2.resize(var,None,fx=4,fy=4,interpolation=cv2.INTER_CUBIC)
             var=cv2.copyMakeBorder(var,15,15,15,15,cv2.BORDER_CONSTANT,value=255 if var.ndim==2 else (255,255,255))
             text=_tesseract(var, config='--psm 7 -c tessedit_char_whitelist=#0123456789ABCDEF')
+            hash_seen |= text.lstrip().startswith('#')
             m=re.fullmatch(r'#?([0-9A-F]{6})',text.replace(' ',''))
             if not m:continue
             value='#'+m.group(1); distance=_swatch_distance(value,samples)
@@ -216,10 +220,15 @@ def read_codes(image,cards,markers=None,enabled=None):
             # Tesseract merges repeated narrow glyphs (e.g. 7F7F7F).
             # Segment only when six complete glyph components are unambiguous.
             region=image[y+round(h*.76):y+round(h*.96),x+round(w*.10):x+round(w*.94)]
-            gray=cv2.cvtColor(region,cv2.COLOR_RGB2GRAY);mask=(gray<160).astype(np.uint8)
-            stats=cv2.connectedComponentsWithStats(mask)[2]
-            boxes=sorted([tuple(map(int,s[:4])) for s in stats[1:] if s[3]>=region.shape[0]*.45 and s[2]>=3 and s[4]>=6])
-            if len(boxes)==6:
+            gray=cv2.cvtColor(region,cv2.COLOR_RGB2GRAY)
+            for threshold in (160,140):
+                mask=(gray<threshold).astype(np.uint8)
+                stats=cv2.connectedComponentsWithStats(mask)[2]
+                boxes=sorted([tuple(map(int,s[:4])) for s in stats[1:] if s[3]>=region.shape[0]*.45 and s[2]>=3 and s[4]>=6])
+                # Some native cards include the leading # in this crop. Only
+                # omit it when line OCR independently observed that prefix.
+                if len(boxes)==7 and hash_seen:boxes=boxes[1:]
+                if len(boxes)!=6:continue
                 chars=[];cache={}
                 for bx,by,bw,bh in boxes:
                     glyph=(1-mask[by:by+bh,bx:bx+bw])*255
@@ -230,6 +239,7 @@ def read_codes(image,cards,markers=None,enabled=None):
                 if all(re.fullmatch('[0-9A-F]',c) for c in chars):
                     value='#'+''.join(chars);distance=_swatch_distance(value,samples)
                     candidates.append((distance,value))
+                    if distance<3:break
         candidates.sort()
         # Require a close swatch match; a plausible six-digit OCR string alone
         # must not turn a low-nibble misread into a successful HEX check.
@@ -316,8 +326,8 @@ def timer_seconds(image, unit=None, previous=None):
                 min(h,round(ref*1.50))),
                (0,0,min(w,round(max(ref*3.0,220))),
                 min(h,round(max(ref*1.5,90))))]
-    values=[]
-    for box_index,(left,top,right,bottom) in enumerate(boxes):
+    jobs=[]
+    for left,top,right,bottom in boxes:
         left=max(0,min(w-1,left));top=max(0,min(h-1,top))
         right=max(left+1,min(w,right));bottom=max(top+1,min(h,bottom))
         crop=image[top:bottom,left:right]
@@ -325,17 +335,27 @@ def timer_seconds(image, unit=None, previous=None):
         # Grayscale avoids the coloured pill background suppressing white
         # glyphs. One raw and one high-contrast variant cover anti-aliasing.
         variants=[gray,np.where(gray>=170,255,0).astype('uint8')]
-        for variant in variants:
-            for psm in (6,11):
-                text=ocr(variant,'0123456789',psm=psm)
-                found=_timer_values(text)
-                if found:values.extend(found)
-                if values and previous is None and max(values)>=100:
-                    return max(values)
-        # A clean crop is normally sufficient; continue to the broad crop
-        # only when no candidate was found or when the previous value helps
-        # disambiguate a merged hourglass digit.
-        if values and previous is None and box_index>=1:break
+        jobs.append([(variant,psm) for variant in variants for psm in (6,11)])
+    def read(job):
+        variant,psm=job
+        return _timer_values(ocr(variant,'0123456789',psm=psm))
+    values=[]
+    if previous is not None:
+        # Rechecks require every crop/variant to disambiguate short or merged
+        # digits. Two independent OCR processes overlap that work without
+        # weakening selection, changing task order, or using more workers on
+        # machines with many cores. Initial detection retains its early exit.
+        with ThreadPoolExecutor(max_workers=2,thread_name_prefix='timer-ocr') as pool:
+            for found in pool.map(read,[job for group in jobs for job in group]):
+                values.extend(found)
+    else:
+        for box_index,group in enumerate(jobs):
+            for job in group:
+                values.extend(read(job))
+                if values and max(values)>=100:return max(values)
+            # A clean crop is normally sufficient; continue to the broad
+            # crop only when the earlier crops found no candidate.
+            if values and box_index>=1:break
     if not values:return None
     if previous is not None:
         # A countdown can only stay the same or decrease between frames.
@@ -343,7 +363,7 @@ def timer_seconds(image, unit=None, previous=None):
         if ordered:return min(ordered,key=lambda v:abs(v-int(previous)))
     return max(values)
 
-def recognize(image,with_ocr=True,previous=None,enabled=None):
+def recognize(image,with_ocr=True,previous=None,enabled=None,*,read_colors=True):
     cards=color_cards(image)
     if cards is None:raise ValueError('未识别到染色小游戏的三张色码卡片。请先进入限时染色界面。')
     h,w=image.shape[:2]; white=np.min(image,axis=2)>210
@@ -372,14 +392,17 @@ def recognize(image,with_ocr=True,previous=None,enabled=None):
             j=int(np.argmax(score))
             if score[j]>best[0]:best=(score[j],int(ys[j]))
         if best[0]<.60:raise ValueError('无法可靠识别颜色点位。请放大游戏窗口后重试。')
-        markers.append((cx,best[1]))
-    spacing=markers[1][0]-markers[0][0]
-    left=max(0,round(markers[0][0]-spacing*.5)); right=min(w,round(markers[2][0]+spacing*.5))
+        markers.append(refine_marker_center(image,(cx,best[1]),cw))
+    # Board bounds are card-layout geometry. A subpixel ring refinement must
+    # not move the crop or its coordinate origin by a rounding pixel.
+    card_centers=[x+cw//2 for x,y,cw,ch in cards]
+    spacing=card_centers[1]-card_centers[0]
+    left=max(0,round(card_centers[0]-spacing*.5)); right=min(w,round(card_centers[2]+spacing*.5))
     top=max(c[1]+c[3] for c in cards)+round(cards[0][2]*.25)
     bottom=min(h-3,top+(right-left))
     # Board interior is square in both portrait and landscape layouts.
     if any(not(top<my<bottom) for mx,my in markers):raise ValueError('色板定位不完整，已停止以避免误操作。')
-    colors=read_codes(image,cards,markers,enabled=enabled) if with_ocr else [None]*3
+    colors=read_codes(image,cards,markers,enabled=enabled) if with_ocr and read_colors else [None]*3
     seconds=None
     if with_ocr:
         unit=cards[0][2]
@@ -427,8 +450,8 @@ def candidate_shift(image,scene,rules,visited=(),excluded=()):
     # Cover the full visible height, including points near the board's edges.
     enabled=[p for p,rule in zip(scene.markers,rules) if rule['enabled']]
     if not enabled:return None
-    ymin=max(my-(b-9) for mx,my in enabled)
-    ymax=min(my-(t+9) for mx,my in enabled)
+    ymin=int(np.ceil(max(my-(b-9) for mx,my in enabled)))
+    ymax=int(np.floor(min(my-(t+9) for mx,my in enabled)))
     yy,xx=np.mgrid[ymin:ymax+1,-int(third*.5):int(third*.5)+1]
     dx,dy=xx.ravel(),yy.ravel(); scores=np.zeros(dx.shape,float); valid=np.ones(dx.shape,bool)
     active=0;raw_worst=np.zeros(dx.shape);raw_total=np.zeros(dx.shape);feasible=np.ones(dx.shape,bool)
@@ -436,7 +459,8 @@ def candidate_shift(image,scene,rules,visited=(),excluded=()):
         if not rule['enabled']:continue
         active+=1; sx=mx-dx; sy=my-dy
         good=(sx>l+i*third+5)&(sx<l+(i+1)*third-5)&(sy>t+8)&(sy<b-8)
-        sx=np.clip(sx,0,image.shape[1]-1); sy=np.clip(sy,0,image.shape[0]-1)
+        sx=np.rint(np.clip(sx,0,image.shape[1]-1)).astype(int)
+        sy=np.rint(np.clip(sy,0,image.shape[0]-1)).astype(int)
         pixels=image[sy,sx]; colors=lab(pixels)
         distances=np.min(np.linalg.norm(colors[:,None,:]-lab([rgb(c) for c in rule['colors']])[None,:,:],axis=2),axis=1)
         # Exclude UI geometry, not white dye. Pure white is a valid target.

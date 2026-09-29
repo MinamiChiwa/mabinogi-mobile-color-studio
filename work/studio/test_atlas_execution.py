@@ -5,6 +5,11 @@ from atlas_pose import homogeneous
 
 
 class Fake:
+    def perform_gesture(self, gesture):
+        if gesture.kind=='drag':self.drag(*gesture.translation)
+        elif gesture.kind=='wheel':self.wheel(gesture.wheel_steps,gesture.anchor)
+        else:self.rotate(gesture.requested_angle,gesture.anchor)
+
     def __init__(self):
         self.pose=np.zeros(2);self.moves=[];self.released=False;self.scale=1;self.reads=0
         self.ctx=Context('one',(0,0,900,900),(0,0,900,900),((150,400),(450,400),(750,400)))

@@ -92,11 +92,22 @@ class PeriodicAtlas:
                 end=np.clip(np.ceil((corners.max(axis=0)-[tx,ty])*n-.5).astype(int)+2,0,n)
                 x0,y0=start;x1,y1=end
                 if x1<=x0 or y1<=y0:continue
-                yy,xx=np.mgrid[y0:y1,x0:x1]
-                phase=np.stack(((xx+.5)/n,(yy+.5)/n),axis=-1)
-                points=(phase+[tx,ty])@self.basis.T+self.origin+translation
-                px,py=points[...,0].astype(np.float32),points[...,1].astype(np.float32)
-                ix=np.floor(px).astype(int);iy=np.floor(py).astype(int)
+                if self.basis[0,1]==0 and self.basis[1,0]==0:
+                    # Live scans use axis-aligned periods. Keep the same
+                    # arithmetic but avoid materializing a million 2D phase
+                    # vectors for every frame and periodic tile.
+                    xpoints=(((np.arange(x0,x1)+.5)/n+tx)*self.basis[0,0]+self.origin[0]+translation[0]).astype(np.float32)
+                    ypoints=(((np.arange(y0,y1)+.5)/n+ty)*self.basis[1,1]+self.origin[1]+translation[1]).astype(np.float32)
+                    px=np.broadcast_to(xpoints,(y1-y0,x1-x0))
+                    py=np.broadcast_to(ypoints[:,None],(y1-y0,x1-x0))
+                    ix=np.floor(xpoints).astype(int)[None,:]
+                    iy=np.floor(ypoints).astype(int)[:,None]
+                else:
+                    yy,xx=np.mgrid[y0:y1,x0:x1]
+                    phase=np.stack(((xx+.5)/n,(yy+.5)/n),axis=-1)
+                    points=(phase+[tx,ty])@self.basis.T+self.origin+translation
+                    px,py=points[...,0].astype(np.float32),points[...,1].astype(np.float32)
+                    ix=np.floor(px).astype(int);iy=np.floor(py).astype(int)
                 inside=(ix>=0)&(iy>=0)&(ix<w-1)&(iy<h-1)
                 ix=np.clip(ix,0,w-2);iy=np.clip(iy,0,h-2)
                 values=cv2.remap(source,px,py,cv2.INTER_LINEAR)
@@ -104,12 +115,19 @@ class PeriodicAtlas:
                     good=inside&mask[iy,ix]&mask[iy+1,ix]&mask[iy,ix+1]&mask[iy+1,ix+1]
                     if not good.any():
                         continue
+                    # Material stripes occupy only part of a projected tile.
+                    # Avoid reading/writing the other stripes' moment arrays;
+                    # keep exactly the same samples and accumulation order.
+                    rows=np.flatnonzero(good.any(axis=1));cols=np.flatnonzero(good.any(axis=0))
+                    ya,yb=int(rows[0]),int(rows[-1])+1
+                    xa,xb=int(cols[0]),int(cols[-1])+1
+                    good=good[ya:yb,xa:xb]
                     # Each tile contributes at most once per atlas cell.
                     # Dense slice arithmetic avoids expensive indexed writes.
-                    self.count[i,y0:y1,x0:x1] += good
-                    weighted = values * good[..., None]
-                    self.total[i,y0:y1,x0:x1] += weighted
-                    self.squared[i,y0:y1,x0:x1] += weighted.astype(np.float64) * weighted
+                    self.count[i,y0+ya:y0+yb,x0+xa:x0+xb] += good
+                    weighted = values[ya:yb,xa:xb] * good[..., None]
+                    self.total[i,y0+ya:y0+yb,x0+xa:x0+xb] += weighted
+                    self.squared[i,y0+ya:y0+yb,x0+xa:x0+xb] += weighted.astype(np.float64) * weighted
 
     def sample(self, region, points, translation=(0,0)):
         """Predict RGB at screen points, with a conservative periodic validity mask."""
@@ -187,9 +205,31 @@ def _equivalent_moves(relative, basis, current_translation, radius=1,
     return moves[index, np.arange(len(relative))], distance[index, np.arange(len(relative))]
 
 
+def _ranking_subset(predictions, enabled, ids, priorities, limit):
+    """Discard worse priority tiers only when the best has enough colours.
+
+    This preserves the full lexicographic top distinct-colour results. A
+    bounded probe only decides whether this optimization is possible: if it
+    cannot prove there are enough unique combinations, keep the wider pool.
+    The colour samples, validity and landing neighbourhoods are unchanged.
+    """
+    for metric in priorities:
+        if len(ids)<=limit:break
+        values=metric[ids]
+        best=ids[values==values.min()]
+        if len(best)<limit:break
+        distinct=set()
+        for index in best[:1024]:
+            distinct.add(b''.join(predictions[i][index].tobytes() for i in enabled))
+            if len(distinct)>=limit:break
+        if len(distinct)<limit:break
+        ids=best
+    return ids
+
+
 def translation_candidates(atlas, markers, rules, current_translation=(0, 0),
                            limit=8, cancelled=lambda: False, cycle_radius=1,
-                           max_move=None, landing_radius=0.):
+                           max_move=None, landing_radius=0., integer_moves=False):
     """Exhaust every discrete translation phase at fixed scale and angle.
 
     Returns screenshot predictions (Delta E 76), never verified game HEX.
@@ -211,11 +251,21 @@ def translation_candidates(atlas, markers, rules, current_translation=(0, 0),
     yy, xx = np.mgrid[:n, :n]
     shifts = np.column_stack((xx.ravel(), yy.ravel())) / n
     inverse = np.linalg.inv(atlas.basis)
+    current_phase = current @ inverse.T
+    relative = (shifts-current_phase+.5) % 1-.5
+    moves, distance = _equivalent_moves(relative, atlas.basis, current,
+                                         radius=cycle_radius,
+                                         max_distance=max_move)
+    if integer_moves:
+        moves=np.rint(moves)
+        distance=np.linalg.norm(moves,axis=1)
+        if max_move is not None:distance=np.where(distance<=max_move,distance,np.inf)
+    sample_shifts=(current+moves) if integer_moves else shifts@atlas.basis.T
     predictions = []; deltas = []; passes = []; usable = np.ones(n*n, bool)
     for i in range(3):
         if cancelled():
             raise InterruptedError('Calculation cancelled')
-        sampled, supported = atlas.sample(i,markers[i]-shifts@atlas.basis.T)
+        sampled, supported = atlas.sample(i,markers[i]-sample_shifts)
         values = np.rint(sampled).clip(0,255).astype(np.uint8)
         predictions.append(values)
         if i not in enabled:
@@ -251,15 +301,17 @@ def translation_candidates(atlas, markers, rules, current_translation=(0, 0),
         accepted_mask=(passed&usable).reshape(n,n).astype(np.uint8)
         padded=cv2.copyMakeBorder(accepted_mask,pad,pad,pad,pad,cv2.BORDER_WRAP)
         stable=cv2.erode(padded,kernel)[pad:-pad,pad:-pad].ravel().astype(bool)
-    current_phase = current @ inverse.T
-    relative = (shifts-current_phase+.5) % 1-.5
-    moves, distance = _equivalent_moves(relative, atlas.basis, current,
-                                         radius=cycle_radius,
-                                         max_distance=max_move)
     risk=np.where(stable,neighborhood_maximum,maximum)
     from candidate_ranking import candidate_order,exact_priority,exact_fields
+    from color_family import family_priority,family_fields
     hits,exact_max,exact_avg,exact_total=exact_priority(predictions,deltas,rules)
-    order=candidate_order(hits,maximum,average,passed,stable,neighborhood_maximum,distance)
+    family_max,family_avg,family_losses=family_priority(predictions,rules)
+    ids=_ranking_subset(predictions,enabled,np.flatnonzero(usable&np.isfinite(distance)),
+                        (family_max,family_avg,exact_max,exact_avg,maximum,average),limit)
+    order=ids[candidate_order(hits[ids],maximum[ids],average[ids],passed[ids],stable[ids],
+                          neighborhood_maximum[ids],distance[ids],
+                          exact_maximum=exact_max[ids],exact_average=exact_avg[ids],
+                          family_maximum=family_max[ids],family_average=family_avg[ids])]
     result = []; seen = set()
     for index in order:
         if cancelled():
@@ -282,6 +334,7 @@ def translation_candidates(atlas, markers, rules, current_translation=(0, 0),
                              landing_maximum=(float(neighborhood_maximum[index])
                                               if np.isfinite(neighborhood_maximum[index]) else None))
         result[-1].update(exact_fields(hits,exact_max,exact_avg,exact_total,index))
+        result[-1].update(family_fields(family_max,family_avg,family_losses,index))
         if len(result) >= limit:
             break
     return result

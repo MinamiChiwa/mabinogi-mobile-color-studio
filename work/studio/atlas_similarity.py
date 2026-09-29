@@ -10,7 +10,8 @@ import itertools
 import numpy as np
 import cv2
 from vision import lab, rgb
-from candidate_ranking import candidate_rank,exact_priority,exact_fields
+from candidate_ranking import candidate_rank,candidate_order,exact_priority,exact_fields
+from color_family import family_penalties,family_priority,family_fields
 
 
 def _distances(values, rule):
@@ -29,23 +30,29 @@ def _distances(values, rule):
 def _seeds(atlas, region, rule, limit, source_radius, include_compromises=False):
     colors,valid,_=atlas.maps(region=region); n=atlas.resolution
     distances,passes=_distances(colors.reshape(-1,3),rule)
+    family=family_penalties(colors.reshape(-1,3),rule)
     # Same four-pixel support requirement as atlas.sample, including seams.
     usable=valid&np.roll(valid,-1,0)&np.roll(valid,-1,1)&np.roll(np.roll(valid,-1,0),-1,1)
     ids=np.flatnonzero(usable.ravel()&passes)
     hit_count=len(ids)
     if not hit_count and include_compromises:
         ids=np.flatnonzero(usable.ravel())
-        # No target hit: use a bounded pool of the closest supported colors.
+        # No target hit: preserve the family before choosing closest colours.
         # This changes proposals only; acceptance always uses original rules.
         count=min(len(ids),max(limit,2048))
-        if count and count<len(ids):ids=ids[np.argpartition(distances[ids],count-1)[:count]]
+        if count and count<len(ids):
+            within=ids[family[ids]<=1e-7]
+            if len(within)>=count:
+                ids=within[np.argpartition(distances[within],count-1)[:count]]
+            else:
+                ids=ids[np.lexsort((distances[ids],family[ids]))[:count]]
     if not len(ids):return np.empty((0,2)),np.empty(0),0
     pad=max(1,int(np.ceil(source_radius*n*np.abs(np.linalg.inv(atlas.basis)).sum(axis=1).max())))
     if pad>n:raise ValueError('Landing radius exceeds atlas period')
     field=np.where(usable.ravel(),distances,np.inf).reshape(n,n).astype(np.float32)
     padded=cv2.copyMakeBorder(field,pad,pad,pad,pad,cv2.BORDER_WRAP)
     worst=cv2.dilate(padded,np.ones((2*pad+1,2*pad+1),np.uint8))[pad:-pad,pad:-pad].ravel()
-    order=ids[np.lexsort((ids,distances[ids],worst[ids]))]
+    order=ids[np.lexsort((ids,distances[ids],worst[ids],family[ids]))]
     # First include a best hit per spatial bin, then fill by color/robustness.
     bins=max(2,int(np.sqrt(limit)))
     kept=[]; seen=set()
@@ -60,6 +67,21 @@ def _seeds(atlas, region, rule, limit, source_radius, include_compromises=False)
             if int(index) not in selected:
                 kept.append(int(index));selected.add(int(index))
             if len(kept)>=limit:break
+    if include_compromises:
+        # A hit in a small island must not exclude every other location. Two
+        # exact islands can have an unreachable separation while one exact
+        # hit plus a nearby color elsewhere is the best feasible compromise.
+        # Add one best supported point per bin across the FULL period, with a
+        # separate, bounded allowance; preserve the original exact seeds.
+        fallback_bins=max(2,int(np.sqrt(min(limit,64))))
+        available=np.flatnonzero(usable.ravel())
+        y,x=np.divmod(available,n)
+        bins_xy=(y*fallback_bins//n)*fallback_bins+x*fallback_bins//n
+        order=np.lexsort((available,worst[available],distances[available],family[available],bins_xy))
+        ordered_bins=bins_xy[order]
+        first=np.r_[True,ordered_bins[1:]!=ordered_bins[:-1]]
+        selected=set(kept)
+        kept.extend(int(v) for v in available[order[first]] if int(v) not in selected)
     kept=np.asarray(kept,int)
     y,x=np.divmod(kept,n)
     points=(np.column_stack((x,y))+.5)/n@atlas.basis.T+atlas.origin
@@ -123,71 +145,90 @@ def similarity_candidates(atlas, markers, rules, current_translation, board_shap
         diag['hit_counts'][str(region+1)]=hits
         diag['seed_counts'][str(region+1)]=len(points[region])
     if any(not len(points[i]) for i in enabled):return []
-    # Anchor exact regions first; similar targets cannot displace them merely
-    # because their seed pool happens to be smaller.
-    first,second=sorted(enabled,key=lambda i:(not rules[i].get('exact'),len(points[i])))[:2]
-    q1=points[first][:,0]+1j*points[first][:,1]
-    q2=points[second][:,0]+1j*points[second][:,1]
-    p1=complex(*markers[first]); p2=complex(*markers[second])
+    # Evaluate every enabled pair. Exact priority belongs to the resulting
+    # three-region score, not to a fixed pair that can have zero reachable
+    # separations and prevent all other proposals from being considered.
     center=complex(shape[1]/2,shape[0]/2); current_z=complex(*current)
     inverse=np.linalg.inv(atlas.basis); pool=[]
-    pair_risk=np.maximum(source_risk[first][:,None],source_risk[second][None,:])
-    for ox,oy in itertools.product(range(-cycle_radius,cycle_radius+1),repeat=2):
-        if cancelled():raise InterruptedError('Calculation cancelled')
-        wrap=atlas.basis@np.array([ox,oy]); denominator=q2[None,:]+complex(*wrap)-q1[:,None]
-        with np.errstate(divide='ignore',invalid='ignore'):
-            a=(p2-p1)/denominator
-        scales=np.abs(a); angles=np.degrees(np.angle(a))
-        good=np.isfinite(a)&(scales>=bounds[0])&(scales<=bounds[1])&(np.abs(angles)<=max_angle)
-        ii,jj=np.where(good)
-        if not len(ii):continue
-        a=a[ii,jj]
-        if levels is not None:
-            # A continuous solution can lie between wheel notches. Test the
-            # nearest available scale and its neighbors, then resample ALL
-            # regions; never keep the continuous solution's color scores.
-            nearest=np.abs(np.log(np.abs(a)[:,None]/levels)).argmin(axis=1)
-            ids=np.clip(nearest[:,None]+[-1,0,1],0,len(levels)-1)
-            a=(a/np.abs(a))[:,None]*levels[ids]
-            a=a.ravel();ii=np.repeat(ii,3);jj=np.repeat(jj,3)
-            q2_wrapped=q2[jj]+complex(*wrap)
-            b=(p1+p2-a*(q1[ii]+q2_wrapped))/2
-            if rules[first].get('exact') and not rules[second].get('exact'):
-                b=p1-a*q1[ii]
-        else:b=p1-a*q1[ii]
-        # Choose the shortest representative in the rotated/scaled period
-        # lattice. Search neighbors too: a skewed basis needs more than round.
-        displacement=(a*center+b-a*current_z-center)/a
-        phase=np.column_stack((displacement.real,displacement.imag))@inverse.T
-        phase-=np.rint(phase)
-        best=np.full(len(a),np.inf); center_move=np.zeros(len(a),complex)
-        for tx,ty in itertools.product((-1,0,1),repeat=2):
-            unrotated=(phase+[tx,ty])@atlas.basis.T
-            candidate=a*(unrotated[:,0]+1j*unrotated[:,1])
-            better=np.abs(candidate)<best
-            best[better]=np.abs(candidate[better]);center_move[better]=candidate[better]
-        relative_offset=center_move+center-a*center
-        absolute_offset=relative_offset+a*current_z
-        passed,maximum,average,colors,distances,usable=_sample_transforms(atlas,markers,rules,a,absolute_offset)
-        diag['evaluated_transforms']+=len(a)
-        ids=np.flatnonzero(passed)
-        # Keep a bounded pool for the more costly neighborhood check. Include
-        # source-island quality so exact but brittle pixels cannot fill it.
-        risk=pair_risk[ii,jj]
-        ids=ids[np.lexsort((best[ids],average[ids],maximum[ids],risk[ids]))][:256]
-        if include_compromises:
-            rejected=np.flatnonzero(usable&~passed)
+    ordered=sorted(enabled,key=lambda i:(not rules[i].get('exact'),len(points[i])))
+    diag['pair_evaluated_transforms']={}
+    for first,second in itertools.combinations(ordered,2):
+        pair_key=f'{first+1}-{second+1}'
+        diag['pair_evaluated_transforms'][pair_key]=0
+        q1=points[first][:,0]+1j*points[first][:,1]
+        q2=points[second][:,0]+1j*points[second][:,1]
+        p1=complex(*markers[first]); p2=complex(*markers[second])
+        pair_risk=np.maximum(source_risk[first][:,None],source_risk[second][None,:])
+        for ox,oy in itertools.product(range(-cycle_radius,cycle_radius+1),repeat=2):
+            if cancelled():raise InterruptedError('Calculation cancelled')
+            wrap=atlas.basis@np.array([ox,oy]); denominator=q2[None,:]+complex(*wrap)-q1[:,None]
+            with np.errstate(divide='ignore',invalid='ignore'):
+                a=(p2-p1)/denominator
+            scales=np.abs(a); angles=np.degrees(np.angle(a))
+            good=np.isfinite(a)&(scales>=bounds[0])&(scales<=bounds[1])&(np.abs(angles)<=max_angle)
+            ii,jj=np.where(good)
+            if not len(ii):continue
+            a=a[ii,jj]
+            if levels is not None:
+                # A continuous solution can lie between wheel notches. Test the
+                # nearest available scale and its neighbors, then resample ALL
+                # regions; never keep the continuous solution's color scores.
+                nearest=np.abs(np.log(np.abs(a)[:,None]/levels)).argmin(axis=1)
+                ids=np.clip(nearest[:,None]+[-1,0,1],0,len(levels)-1)
+                a=(a/np.abs(a))[:,None]*levels[ids]
+                a=a.ravel();ii=np.repeat(ii,3);jj=np.repeat(jj,3)
+                q2_wrapped=q2[jj]+complex(*wrap)
+                b=(p1+p2-a*(q1[ii]+q2_wrapped))/2
+                # Snapping scale can move either target off its seed. Score
+                # midpoint and each exact anchor separately; preserving one
+                # exact region is preferable to losing both at a midpoint.
+                offsets=[b]
+                if rules[first].get('exact'):offsets.append(p1-a*q1[ii])
+                if rules[second].get('exact'):offsets.append(p2-a*q2_wrapped)
+                b=np.concatenate(offsets)
+                a=np.tile(a,len(offsets));ii=np.tile(ii,len(offsets));jj=np.tile(jj,len(offsets))
+            else:b=p1-a*q1[ii]
+            # Choose the shortest representative in the rotated/scaled period
+            # lattice. Search neighbors too: a skewed basis needs more than round.
+            displacement=(a*center+b-a*current_z-center)/a
+            phase=np.column_stack((displacement.real,displacement.imag))@inverse.T
+            phase-=np.rint(phase)
+            best=np.full(len(a),np.inf); center_move=np.zeros(len(a),complex)
+            for tx,ty in itertools.product((-1,0,1),repeat=2):
+                unrotated=(phase+[tx,ty])@atlas.basis.T
+                candidate=a*(unrotated[:,0]+1j*unrotated[:,1])
+                better=np.abs(candidate)<best
+                best[better]=np.abs(candidate[better]);center_move[better]=candidate[better]
+            relative_offset=center_move+center-a*center
+            absolute_offset=relative_offset+a*current_z
+            passed,maximum,average,colors,distances,usable=_sample_transforms(atlas,markers,rules,a,absolute_offset)
+            diag['evaluated_transforms']+=len(a)
+            diag['pair_evaluated_transforms'][pair_key]+=len(a)
+            ids=np.flatnonzero(passed)
+            # Keep a bounded pool for the more costly neighborhood check. Include
+            # source-island quality so exact but brittle pixels cannot fill it.
+            risk=pair_risk[ii,jj]
             hits,exact_max,exact_avg,_=exact_priority(colors,distances,rules)
-            rejected=rejected[np.lexsort((best[rejected],risk[rejected],average[rejected],maximum[rejected],
-                                           exact_avg[rejected],exact_max[rejected],-hits[rejected]))][:256]
-            ids=np.r_[ids,rejected]
-        for k in ids:
-            pool.append((a[k],relative_offset[k],absolute_offset[k],center_move[k],
-                         maximum[k],average[k]))
+            family_max,family_avg,_=family_priority(colors,rules)
+            ids=ids[candidate_order(hits[ids],maximum[ids],average[ids],passed[ids],False,
+                                    risk[ids],best[ids],exact_maximum=exact_max[ids],
+                                    exact_average=exact_avg[ids],family_maximum=family_max[ids],
+                                    family_average=family_avg[ids])][:256]
+            if include_compromises:
+                rejected=np.flatnonzero(usable&~passed)
+                rejected=rejected[candidate_order(hits[rejected],maximum[rejected],average[rejected],
+                                    passed[rejected],False,risk[rejected],best[rejected],
+                                    exact_maximum=exact_max[rejected],exact_average=exact_avg[rejected],
+                                    family_maximum=family_max[rejected],family_average=family_avg[rejected])][:256]
+                ids=np.r_[ids,rejected]
+            for k in ids:
+                pool.append((a[k],relative_offset[k],absolute_offset[k],center_move[k],
+                             maximum[k],average[k]))
     if not pool:return []
     a=np.array([v[0] for v in pool]); absolute=np.array([v[2] for v in pool])
     passed,maximum,average,colors,distances,usable=_sample_transforms(atlas,markers,rules,a,absolute)
     hits,exact_max,exact_avg,exact_total=exact_priority(colors,distances,rules)
+    family_max,family_avg,family_losses=family_priority(colors,rules)
     stable=passed.copy(); worst=maximum.copy()
     neighborhood_supported=usable.copy()
     for x,y in ((-1,0),(1,0),(0,-1),(0,1),(-1,-1),(-1,1),(1,-1),(1,1)):
@@ -211,6 +252,7 @@ def similarity_candidates(atlas, markers, rules, current_translation, board_shap
             landing_maximum=float(worst[k]) if neighborhood_supported[k] else None,
             search_space='periodic_similarity',execution_verified=False))
         rows[-1].update(exact_fields(hits,exact_max,exact_avg,exact_total,k))
+        rows[-1].update(family_fields(family_max,family_avg,family_losses,k))
     result=[]; seen=set()
     for row in sorted(rows,key=candidate_rank):
         key=tuple(row['colors'])
@@ -219,18 +261,27 @@ def similarity_candidates(atlas, markers, rules, current_translation, board_shap
         if len(result)>=limit:break
     diag['accepted_pool']=sum(row['accepted'] for row in rows)
     diag['compromise_pool']=sum(not row['accepted'] for row in rows)
+    diag['family_consistent_pool']=sum(row['family_consistent'] for row in rows)
     return result
 
 
 def captured_scale_levels(log):
-    """Estimate reachable wheel levels only over the observed capture range.
+    """Use measured DOWN ticks, never the inverse of an UP measurement.
 
-    Capture logs measure aggregate scaling, so these levels are proposals.
-    Live execution must still measure every wheel response and reject drift.
+    Without a directional calibration only the current scale is supported.
+    The live executor still verifies every input response against images.
     """
     zoom=next((r for r in reversed(log) if r.get('kind')=='sampling_zoom'),{})
-    steps=int(zoom.get('steps',0));scale=float(zoom.get('scale',1))
-    if not 0<steps<=48 or not np.isfinite(scale) or scale<=1:
+    calibration=next((r for r in reversed(log) if r.get('kind')=='zoom_calibration'),{})
+    steps=int(zoom.get('steps',0));tick=calibration.get('down_log_step');up=calibration.get('up_log_step')
+    if (not calibration.get('passed') or tick is None or
+            up is None or not np.isfinite(up) or not 0<float(up)<.15 or
+            not 0<steps<=48 or not np.isfinite(tick) or not 0<float(tick)<.15):
         return [1.],None
-    tick=float(np.log(scale)/steps)
+    tick=float(tick)
+    scale=calibration.get('current_scale',zoom.get('scale',1.))
+    if scale is None or not np.isfinite(scale) or scale<=1:return [1.],None
+    # A full down/up calibration need not return to the original scale.
+    # Stay inside the range actually observed during this capture.
+    steps=min(steps,int(np.floor(np.log(scale)/tick)))
     return np.exp(-tick*np.arange(steps+1)).tolist(),tick

@@ -8,14 +8,19 @@ from pathlib import Path
 import time
 import uuid
 import json
+import numpy as np
 from PIL import Image
 from live_atlas_capture import acquire
 from atlas_adapter import build_from_capture
-from atlas_execution import CandidateBatch, Context, execute_candidate
-from atlas_service import AtlasCallbacks
+from atlas_execution import CandidateBatch, Context, execute_candidate, reposition_budget
+from atlas_service import AtlasCallbacks, _protected_route
 from atlas_runtime import Adapter
 from workflow_budget import earliest_deadline
 from atlas_pose import homogeneous
+from atlas_replan import reachable_candidates
+from atlas_pose_scoring import rescore_candidate
+from atlas_bound_route import bind_candidate
+from candidate_ranking import candidate_rank
 
 
 def acquire_current(_owner, _rules, capture_dir, entry=None, strategy='grid', entry_size=None, **context):
@@ -44,6 +49,68 @@ def build_current(capture, rules, **_context):
     rows=report.get('candidates',[])
     if not rows:return report
     game=artifact['game'];scene=artifact['scene']
+    runtime=report.get('runtime',{})
+    if runtime.get('atlas') is None:
+        raise RuntimeError('Atlas is unavailable for route endpoint scoring')
+    prepared=[];route_diagnostics=[]
+    progress=capture.get('progress')
+    for index,row in enumerate(rows,1):
+        game.check()
+        if progress:progress(stage='search',current=index,total=len(rows))
+        try:
+            ready,budget=bind_candidate(row,runtime['atlas'],runtime['capture_offset'],
+                scene.board,scene.markers,rules,time.monotonic(),deadline,check=game.check,
+                require_stable=True)
+        except (ValueError,TypeError,KeyError) as exc:
+            ready=None;budget=dict(allowed=False,reason='invalid_route',detail=str(exc))
+        route_diagnostics.append(dict(candidate_id=row['id'],
+            budget={k:v for k,v in budget.items() if k!='input_route'}))
+        if ready is not None:prepared.append(ready)
+    # A same-family route is always preferred.  If the atlas produced no
+    # same-family candidate at all, make one explicit second pass that permits
+    # the closest cross-family compromises.  This is deliberately separate
+    # from the normal pass so a cross-family row can never displace a usable
+    # same-family route merely because its Delta-E is a little lower.
+    same_family_rows = [row for row in rows if row.get('family_consistent', False)]
+    cross_family_rows = [row for row in rows if not row.get('family_consistent', False)]
+    cross_family_prepared = []
+    if not prepared and not same_family_rows and cross_family_rows and time.monotonic()<deadline:
+        for index,row in enumerate(cross_family_rows,1):
+            game.check()
+            if progress:progress(stage='fallback-search',current=index,total=len(rows))
+            try:
+                ready,budget=bind_candidate(row,runtime['atlas'],runtime['capture_offset'],
+                    scene.board,scene.markers,rules,time.monotonic(),deadline,check=game.check,
+                    require_stable=True,allow_cross_family=True)
+            except (ValueError,TypeError,KeyError) as exc:
+                ready=None;budget=dict(allowed=False,reason='invalid_route',detail=str(exc))
+            route_diagnostics.append(dict(candidate_id=row['id'],cross_family=True,
+                budget={k:v for k,v in budget.items() if k!='input_route'}))
+            if ready is not None:cross_family_prepared.append(ready)
+        prepared.extend(cross_family_prepared)
+    if not prepared and time.monotonic()<deadline:
+        # No transform route survived. Retain the already captured pose and
+        # search its atlas for integer translations instead of publishing an
+        # unattainable continuous candidate or throwing away the session.
+        fallback=reachable_candidates(runtime['atlas'],runtime['capture_offset'],
+            homogeneous([[1,0,0],[0,1,0]]),scene.markers,scene.board,rules,0,check=game.check)
+        for index,row in enumerate(fallback):
+            ready,budget=bind_candidate(dict(row,id=index),runtime['atlas'],runtime['capture_offset'],
+                scene.board,scene.markers,rules,time.monotonic(),deadline,check=game.check,
+                require_stable=True)
+            route_diagnostics.append(dict(candidate_id=index,fallback=True,
+                budget={k:v for k,v in budget.items() if k!='input_route'}))
+            if ready is not None:prepared.append(ready)
+    rows=sorted(prepared,key=candidate_rank)
+    report['candidates']=rows
+    report['search_diagnostics']=dict(report.get('search_diagnostics') or {},route_binding=route_diagnostics,
+        stability_required=True,stable_route_count=len(rows),
+        rejected_unstable_route_count=sum(d.get('budget',{}).get('reason') in
+                                          ('unstable_landing','unstable_route')
+                                          for d in route_diagnostics),
+        cross_family_fallback_count=len(cross_family_prepared),
+        same_family_search_count=len(same_family_rows))
+    if not rows:return report
     context=Context(uuid.uuid4().hex,tuple(game.geometry()),tuple(scene.board),
                     tuple(map(tuple,scene.markers)))
     batch=CandidateBatch(rows,context,deadline)
@@ -63,6 +130,57 @@ def build_current(capture, rules, **_context):
 def _execute_recorded(owner,report,candidate,rules,batch,reference,reservation='legacy'):
     events=[];result=None;failure=None
     adapter=report['adapter']
+    adapter.enabled=[bool(rule['enabled']) for rule in rules]
+    runtime=report.get('runtime',{})
+    if runtime.get('atlas') is not None:
+        def rebind(actual,current,active_rules):
+            from atlas_pose import relative_candidate
+            move=relative_candidate(current,actual,batch.context.board)
+            reference=np.eye(3) if report.get('actual_pose') is None else homogeneous(report['actual_pose'])
+            try:
+                ready,_budget=bind_candidate(move,runtime['atlas'],runtime['capture_offset'],
+                    batch.context.board,batch.context.markers,active_rules,time.monotonic(),
+                    batch.deadline,reference_pose=actual@reference,check=adapter.check,
+                    require_stable=True)
+            except (ValueError,TypeError,KeyError):
+                return None
+            # A new route must preserve the family's quality after resampling;
+            # otherwise search the measured pose for a fresh compromise.
+            if current.get('protect_observed_result') and (ready is None or not _protected_route(ready,_budget)):
+                return None
+            if ready is not None and ready['family_maximum']<=current.get('family_maximum',0)+1e-7:
+                return ready
+            return None
+        adapter.rebind=rebind
+        def replan(actual,current,active_rules):
+            if current.get('protect_observed_result'):return None
+            rows=reachable_candidates(runtime['atlas'],runtime['capture_offset'],actual,
+                 batch.context.markers,batch.context.board,active_rules,current['id'],
+                 check=adapter.check,reference_pose=report.get('actual_pose'))
+            from atlas_pose import relative_candidate
+            for row in rows:
+                move=relative_candidate(row,actual,batch.context.board)
+                reference=np.eye(3) if report.get('actual_pose') is None else homogeneous(report['actual_pose'])
+                try:
+                    ready,_budget=bind_candidate(move,runtime['atlas'],runtime['capture_offset'],
+                        batch.context.board,batch.context.markers,active_rules,time.monotonic(),
+                        batch.deadline,reference_pose=actual@reference,check=adapter.check,
+                        require_stable=True)
+                except (ValueError,TypeError,KeyError):
+                    ready=None
+                if ready is not None:return ready
+            return None
+        adapter.replan=replan
+        adapter.rescore=lambda actual,current,active_rules:rescore_candidate(
+            runtime['atlas'],runtime['capture_offset'],current,actual,
+            batch.context.markers,batch.context.board,active_rules,
+            pose_source='measured_final_pose',reference_pose=report.get('actual_pose'),
+            check=adapter.check)
+    else:
+        # The adapter is reused across choices; do not retain a stale closure.
+        adapter.replan=None
+        adapter.rebind=None
+        adapter.rescore=None
     for name in ('last_motion_before','last_motion_after','last_motion_diagnostics'):
         if hasattr(adapter,name):setattr(adapter,name,None)
     def event(kind,data):
@@ -91,6 +209,7 @@ def _execute_recorded(owner,report,candidate,rules,batch,reference,reservation='
                         Image.fromarray(frame).save(folder/filename,compress_level=1)
                         motion_frames[label]=filename
                 data=dict(candidate=candidate,rules=rules,result=result,error=failure,events=events,
+                          code_read_totals=getattr(adapter,'code_read_stats',None),
                           last_registration=getattr(adapter,'last_motion_diagnostics',None),
                           motion_frames=motion_frames,
                           previous_actual_pose=report.get('actual_pose'),
@@ -107,6 +226,20 @@ def default_current(owner, report, candidate, rules, **_context):
     return result
 
 
+def prepare_choice(owner,report,candidate,rules,**context):
+    """Read-only route binding for a trial and its measured checkpoint return."""
+    adapter=report['adapter'];adapter.check()
+    deadline=earliest_deadline(report['selection_deadline'],context.get('selection_deadline'))
+    runtime=report.get('runtime',{})
+    if runtime.get('atlas') is None:return None,dict(allowed=False,reason='atlas_unavailable')
+    source=context.get('reference_pose',report.get('actual_pose'))
+    row,budget=bind_candidate(candidate,runtime['atlas'],runtime['capture_offset'],
+        adapter.context().board,adapter.context().markers,rules,time.monotonic(),deadline,
+        reference_pose=source,check=adapter.check,require_stable=True)
+    if row is not None:row['prepared_reference_pose']=homogeneous(source)[:2].tolist()
+    return row,budget
+
+
 def choice_current(owner, report, candidate, rules, **_context):
     # Service rebases the complete target matrix from the last measured pose.
     # Retain the verified frame so manual movement during selection is caught.
@@ -114,9 +247,26 @@ def choice_current(owner, report, candidate, rules, **_context):
     deadline=earliest_deadline(report['selection_deadline'],_context.get('selection_deadline'))
     if time.monotonic()>=deadline:raise RuntimeError('Workflow deadline expired before choice')
     reference=report['pose_reference'];row=dict(candidate)
+    runtime=report.get('runtime',{})
+    if row.get('protect_observed_result'):
+        if not np.allclose(homogeneous(row['prepared_reference_pose']),
+                           homogeneous(report['actual_pose']),rtol=0,atol=1e-8):
+            raise RuntimeError('Prepared route reference changed')
+        budget=reposition_budget(row,time.monotonic(),deadline,adapter.context().board,
+                                 markers=adapter.context().markers)
+        if not _protected_route(row,budget):raise RuntimeError('Protected route is no longer available')
+    elif runtime.get('atlas') is not None:
+        row,budget=bind_candidate(row,runtime['atlas'],runtime['capture_offset'],
+            adapter.context().board,adapter.context().markers,rules,time.monotonic(),deadline,
+            reference_pose=report.get('actual_pose'),check=adapter.check,
+            require_stable=True)
+        if row is None:raise RuntimeError('Selected route has no supported endpoint: '+budget['reason'])
+        owner.event('atlas_prediction_updated',candidate_id=row['id'],
+            candidate=row,colors=row['colors'],deltas=row['deltas'],prediction_pose_source=row['prediction_pose_source'])
     batch=CandidateBatch([row],adapter.context(),deadline)
     result=_execute_recorded(owner,report,row,rules,batch,reference)
-    result['actual_pose']=(homogeneous(result['actual_pose'])@homogeneous(report['actual_pose']))[:2].tolist()
+    if result.get('actual_pose') is not None:
+        result['actual_pose']=(homogeneous(result['actual_pose'])@homogeneous(report['actual_pose']))[:2].tolist()
     report['pose_reference']=adapter.verified_frame
     report['actual_pose']=result['actual_pose']
     return result
@@ -128,4 +278,4 @@ def callbacks(capture_dir, entry=None, strategy='grid', entry_size=None):
         acquire=lambda owner,rules,**ctx:acquire_current(
             owner,rules,capture_dir,entry,strategy=strategy,
             entry_size=entry_size,**ctx),
-        build=build_current,default=default_current,choice=choice_current)
+        build=build_current,default=default_current,choice=choice_current,prepare=prepare_choice)

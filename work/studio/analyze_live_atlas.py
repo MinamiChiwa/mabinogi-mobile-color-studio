@@ -3,6 +3,8 @@ import argparse
 import json
 import time
 import shutil
+import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import numpy as np
 from PIL import Image,ImageDraw
@@ -12,6 +14,34 @@ from vision import error,measure_board_motion
 from atlas_masks import material_masks, mask_parameters, mask_summary, save_mask_overlay
 from atlas_similarity import similarity_candidates, captured_scale_levels
 from candidate_ranking import candidate_rank
+
+
+def save_atlas(path, **arrays):
+    """Lossless NPZ with inexpensive compression for per-session data."""
+    with zipfile.ZipFile(path,'w',compression=zipfile.ZIP_DEFLATED,compresslevel=1) as archive:
+        for name,value in arrays.items():
+            with archive.open(name+'.npy','w',force_zip64=True) as stream:
+                np.lib.format.write_array(stream,np.asarray(value),allow_pickle=False)
+
+
+def export_maps(out,atlas):
+    started=time.perf_counter()
+    colors,valid,rmse=atlas.maps()
+    for j in range(3):
+        Image.fromarray(np.dstack((colors[j],valid[j].astype(np.uint8)*255))).save(
+            out/f'region-{j+1}.png',compress_level=1)
+    save_atlas(out/'atlas.npz',colors=colors,valid=valid,count=atlas.count,
+               rmse=rmse,basis=atlas.basis,origin=atlas.origin)
+    expanded_out=out/'expanded';expanded_out.mkdir(exist_ok=True)
+    for filename in ('atlas.npz','region-1.png','region-2.png','region-3.png'):
+        shutil.copyfile(out/filename,expanded_out/filename)
+    canvas=Image.new('RGB',(1560,560),'#18212b');draw=ImageDraw.Draw(canvas)
+    for j in range(3):
+        tile=Image.fromarray(np.dstack((colors[j],valid[j].astype(np.uint8)*255))).resize((512,512))
+        canvas.paste(tile,(8+j*520,40),tile.getchannel('A'))
+        draw.text((12+j*520,14),f'Region {j+1} - native capture',fill='white')
+    canvas.save(out/'overview.png',compress_level=1)
+    return time.perf_counter()-started
 
 
 def measured_translation(a,b,feature_cache=None,texture_mask=None):
@@ -62,8 +92,8 @@ def measure_periods(images,offsets,masks,feature_cache=None,check=None):
 
 def frame_sequence(log):
     """Normalize legacy and grid capture logs into ordered frame metadata."""
-    if any(r.get('kind')=='point_probe_plan' or str(r.get('kind','')).startswith('micro_return_') or
-           (r.get('kind')=='CAPTURE_COMPLETE' and r.get('strategy') in ('probe','micro_return')) for r in log):
+    if any(r.get('kind') in ('point_probe_plan','response_probe_plan') or str(r.get('kind','')).startswith('micro_return_') or
+           (r.get('kind')=='CAPTURE_COMPLETE' and r.get('strategy') in ('probe','micro_return','response')) for r in log):
         raise ValueError('Point sampling probes are diagnostic captures, not atlas scans')
     rows=[r for r in log if r.get('kind')=='frame']
     grid=any(r.get('name')=='max_sampling' for r in rows)
@@ -124,8 +154,44 @@ def validation_summary(validation):
                               if row['region']==region)) for region in (1,2,3)]
 
 
+class CaptureAlignment:
+    """Incremental adjacent-frame alignment, shared by live and offline runs."""
+    def __init__(self, scene):
+        self.scene=scene
+        self.masks=material_masks(scene)
+        self.texture_mask=self.masks.any(axis=0)
+        self.images=[];self.names=[];self.offsets=[];self.motions=[]
+        self.feature_cache={}
+        self.seconds=0.
+
+    def append(self,name,image,command=None):
+        started=time.perf_counter()
+        i=len(self.images)
+        if i:
+            a,b=self.images[-1],image
+            dx,dy=command['dx'],command['dy']
+            measured=measured_translation(a,b,self.feature_cache,self.texture_mask)
+            if np.linalg.norm(measured-[dx,dy])>12:
+                raise ValueError('Measured motion disagrees with capture command')
+            dx,dy=measured
+            dx,e=refine(lambda v:translation_error(a,b,self.masks,v,dy),dx,.6,.04)
+            dy,e=refine(lambda v:translation_error(a,b,self.masks,dx,v),dy,.3,.025)
+            absolute=self.offsets[-1]+[dx,dy]
+            if i%8==0 or command.get('holdout'):
+                ax,ae=refine(lambda v:translation_error(self.images[0],b,self.masks,v,absolute[1]),
+                             absolute[0],2.5,.25)
+                ay,ae=refine(lambda v:translation_error(self.images[0],b,self.masks,ax,v),
+                             absolute[1],1.5,.15)
+                if np.isfinite(ae) and ae<=8:absolute=np.array([ax,ay])
+            self.offsets.append(absolute)
+            self.motions.append(dict(frame=name,dx=dx,dy=dy,rgb_rmse=e))
+        else:self.offsets.append(np.zeros(2))
+        self.images.append(image);self.names.append(name)
+        self.seconds+=time.perf_counter()-started
+
+
 def run(source,game_codes=None,example_targets=None,target_rules=None,output=None,check=None,
-        atlas_resolution=768,progress=None):
+        atlas_resolution=768,progress=None,runtime=None,prepared=None):
     progress=progress or (lambda **data:None)
     started=time.perf_counter();timings={}
     source=Path(source);out=Path(output) if output is not None else source/'analysis'
@@ -139,7 +205,11 @@ def run(source,game_codes=None,example_targets=None,target_rules=None,output=Non
     log=json.loads((source/'log.json').read_text())
     scene=scene_record(log)
     sequence=frame_sequence(log);names=sequence['names']
-    images=[np.array(Image.open(source/(name+'_board.png')).convert('RGB')) for name in names]
+    if (prepared is not None and (prepared.names!=names or
+            prepared.scene['board']!=scene['board'] or prepared.scene['markers']!=scene['markers'])):
+        raise ValueError('Prepared frames do not belong to this capture')
+    images=(prepared.images if prepared is not None else
+            [np.array(Image.open(source/(name+'_board.png')).convert('RGB')) for name in names])
     holdout_indices=set(sequence['holdout_indices'])
     if sequence['strategy']=='grid' and len(images)<4:
         raise ValueError('Grid capture needs at least four board frames')
@@ -151,30 +221,15 @@ def run(source,game_codes=None,example_targets=None,target_rules=None,output=Non
     save_mask_overlay(images[0], masks, out/'mask-overlay.png')
     command_rows=[r for r in log if r.get('kind')=='command']
     commands=[(r['dx'],r['dy']) for r in command_rows]
-    offsets=[np.zeros(2)];motions=[];feature_cache={}
-    for i,(dx,dy) in enumerate(commands,1):
-        progress(stage='align',current=i,total=len(commands))
-        if check:check()
-        a,b=images[i-1],images[i]
-        measured=measured_translation(a,b,feature_cache,texture_mask)
-        if np.linalg.norm(measured-[dx,dy])>12:
-            raise ValueError('Measured motion disagrees with capture command')
-        dx,dy=measured
-        dx,e=refine(lambda v:translation_error(a,b,masks,v,dy),dx,.6,.04)
-        dy,e=refine(lambda v:translation_error(a,b,masks,dx,v),dy,.3,.025)
-        absolute=np.asarray(offsets[-1])+[dx,dy]
-        # Correct slow cumulative drift against the original reference at
-        # row ends and held-out frames.  The narrow search stays near the
-        # neighboring-frame solution, so periodic aliases cannot replace it.
-        if i % 8 == 0 or i in holdout_indices:
-            ax,ae=refine(lambda v:translation_error(images[0],b,masks,v,absolute[1]),
-                         absolute[0],2.5,.25)
-            ay,ae=refine(lambda v:translation_error(images[0],b,masks,ax,v),
-                         absolute[1],1.5,.15)
-            if np.isfinite(ae) and ae <= 8:
-                absolute=np.array([ax,ay])
-        offsets.append(absolute)
-        motions.append(dict(frame=names[i],dx=dx,dy=dy,rgb_rmse=e))
+    alignment=prepared or CaptureAlignment(scene)
+    if prepared is None:
+        alignment.append(names[0],images[0])
+        for i,command in enumerate(command_rows,1):
+            progress(stage='align',current=i,total=len(commands))
+            if check:check()
+            alignment.append(names[i],images[i],dict(command,holdout=i in holdout_indices))
+    offsets,motions,feature_cache=alignment.offsets,alignment.motions,alignment.feature_cache
+    timings['overlapped_alignment_seconds']=alignment.seconds if prepared is not None else 0.
     if sequence['strategy']=='grid':
         progress(stage='period')
         (px,e),(py,pyerr)=measure_periods(images,offsets,masks,feature_cache,check)
@@ -202,14 +257,16 @@ def run(source,game_codes=None,example_targets=None,target_rules=None,output=Non
     timings['atlas_seconds']=time.perf_counter()-stage
     stage=time.perf_counter()
     atlas=atlas.snapshot()
+    if runtime is not None:runtime.update(atlas=atlas,capture_offset=offsets[-1].copy())
     coverage=atlas.report()
     timings['map_seconds']=time.perf_counter()-stage
     colors,valid,rmse=atlas.maps()
     progress(stage='export')
-    stage=time.perf_counter()
-    for j in range(3):Image.fromarray(np.dstack((colors[j],valid[j].astype(np.uint8)*255))).save(out/f'region-{j+1}.png')
-    np.savez_compressed(out/'atlas.npz',colors=colors,valid=valid,count=atlas.count,rmse=rmse,basis=atlas.basis,origin=atlas.origin)
-    timings['export_seconds']=time.perf_counter()-stage
+    # The snapshot is immutable. Lossless diagnostic export can share the
+    # validation/search interval without blocking candidate computation.
+    exporter=ThreadPoolExecutor(max_workers=1,thread_name_prefix='atlas-export')
+    export=exporter.submit(export_maps,out,atlas)
+    exporter.shutdown(wait=False)
     stage=time.perf_counter()
     if check:check()
     progress(stage='validate')
@@ -236,9 +293,6 @@ def run(source,game_codes=None,example_targets=None,target_rules=None,output=Non
     # training frames and maps. Copy exports instead of recompressing them.
     expanded=atlas
     expanded_out=out/'expanded';expanded_out.mkdir(exist_ok=True)
-    for filename in ('atlas.npz','region-1.png','region-2.png','region-3.png'):
-        if check:check()
-        shutil.copyfile(out/filename,expanded_out/filename)
     # Optional manually transcribed final-frame game codes; never live OCR.
     marker_check=[]
     for j in range(3):
@@ -264,12 +318,13 @@ def run(source,game_codes=None,example_targets=None,target_rules=None,output=Non
         return False
     progress(stage='search')
     candidates=(translation_candidates(expanded,markers,rules,offsets[-1],cancelled=cancelled,
-                                       landing_radius=1.)
+                                       landing_radius=1.,integer_moves=True)
                 if rules and report['expanded']['quality_gate']['passed'] else [])
     search_diagnostics={}
     if rules and report['expanded']['quality_gate']['passed']:
         progress(stage='similarity')
         levels,tick=captured_scale_levels(log)
+        calibration=next((r for r in reversed(log) if r.get('kind')=='zoom_calibration'),{})
         joint=similarity_candidates(expanded,markers,rules,offsets[-1],(h,w),
                                     scale_bounds=(min(levels),1.),scale_levels=levels,
                                     cancelled=cancelled,diagnostics=search_diagnostics,
@@ -277,14 +332,17 @@ def run(source,game_codes=None,example_targets=None,target_rules=None,output=Non
         for row in candidates:row['search_space']='periodic_translation'
         for row in joint:
             row['id']+=len(candidates)
-            if tick is not None:row['zoom_log_step']=tick
+            if tick is not None:
+                row['zoom_log_step']=tick
+                row['zoom_log_step_up']=calibration.get('up_log_step',tick)
+                row['wheel_steps']=-int(round(-np.log(row['scale'])/tick))
+                row['scale_source']='measured_down_ticks'
         # Retain both pools: a cheaper translation may still fit the game
         # countdown when a slightly better rotation/zoom proposal cannot.
         candidates=sorted(candidates+joint,key=candidate_rank)
         for index,row in enumerate(candidates):row['id']=index
     if check:check()
     timings['candidate_seconds']=time.perf_counter()-stage
-    progress(stage='ready')
     timings['candidate_computed']=bool(rules and report['expanded']['quality_gate']['passed'])
     review=dict(schema=1,verified=False,metric='Delta E 76',
                 mode='configured_targets' if target_rules is not None else 'offline_example',
@@ -295,12 +353,11 @@ def run(source,game_codes=None,example_targets=None,target_rules=None,output=Non
                 coverage=coverage,quality_gate=report['expanded']['quality_gate'],
                 candidates=candidates,candidates_publishable=bool(candidates))
     (expanded_out/'review.json').write_text(json.dumps(review,indent=2),encoding='utf-8')
-    canvas=Image.new('RGB',(1560,560),'#18212b');draw=ImageDraw.Draw(canvas)
-    for j in range(3):
-        tile=Image.open(expanded_out/f'region-{j+1}.png').resize((512,512))
-        canvas.paste(tile,(8+j*520,40),tile.getchannel('A'))
-        draw.text((12+j*520,14),f'Region {j+1} - native capture',fill='white')
-    canvas.save(out/'overview.png')
+    if not export.done():progress(stage='export')
+    stage=time.perf_counter()
+    timings['export_seconds']=export.result()
+    timings['export_wait_seconds']=time.perf_counter()-stage
+    progress(stage='ready')
     timings['total_seconds']=time.perf_counter()-started
     if check:check()
     report['timings']=timings
@@ -315,6 +372,6 @@ if __name__=='__main__':
     parser.add_argument('--example-targets',nargs=3,help='Example targets for an offline candidate list')
     parser.add_argument('--output',type=Path,help='Separate output directory; preserves the source analysis')
     parser.add_argument('--atlas-resolution',type=int,choices=(768,1024),default=768,
-                        help='Offline atlas sampling resolution (the production default is 768)')
+                        help='Offline atlas sampling resolution (the production default is 1024)')
     args=parser.parse_args();run(args.source,args.game_codes,args.example_targets,output=args.output,
                                   atlas_resolution=args.atlas_resolution)

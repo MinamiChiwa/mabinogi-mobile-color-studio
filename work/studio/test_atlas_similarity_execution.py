@@ -6,6 +6,11 @@ from atlas_pose import candidate_pose, homogeneous, marker_errors, relative_cand
 
 
 class SimilarityGame:
+    def perform_gesture(self, gesture):
+        if gesture.kind=='drag':self.drag(*gesture.translation)
+        elif gesture.kind=='wheel':self.wheel(gesture.wheel_steps,gesture.anchor)
+        else:self.rotate(gesture.requested_angle,gesture.anchor)
+
     def __init__(self):
         self.ctx=Context('test',(40,80,1280,960),(714,425,1212,923),
                          ((797,620),(963,800),(1129,660)))
@@ -68,10 +73,9 @@ class SimilarityExecutionTests(unittest.TestCase):
                 else:self.row['angle']=0;self.game.tick=0
                 with self.assertRaisesRegex(RuntimeError,'stalled'):self.run_row()
                 self.assertEqual(self.game.actions,[kind]);self.assertEqual(self.game.releases,1)
-    def test_subpixel_final_rotation_accepts_identity_registration(self):
+    def test_subpixel_rotation_replans_from_identity_not_commanded_angle(self):
         # A rounded screen path may produce an identity registration for the
-        # final few pixels. The bounded micro-rotation path carries the
-        # commanded pose forward so verification can still finish.
+        # final few pixels. Replanning must use that measured identity.
         original=self.game.rotate
         def rotate(angle,anchor):
             if abs(angle)<1:
@@ -80,10 +84,44 @@ class SimilarityExecutionTests(unittest.TestCase):
             original(angle,anchor)
         self.game.rotate=rotate
         self.row.update(dx=0,dy=0,angle=.4,scale=1)
+        poses=[]
+        def replan(actual,candidate,rules):
+            poses.append(actual.copy())
+            return dict(candidate,matrix=actual[:2].tolist(),replanned=True)
+        self.game.replan=replan
         result=self.run_row()
         self.assertTrue(result['verified'])
         self.assertEqual(self.game.actions,['rotate'])
         self.assertLessEqual(max(result['marker_errors']),1)
+        self.assertTrue(result['replanned'])
+        np.testing.assert_array_equal(poses[0],np.eye(3))
+        np.testing.assert_array_equal(result['actual_pose'],self.game.pose[:2])
+
+    def test_directional_wheel_model_reaches_forty_eight_down_ticks(self):
+        self.row.update(angle=0,scale=.99**48,zoom_log_step=-np.log(.99),
+                        zoom_log_step_up=np.log(1.01))
+        self.game.tick=-np.log(.99)
+        result=self.run_row()
+        self.assertLessEqual(max(result['marker_errors']),1)
+        self.assertEqual(sum(self.game.wheel_ticks),-48)
+
+    def test_recorded_between_detent_targets_finish_a_measured_translation_fallback(self):
+        for scale,angle in ((.6207661876538648,-5.003022683180299),
+                            (.7066309509603709,20.533549877147106)):
+            with self.subTest(scale=scale):
+                self.setUp()
+                self.row.update(scale=scale,angle=angle,zoom_log_step=np.log(1.01))
+                self.game.tick=-np.log(.99)
+                def replan(actual,candidate,rules):
+                    target=homogeneous([[1,0,25],[0,1,-36]])@actual
+                    return dict(candidate,matrix=target[:2].tolist(),replanned=True)
+                self.game.replan=replan
+                result=self.run_row()
+                self.assertTrue(result['replanned'])
+                self.assertTrue(result['verified'])
+                self.assertNotIn('recovered',result)
+                self.assertLessEqual(max(result['marker_errors']),1)
+                self.assertEqual(self.game.actions[-1],'drag')
 
     def test_wrong_pivot_cannot_be_hidden_by_center_displacement(self):
         rotate=self.game.rotate

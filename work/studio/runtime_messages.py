@@ -2,6 +2,12 @@
 
 # Complete clauses take precedence over generic UI words such as 'Region'.
 EN = {
+    '自动染色': 'Automatic dyeing',
+    '正在恢复本轮已实测的最佳方案。': 'Restoring the best combination measured in this round.',
+    '未能恢复先前最佳结果，请以游戏当前颜色为准。': 'The previous best result could not be restored. Check the current colors in the game.',
+    '先前最佳实测（未恢复）': 'Previous best measurement (not restored)',
+    '本轮没有在预测阶段确认稳定可达的方案，未发送自动移动。': 'No reliably reachable combination was confirmed during prediction, so no automatic movement was sent.',
+    '所选方案无法从当前位置可靠到达，已保留当前颜色。': 'The selected combination cannot be reached reliably from the current position. The current colors are kept.',
     '颜色板采集未能完成，已停止自动移动并保留游戏当前画面。': 'The color board could not be captured. Automatic movement stopped and the current game frame was kept.',
     '颜色板校验未能完成，已停止自动移动并保留游戏当前画面。': 'The color board could not be verified. Automatic movement stopped and the current game frame was kept.',
     '当前动作未能可靠复核，已停止自动移动并保留游戏当前画面。': 'The latest action could not be verified reliably. Automatic movement stopped and the current game frame was kept.',
@@ -38,6 +44,12 @@ EN = {
     '文字识别组件不可用，请修复 Tesseract 后再开始染色采样。': 'OCR is unavailable. Repair Tesseract before starting another dye session.',
 }
 TW = {
+    '自动染色': '自動染色',
+    '正在恢复本轮已实测的最佳方案。': '正在恢復本輪已實測的最佳方案。',
+    '未能恢复先前最佳结果，请以游戏当前颜色为准。': '未能恢復先前最佳結果，請以遊戲目前顏色為準。',
+    '先前最佳实测（未恢复）': '先前最佳實測（未恢復）',
+    '本轮没有在预测阶段确认稳定可达的方案，未发送自动移动。': '本輪未能在預測階段確認穩定可達的方案，因此未發送自動移動。',
+    '所选方案无法从当前位置可靠到达，已保留当前颜色。': '所選方案無法從目前位置可靠到達，已保留目前顏色。',
     '颜色板采集未能完成，已停止自动移动并保留游戏当前画面。': '無法完成顏色板採集，已停止自動移動並保留目前遊戲畫面。',
     '颜色板校验未能完成，已停止自动移动并保留游戏当前画面。': '無法完成顏色板驗證，已停止自動移動並保留目前遊戲畫面。',
     '当前动作未能可靠复核，已停止自动移动并保留游戏当前画面。': '最近一次操作無法可靠複核，已停止自動移動並保留目前遊戲畫面。',

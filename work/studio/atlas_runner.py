@@ -66,7 +66,9 @@ class AtlasController:
             self.phase = AtlasPhase.KEEP_DEFAULT
             return AtlasEvent('atlas_choice_rejected', dict(candidate_id=candidate_id,
                 default_id=self.default['id'],budget=budget,
-                message='剩余时间不足，保持自动最佳方案。'))
+                message=('剩余时间不足，保持自动最佳方案。'
+                         if budget.get('reason') in ('deadline','insufficient_time') else
+                         '所选方案无法从当前位置可靠到达，已保留当前颜色。')))
         self.choice = move
         self.phase = AtlasPhase.CHOICE_POSITIONING
         return AtlasEvent('atlas_choice', dict(candidate=move,

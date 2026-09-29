@@ -12,6 +12,40 @@ from vision import accepted
 from ui_typography import SECTION_FONT,BODY_FONT,SMALL_FONT
 
 
+def candidate_display(row, result=None):
+    """Keep game observations separate from forecasts and execution targets."""
+    if not result or not result.get('verified') or not result.get('actual_colors'):
+        return dict(row, measured=False)
+    shown=dict(row,measured=True,colors=list(result['actual_colors']),
+               deltas=list(result.get('actual_deltas') or [None]*3))
+    for key in ('maximum','average','accepted','exact_matches','exact_total',
+                'family_consistent','family_maximum','family_average'):
+        if key in result:shown[key]=result[key]
+    return shown
+
+
+def update_candidate_display(data, candidate_id, *, candidate=None, result=None, current=False):
+    """Update only the presentation model; preserve selectable candidate IDs."""
+    updated=dict(data,candidates=list(data.get('candidates',[])),
+                 observations=dict(data.get('observations',{})))
+    targets=data.get('candidate_targets') or {row['id']:dict(row) for row in data.get('candidates',[])}
+    updated['candidate_targets']=targets
+    if candidate is not None:
+        updated['candidates']=[dict(candidate) if row['id']==candidate_id else row
+                               for row in updated['candidates']]
+        updated['observations'].pop(candidate_id,None)
+    if result is not None and result.get('verified'):
+        updated['observations'][candidate_id]=dict(result)
+    if current:
+        updated['default_id']=candidate_id
+        # Other buttons still execute their published targets. A fallback
+        # reached under the same ID must not become their displayed forecast.
+        updated['candidates']=[row if row['id']==candidate_id else targets.get(row['id'],row)
+                               for row in updated['candidates']]
+        updated['candidates'].sort(key=lambda row:row['id']!=candidate_id)
+    return updated
+
+
 def clamp_surface_position(position, screen_size, surface_size):
     """Keep a saved overlay position inside the physical work area.
 
@@ -191,15 +225,17 @@ class SearchOverlay(ct.CTkToplevel):
         if value==self._text:return
         self._text=value;self.heading.configure(text=tr(title));self.copy.configure(text=tr(body))
     def clear_candidates(self):
+        self._candidate_data=None
         self.batch_id=None;self.default_candidate_id=None;self.candidate_rows={};self.selection_sent=False
         for child in self.results.winfo_children():child.destroy()
         self.candidate_container=None;self.default_result_label=None
         self.results.grid_remove();self._has_results=False;self.resize_surface()
     def show_candidates(self,data):
         self.clear_candidates();self.batch_id=data['batch_id'];self.phase='positioning'
+        self._candidate_data=dict(data,candidates=list(data.get('candidates',[])))
         rows=data.get('candidates',[])
         default=data.get('default_id');self.default_candidate_id=default
-        if data.get('compromise_only'):
+        if data.get('compromise_only') or data.get('family_unavailable'):
             self.render('自动定位最接近方案',data.get('message') or
                         '未找到满足所设目标的组合，正在定位最接近的妥协方案。')
         else:
@@ -211,22 +247,28 @@ class SearchOverlay(ct.CTkToplevel):
         if not rows:
             ct.CTkLabel(self.candidate_container,text='有效覆盖不足，暂无可计算方案。').pack(padx=8,pady=12)
         for row in rows:
+            result=data.get('observations',{}).get(row['id']) if row['id']==default else None
+            shown=candidate_display(row,result)
             frame=ct.CTkFrame(self.candidate_container);frame.pack(fill='x',pady=4)
-            for i,(color,delta) in enumerate(zip(row['colors'],row['deltas'])):
+            title=('当前方案 · 游戏实测' if row['id']==default else '已测试方案 · 游戏实测') if shown['measured'] else '候选方案 · 预测颜色'
+            ct.CTkLabel(frame,text=title,font=BODY_FONT).pack(anchor='w',padx=6,pady=(4,2))
+            for i,(color,delta) in enumerate(zip(shown['colors'],shown['deltas'])):
                 text=f'区域 {i+1}  {color}   ΔE {delta:.2f}' if delta is not None else f'区域 {i+1}  未参与匹配'
                 line=ct.CTkFrame(frame,fg_color='transparent');line.pack(fill='x',padx=6)
                 ct.CTkLabel(line,text='',width=18,height=18,fg_color=color or '#333333').pack(side='left',padx=(0,6))
                 ct.CTkLabel(line,text=text,font=BODY_FONT).pack(side='left')
-            exact_total=int(row.get('exact_total',0))
-            exact_prefix=(tr('精准命中 ')+f"{int(row.get('exact_matches',0))}/{exact_total} · "
+            exact_total=int(shown.get('exact_total',0))
+            exact_prefix=(tr('精准命中 ')+f"{int(shown.get('exact_matches',0))}/{exact_total} · "
                           if exact_total else '')
-            label=exact_prefix+f"最大 {row['maximum']:.2f} / 平均 {row['average']:.2f} · "+('预测达标' if row['accepted'] else '未精准匹配 · 妥协方案' if exact_total and row.get('exact_matches',0)<exact_total else '妥协方案')
+            label=exact_prefix+f"最大 {shown['maximum']:.2f} / 平均 {shown['average']:.2f} · "+(('实测达标' if shown['measured'] else '预测达标') if shown['accepted'] else '未精准匹配 · 妥协方案' if exact_total and shown.get('exact_matches',0)<exact_total else '妥协方案')
+            if shown.get('family_consistent') is False:label+=' · '+tr('存在色系偏离')
             ct.CTkLabel(frame,text=label,font=BODY_FONT).pack()
             button=ct.CTkButton(frame,text='选择此方案',state='disabled',
                                command=lambda b=self.batch_id,r=row['id']:self.choose(b,r))
             button.pack(fill='x',padx=6,pady=6);self.candidate_rows[row['id']]=button
         if default in self.candidate_rows:
-            self.candidate_rows[default].configure(text='自动方案（当前）')
+            measured=bool(data.get('observations',{}).get(default,{}).get('verified'))
+            self.candidate_rows[default].configure(text='自动方案（当前）' if measured else '正在定位此方案')
     def show_default_verification(self,data):
         result=data.get('result',data)
         colors=result.get('actual_colors')
@@ -235,6 +277,7 @@ class SearchOverlay(ct.CTkToplevel):
         maximum=result.get('maximum')
         text=tr('自动方案实测色码')+'  '+' / '.join(color or '—' for color in colors)
         if maximum is not None:text+='\n'+tr('最大实测色差')+f' ΔE {maximum:.2f}'
+        if result.get('family_consistent') is False:text+='\n'+tr('部分区域与目标色系不符。')
         self.default_result_label=ct.CTkLabel(self.results,text=text,justify='left',anchor='w',wraplength=374)
         if self.candidate_container is not None:
             self.default_result_label.pack(fill='x',padx=8,pady=(0,8),before=self.candidate_container)
@@ -248,11 +291,16 @@ class SearchOverlay(ct.CTkToplevel):
     def show_verification(self,data):
         self.clear_candidates();self.phase='verified'
         self.results.grid(row=4,column=0,padx=2,pady=(0,10),sticky='ew');self._has_results=True;self._collapsed=False;self.copy.grid();self.activity.grid();self.collapse.configure(text='收起');self.resize_surface()
-        self.render('游戏色码已复核','全部目标达标，请在游戏内手动确认是否套用。' if data['accepted'] else '本轮候选实测未达标；当前颜色如下，尚不能判断色板无解。')
+        self.render('游戏色码已复核','部分区域与目标色系不符。' if data.get('family_consistent') is False else
+                    '全部目标达标，请在游戏内手动确认是否套用。' if data['accepted'] else '本轮候选实测未达标；当前颜色如下，尚不能判断色板无解。')
         for i in range(3):
             if data['actual_deltas'][i] is None:continue
-            text=(f"区域 {i+1}\n预测 {data['predicted_colors'][i]} · ΔE {data['predicted_deltas'][i]:.2f}\n"
-                  f"实测 {data['actual_colors'][i]} · ΔE {data['actual_deltas'][i]:.2f}")
+            predicted=data.get('predicted_colors',[None]*3)[i]
+            delta=data.get('predicted_deltas',[None]*3)[i]
+            text=f"区域 {i+1}\n"
+            if predicted is not None and delta is not None:
+                text+=f"预测 {predicted} · ΔE {delta:.2f}\n"
+            text+=f"实测 {data['actual_colors'][i]} · ΔE {data['actual_deltas'][i]:.2f}"
             ct.CTkLabel(self.results,text=tr(text),justify='left',anchor='w').pack(fill='x',padx=8,pady=8)
         ct.CTkLabel(self.results,text=tr(f"最大 {data['maximum']:.2f} / 平均 {data['average']:.2f}")).pack(pady=8)
     def show_recovery(self,data):
@@ -269,6 +317,16 @@ class SearchOverlay(ct.CTkToplevel):
         maximum=data.get('maximum');average=data.get('average')
         if maximum is not None and average is not None:
             ct.CTkLabel(self.results,text=tr(f"最大 {maximum:.2f} / 平均 {average:.2f}")).pack(pady=8)
+
+    def show_unrestored_best(self,data):
+        self.show_recovery(data)
+        self.render('已停止自动移动','未能恢复先前最佳结果，请以游戏当前颜色为准。')
+        best=data.get('best_result') or {}
+        ct.CTkLabel(self.results,text=tr('先前最佳实测（未恢复）'),anchor='w').pack(fill='x',padx=8,pady=8)
+        for i,(color,delta) in enumerate(zip(best.get('actual_colors') or [],best.get('actual_deltas') or [])):
+            if color is None or delta is None:continue
+            ct.CTkLabel(self.results,text=tr(f"区域 {i+1} · {color} · ΔE {delta:.2f}"),
+                        anchor='w').pack(fill='x',padx=8,pady=4)
     def handle(self,kind,data):
         if getattr(self,'_dismissed',False):return
         if kind=='atlas_progress':
@@ -277,7 +335,7 @@ class SearchOverlay(ct.CTkToplevel):
         if kind=='atlas_command':
             self.phase='positioning';self.update_activity({'stage':'position'})
             self.render('移动到目标位置',f"步骤 {data.get('step',1)} · 根据图像实测位移校正；F9随时停止。");return
-        if kind in ('atlas_default_verified','atlas_verified','atlas_recovery','atlas_recovery_unavailable','atlas_invalidated','atlas_default_unavailable','error','interrupted','finished') and hasattr(self,'activity'):
+        if kind in ('atlas_default_verified','atlas_verified','atlas_recovery','atlas_best_not_restored','atlas_recovery_unavailable','atlas_invalidated','atlas_default_unavailable','error','interrupted','finished') and hasattr(self,'activity'):
             self.activity.stop();self.activity.set(1)
         if kind=='interrupted' and self.phase in ('choosing','positioning','verified'):
             self.batch_id=None
@@ -285,6 +343,10 @@ class SearchOverlay(ct.CTkToplevel):
             self.phase='interrupted';self.render('流程已中断',data.get('message','已停止，请查看游戏当前颜色。'))
         elif kind=='atlas_candidates':
             self.show_candidates(data)
+        elif kind in ('atlas_replanned','atlas_prediction_updated') and data.get('candidate') and getattr(self,'_candidate_data',None):
+            updated=update_candidate_display(self._candidate_data,data['candidate_id'],
+                                             candidate=data['candidate'],current=True)
+            self.show_candidates(updated)
         elif kind=='atlas_invalidated':
             self.clear_candidates();self.phase='invalidated'
             title='大图重建校验未通过' if data.get('reason')=='atlas_quality_failed' else '当前搜索未得到可执行方案'
@@ -294,11 +356,17 @@ class SearchOverlay(ct.CTkToplevel):
         elif kind=='atlas_positioning':
             self.phase='positioning';self.render('正在定位所选方案','根据图像实测位移校正；F9随时停止。')
         elif kind=='atlas_candidate_failed':
+            if getattr(self,'_candidate_data',None):
+                self.show_candidates(update_candidate_display(self._candidate_data,data['candidate_id'],result=data))
             self.phase='positioning';self.render('当前候选实测未达标','正在检查剩余候选和游戏时间；F9随时停止。')
         elif kind=='atlas_default_verified':
+            if getattr(self,'_candidate_data',None):
+                self.show_candidates(update_candidate_display(self._candidate_data,data['candidate_id'],result=data,current=True))
             self.default_candidate_id=data.get('candidate_id',self.default_candidate_id)
             self.phase='choosing'
-            if data.get('compromise') or not data.get('accepted',True):
+            if data.get('family_consistent') is False:
+                self.render('存在色系偏离','部分区域与目标色系不符。')
+            elif data.get('compromise') or not data.get('accepted',True):
                 self.render('已到达最接近方案','这是当前可测量的妥协方案；可选择其他方案，实际染色须在游戏内手动确认。')
             else:
                 self.render('已到达自动最佳方案','可选择其他方案；剩余时间不足时将保持当前自动方案。')
@@ -318,6 +386,10 @@ class SearchOverlay(ct.CTkToplevel):
             self.show_verification(data)
         elif kind=='atlas_recovery':
             self.show_recovery(data)
+        elif kind=='atlas_best_not_restored':
+            self.show_unrestored_best(data)
+        elif kind=='atlas_status':
+            self.render('自动染色',data.get('message',''))
         elif kind=='atlas_recovery_unavailable':
             self.clear_candidates();self.phase='verified'
             self.render('已保留当前画面',data.get('message','当前动作未能可靠复核，已停止自动移动。'))

@@ -120,6 +120,59 @@ class AtlasTests(unittest.TestCase):
         with self.assertRaises(InterruptedError):
             translation_candidates(atlas, [[0, 0]]*3, self.rules, cancelled=lambda: True)
 
+    def test_integer_landings_are_scored_at_the_executable_position(self):
+        atlas=PeriodicAtlas([[32.7,0],[0,34.3]],resolution=32)
+        y,x=np.mgrid[:40,:40]
+        image=np.stack((x*5,y*5,(x+y)*3),axis=-1).astype(np.uint8)
+        atlas.add_resampled(image,np.ones((3,40,40),bool))
+        markers=np.array([[8.2,11.4],[15.5,19.3],[24.1,9.7]])
+        current=np.array([3.43,-4.71])
+        rules=[dict(enabled=True,colors=['#608080'],exact=False,tolerance=8)]*3
+        rows=translation_candidates(atlas,markers,rules,current,integer_moves=True)
+        self.assertTrue(rows)
+        for row in rows:
+            move=np.array([row['dx'],row['dy']])
+            np.testing.assert_array_equal(move,np.rint(move))
+            for i in range(3):
+                value,valid=atlas.sample(i,[markers[i]-current-move])
+                self.assertTrue(valid[0])
+                expected='#%02X%02X%02X'%tuple(np.rint(value[0]).astype(int))
+                self.assertEqual(row['colors'][i],expected)
+
+    def test_two_near_white_regions_beat_white_plus_green_during_search(self):
+        atlas=PeriodicAtlas([[32,0],[0,32]],resolution=32)
+        for region in range(2):
+            image=np.full((32,32,3),(0,128,0),np.uint8)
+            image[:16]=238
+            image[20+region*5,20]=255
+            if region:image=np.roll(image,8,axis=1)
+            masks=np.zeros((3,32,32),bool);masks[region]=True
+            atlas.add(image,masks)
+        markers=[[8.5,8.5],[16.5,8.5],[24.5,8.5]]
+        rules=[dict(enabled=i<2,exact=True,colors=['#FFFFFF'],tolerance=0) for i in range(3)]
+        rows=translation_candidates(atlas,markers,rules,integer_moves=True)
+        self.assertTrue(rows)
+        self.assertEqual(rows[0]['colors'][:2],['#EEEEEE','#EEEEEE'])
+        self.assertEqual(rows[0]['exact_matches'],0)
+        self.assertFalse(rows[0]['accepted'])
+
+    def test_blue_family_survives_internal_top_candidate_truncation(self):
+        atlas=PeriodicAtlas([[32,0],[0,32]],resolution=32)
+        for region in range(3):
+            image=np.full((32,32,3),255 if region<2 else 100,np.uint8)
+            image[:16]=238 if region<2 else (40,104,192)
+            masks=np.zeros((3,32,32),bool);masks[region]=True
+            atlas.add(image,masks)
+        markers=[[8.5,8.5],[16.5,8.5],[24.5,8.5]]
+        rules=[dict(enabled=True,exact=i<2,colors=['#FFFFFF' if i<2 else '#0080FF'],tolerance=8)
+               for i in range(3)]
+        rows=translation_candidates(atlas,markers,rules,integer_moves=True,limit=1)
+        self.assertEqual(len(rows),1)
+        self.assertEqual(rows[0]['colors'],['#EEEEEE','#EEEEEE','#2868C0'])
+        self.assertTrue(rows[0]['family_consistent'])
+        self.assertEqual(rows[0]['exact_matches'],0)
+        self.assertFalse(rows[0]['accepted'])
+
     def test_resampling_preserves_linear_ramp_at_fractional_positions(self):
         atlas=PeriodicAtlas([[16,0],[0,16]],resolution=16)
         y,x=np.mgrid[:20,:20]

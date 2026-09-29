@@ -1,6 +1,7 @@
 """Runtime image registration and game adapter for the formal atlas flow."""
 import cv2
 import numpy as np
+import time
 from atlas_execution import Context, checked_translation
 from atlas_masks import board_texture_mask, material_masks
 from vision import read_codes
@@ -149,6 +150,8 @@ class Adapter:
         self.g, self.scene, self.session = game, scene, session
         self.last_motion_diagnostics = None
         self.last_motion_before = self.last_motion_after = None
+        self._code_cache = {}
+        self.code_read_stats = dict(calls=0,ocr_passes=0,ocr_cards=0,reused_cards=0,seconds=0.)
 
     def check(self):
         self.g.check()
@@ -170,6 +173,10 @@ class Adapter:
         self.g.drag(self.scene.board, dx, dy)
         self.park()
 
+    def perform_gesture(self, gesture):
+        self.g.perform_gesture(gesture)
+        self.park()
+
     def rotate(self, angle, anchor):
         self.g.rotate(self.scene.board, angle, anchor=anchor)
         self.park()
@@ -185,7 +192,39 @@ class Adapter:
         self.g.pause(seconds)
 
     def read_codes(self, image):
-        return read_codes(image, self.scene.cards, self.scene.markers)
+        # Reuse only a successfully validated HEX for an identical FULL card,
+        # including both text and swatch. Capturing the second frame, waiting,
+        # and registering the board remain the executor's responsibility.
+        # No approximate image hash, old pose, or predicted colour is used.
+        started=time.perf_counter()
+        enabled=getattr(self,'enabled',None)
+        if enabled is None:enabled=[True]*len(self.scene.cards)
+        needed=[False]*len(self.scene.cards);result=[None]*len(self.scene.cards)
+        cards={};reused=0
+        for index,(x,y,w,h) in enumerate(self.scene.cards):
+            if not enabled[index]:continue
+            pixels=image[y:y+h,x:x+w]
+            geometry=(tuple(image.shape),str(image.dtype),(x,y,w,h),bool(self.scene.markers))
+            complete=pixels.shape==(h,w,3) and w>0 and h>0
+            cached=self._code_cache.get(index)
+            if complete and cached is not None and cached[0]==geometry and np.array_equal(pixels,cached[1]):
+                result[index]=cached[2];reused+=1
+            else:
+                needed[index]=True
+                cards[index]=(geometry,pixels,complete)
+        if any(needed):
+            fresh=read_codes(image,self.scene.cards,self.scene.markers,enabled=needed)
+            for index,(geometry,pixels,complete) in cards.items():
+                result[index]=fresh[index]
+                if fresh[index] is not None and complete:
+                    self._code_cache[index]=(geometry,pixels.copy(),fresh[index])
+                else:self._code_cache.pop(index,None)
+            self.code_read_stats['ocr_passes']+=1
+        self.code_read_stats['calls']+=1
+        self.code_read_stats['ocr_cards']+=sum(needed)
+        self.code_read_stats['reused_cards']+=reused
+        self.code_read_stats['seconds']+=time.perf_counter()-started
+        return result
 
     def release(self):
         try:self.g.send(4)
