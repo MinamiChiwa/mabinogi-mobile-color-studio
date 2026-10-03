@@ -109,5 +109,20 @@ class RegistrationTests(unittest.TestCase):
             measure_periods([image]*3,[[0,0],[240,0],[0,240]],
                             np.ones((3,240,360),bool))
 
+    def test_single_validated_return_is_used_as_a_degraded_period(self):
+        rng=np.random.default_rng(414)
+        tile=rng.integers(0,256,(300,300,3),dtype=np.uint8)
+        tile=cv2.GaussianBlur(tile,(3,3),0)
+        y,x=np.mgrid[:240,:360]
+        offsets=np.array([[0,0],[240,0],[280,0],[0,240]])
+        images=[tile[(y-dy)%300,(x-dx)%300] for dx,dy in offsets]
+        masks=np.array([(x>=lo)&(x<lo+120) for lo in (0,120,240)])
+        # Remove the second vertical return: the remaining independent return
+        # still provides a bounded period and later quality validation decides
+        # whether the atlas is safe to publish.
+        (px,ex),(py,ey)=measure_periods(images,offsets,masks)
+        self.assertAlmostEqual(px,300,delta=.3)
+        self.assertAlmostEqual(py,300,delta=.3)
+
 
 if __name__=='__main__':unittest.main()

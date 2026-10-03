@@ -13,6 +13,16 @@ from live_atlas_capture import ZoomMotionTracker
 
 
 class StartupRecognitionTests(unittest.TestCase):
+    def test_timer_track_signal_locates_resizable_horizontal_bar(self):
+        image=np.zeros((300,500,3),np.uint8)
+        image[24:31,75:390]=235
+        track=vision.timer_bar_signal(image,unit=30)
+        self.assertIsNotNone(track)
+        self.assertEqual(track['left'],75)
+        self.assertEqual(track['top'],24)
+        self.assertGreaterEqual(track['fill_end'],389)
+        self.assertGreater(track['confidence'],.7)
+
     def test_countdown_only_still_checks_geometry_and_timer(self):
         image=np.zeros((300,300,3),np.uint8)
         scene=vision.Scene([(70,40,30,30),(130,40,30,30),(190,40,30,30)],
@@ -64,10 +74,26 @@ class StartupRecognitionTests(unittest.TestCase):
                 self.assertEqual(vision.timer_seconds(image,unit=81,previous=previous),expected)
                 self.assertEqual(read.call_count,12)
 
-    def test_initial_countdown_keeps_early_exit(self):
-        with patch('vision.ocr',return_value='4120') as read:
-            self.assertEqual(vision.timer_seconds(np.zeros((960,1280,3),np.uint8),unit=81),120)
-        read.assert_called_once()
+    def test_short_previous_reading_can_be_corrected_by_repeated_long_timer(self):
+        image=np.zeros((960,1280,3),np.uint8)
+        with patch('vision.ocr',return_value='119') as read:
+            self.assertEqual(vision.timer_seconds(image,unit=81,previous=20),119)
+        self.assertEqual(read.call_count,12)
+
+    def test_timer_accepts_localized_suffixes_and_unicode_digits(self):
+        image=np.zeros((960,1280,3),np.uint8)
+        for text,expected in (('80秒',80),('남은 시간 95초',95),('１２５ s',125)):
+            with self.subTest(text=text),patch('vision.ocr',return_value=text):
+                self.assertEqual(vision.timer_seconds(image,unit=81),expected)
+
+    def test_initial_countdown_checks_broad_crop_before_accepting_short_suffix(self):
+        # The narrow crops may see only the trailing ``19`` of a 119-second
+        # timer.  Initial recognition must continue through the broad crop.
+        def read(crop,whitelist,psm):
+            return '119' if crop.shape[1] >= 400 else '19'
+        with patch('vision.ocr',side_effect=read) as ocr:
+            self.assertEqual(vision.timer_seconds(np.zeros((960,1280,3),np.uint8),unit=81),119)
+        self.assertEqual(ocr.call_count,12)
 
 
 class ZoomFeatureReuseTests(unittest.TestCase):

@@ -45,10 +45,25 @@ def texture_mask(scene, shape):
     return board_texture_mask(scene).astype(np.uint8) * 255
 
 
-def _feature_registration(gray_a, gray_b, mask, contrast, diagnostics):
-    detector = cv2.SIFT_create(nfeatures=2400, contrastThreshold=contrast)
-    ka, da = detector.detectAndCompute(gray_a, mask)
-    kb, db = detector.detectAndCompute(gray_b, mask)
+def _feature_registration(gray_a, gray_b, mask, contrast, diagnostics,
+                          *, features_a=None, features_b=None):
+    """Match two board frames, optionally reusing extracted SIFT features.
+
+    A live single-region search compares the previous frame with the newly
+    captured frame after every input.  The previous frame is therefore used
+    twice (as ``after`` once, then as ``before`` on the next step).  Reusing
+    its immutable keypoints/descriptors removes one expensive SIFT extraction
+    per step without relaxing any matching or material-safety gate.
+    """
+    detector = None
+    if features_a is None or features_b is None:
+        detector = cv2.SIFT_create(nfeatures=2400, contrastThreshold=contrast)
+    if features_a is None:
+        features_a = detector.detectAndCompute(gray_a, mask)
+    if features_b is None:
+        features_b = detector.detectAndCompute(gray_b, mask)
+    ka, da = features_a
+    kb, db = features_b
     diagnostics.update(contrast_threshold=contrast, features_before=len(ka), features_after=len(kb))
     if da is None or db is None or len(db) < 2:
         diagnostics['reason'] = 'insufficient_features'
@@ -75,7 +90,25 @@ def _feature_registration(gray_a, gray_b, mask, contrast, diagnostics):
     return matrix, int(inliers.sum())
 
 
-def motion(a, b, scene, diagnostics=None):
+def _cached_features(image, gray, mask, contrast, cache):
+    """Return SIFT features for ``image`` from a small identity-safe cache."""
+    key = (id(image), float(contrast), tuple(gray.shape))
+    row = cache.get(key)
+    # Retain the image object in each entry so an id() cannot be reused for a
+    # different frame while the cached descriptor is still visible.
+    if row is not None and row[0] is image:
+        return row[1]
+    detector = cv2.SIFT_create(nfeatures=2400, contrastThreshold=contrast)
+    found = detector.detectAndCompute(gray, mask)
+    cache[key] = (image, found)
+    # A live search only needs the current/previous frame. Keep a few extra
+    # entries for a failed registration retry while bounding memory use.
+    while len(cache) > 12:
+        cache.pop(next(iter(cache)))
+    return found
+
+
+def motion(a, b, scene, diagnostics=None, feature_cache=None):
     """Measure existing frames; a denser feature retry never sends game input.
 
     Retry only a failed geometric estimate. Both attempts use the same match,
@@ -92,7 +125,14 @@ def motion(a, b, scene, diagnostics=None):
     for contrast in (.04, .01):
         attempt = {}
         diagnostics['attempts'].append(attempt)
-        registration = _feature_registration(gray_a, gray_b, mask, contrast, attempt)
+        if feature_cache is None:
+            registration = _feature_registration(gray_a, gray_b, mask, contrast, attempt)
+        else:
+            features_a = _cached_features(a, gray_a, mask, contrast, feature_cache)
+            features_b = _cached_features(b, gray_b, mask, contrast, feature_cache)
+            registration = _feature_registration(
+                gray_a, gray_b, mask, contrast, attempt,
+                features_a=features_a, features_b=features_b)
         if registration is not None:
             break
     if registration is None:

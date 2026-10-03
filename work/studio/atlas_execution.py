@@ -82,6 +82,85 @@ def _measured_motion(adapter, before, after, emit, phase, step=0):
     return registration
 
 
+def _near_identity_registration(diagnostics, translation_limit=1.0):
+    """Return the diagnostic transform when it is a safe near-identity.
+
+    ``motion`` deliberately rejects a pair when its material RGB check fails,
+    but it still records the geometric transform.  A material-only mismatch
+    is recoverable before any input is sent when that transform says the board
+    has not moved.  Keep the same gates used by :func:`checked_translation`
+    here, and include the translation gate that is applied immediately after
+    the first successful registration.
+    """
+    if not isinstance(diagnostics, dict) or diagnostics.get('reason') != 'material_rgb_mismatch':
+        return None
+    raw_matrix=diagnostics.get('matrix')
+    if raw_matrix is None:
+        # atlas_runtime stores the geometric estimate on the final feature
+        # attempt while the material gate writes its reason on the parent
+        # diagnostics object.
+        attempts=diagnostics.get('attempts') or ()
+        if attempts:
+            raw_matrix=attempts[-1].get('matrix')
+    matrix=np.asarray(raw_matrix,float)
+    if matrix.shape!=(2,3) or not np.isfinite(matrix).all():
+        return None
+    linear=matrix[:,:2]
+    scale=float(np.hypot(linear[0,0],linear[1,0]))
+    angle=float(np.degrees(np.arctan2(linear[1,0],linear[0,0])))
+    translation=matrix[:,2].copy()
+    if (abs(angle)>.25 or abs(scale-1)>.003 or
+            np.max(abs(linear-np.eye(2)))>.006 or
+            np.linalg.norm(translation)>float(translation_limit)):
+        return None
+    return dict(matrix=matrix.tolist(),angle=angle,scale=scale,
+                translation=translation.tolist())
+
+
+def _rebase_reference_before_input(adapter, reference, before, emit):
+    """Re-capture a stable reference after a material-only initial mismatch.
+
+    The atlas reference can differ in RGB from the live board while its
+    geometry is unchanged (for example, an animated overlay or a transient
+    colour pass).  In that narrow case, use the already captured live frame as
+    the new reference and validate one fresh frame before continuing.  No mouse
+    input is emitted here.  ``None`` means that the original safety failure
+    must be retained by the caller.
+    """
+    diagnostics=deepcopy(getattr(adapter,'last_motion_diagnostics',None))
+    initial=_near_identity_registration(diagnostics)
+    if initial is None:
+        return None
+    try:
+        adapter.check()
+        current=adapter.capture()
+        stable=_measured_motion(adapter,before,current,emit,'reference_recheck')
+        stable_diag=deepcopy(getattr(adapter,'last_motion_diagnostics',None))
+        # A valid registration may still describe a real move.  Keep the
+        # rebase strictly read-only and require the fresh pair to stay within
+        # the same small displacement bound as the initial pair.
+        stable_translation=checked_translation(stable)
+        if np.linalg.norm(stable_translation)>1.0:
+            return None
+        emit('atlas_reference_rebased',dict(
+            reason='material_rgb_mismatch',
+            initial=initial,stable=stable,
+            stable_diagnostics=stable_diag,
+            displacement=stable_translation.tolist()))
+        # The newly captured frame becomes both the live reference and the
+        # current frame.  Treat the tiny measured displacement as the new
+        # identity checkpoint rather than carrying a stale sub-pixel offset
+        # into the first input route.
+        identity=dict(matrix=[[1.,0.,0.],[0.,1.,0.]],angle=0.,scale=1.)
+        return current,current,identity
+    except Exception as exc:
+        # The caller re-raises the original material mismatch.  A failed
+        # rebase must never mask it or turn an uncertain frame into movement.
+        if exc.__class__.__name__ in ('Interrupted','InterruptedError'):
+            raise
+        return None
+
+
 def _estimate_candidate_motion(candidate, board, markers, max_steps):
     """Simulate the same rotate/zoom/drag order used by execute_candidate.
 
@@ -587,7 +666,17 @@ def execute_candidate(adapter,batch,batch_id,candidate_id,reference,rules,emit=l
             from atlas_bound_route import bound_motion
             bound=bound_motion(candidate,batch.context.board,batch.context.markers,max_steps)
         before=adapter.capture()
-        registration=_measured_motion(adapter,reference,before,emit,'reference')
+        try:
+            registration=_measured_motion(adapter,reference,before,emit,'reference')
+        except CandidateExpired as initial_error:
+            # A colour-only mismatch can occur while the board is stationary
+            # (animated UI/compositing may change RGB between the atlas and
+            # the first live frame).  Before sending any input, perform one
+            # read-only re-capture and continue only when that pair is stable.
+            rebased=_rebase_reference_before_input(adapter,reference,before,emit)
+            if rebased is None:
+                raise initial_error
+            reference,before,registration=rebased
         actual=homogeneous(registration['matrix'])
         pose_current=True
         moved=checked_translation(registration)
@@ -641,7 +730,8 @@ def execute_candidate(adapter,batch,batch_id,candidate_id,reference,rules,emit=l
                              progress_error<last_rebind_error-.65)
                 if callable(rebind) and (route_rebinds<2 or progressing) and not rotation_quantized:
                     route_rebinds+=1
-                    proposal=dict(candidate,zoom_log_step=zoom_ticks[-1],zoom_log_step_up=zoom_ticks[1])
+                    proposal=dict(candidate,zoom_log_step=zoom_ticks[-1],zoom_log_step_up=zoom_ticks[1],
+                                  execution_zoom_direction=last_zoom_direction)
                     rebound=rebind(actual,proposal,rules)
                     adapter.check()
                 if rebound is not None:
@@ -756,6 +846,44 @@ def execute_candidate(adapter,batch,batch_id,candidate_id,reference,rules,emit=l
             emit('atlas_command',dict(step=step+1,action=kind,command=np.asarray(command).tolist(),
                                      anchor=anchor,gesture=gesture.record()))
             if stage_budget is not None:stage_budget.check_input()
+            return_guard=getattr(adapter,'return_guard',None)
+            if callable(return_guard):
+                # Protect the checkpoint before leaving the last measured
+                # pose. Include input, settling and the next measurement;
+                # the guard separately prices its return and HEX verification.
+                upcoming=max(float(gesture.record()['input_seconds'])+.15+.6+1.,
+                             {'rotate':1.2,'wheel':.5,'drag':1.05}[kind])
+                # Forecast the measured pose after this concrete gesture so
+                # return protection covers the action's real endpoint.  The
+                # post-action registration remains authoritative afterwards.
+                projected_pose=actual.copy()
+                try:
+                    from atlas_bound_route import forecast_gesture
+                    # The next concrete wheel gesture selects its own measured
+                    # direction. A bound route's first DOWN action has not yet
+                    # set last_zoom_direction and must not use the UP response.
+                    projected_pose=forecast_gesture(gesture,batch.context.board,
+                        zoom_ticks[-1],zoom_ticks[1])@actual
+                except Exception:
+                    # PlannedGesture exposes its concrete translation/arc
+                    # fields rather than a matrix; build the same transform
+                    # used by the offline route estimator.
+                    projected_pose=None
+                try:
+                    return_budget=return_guard(actual.copy(),upcoming,projected_pose=projected_pose)
+                except TypeError as exc:
+                    # Third-party/test adapters may still implement the
+                    # original two-argument guard. Preserve that contract;
+                    # native AtlasService guards accept the projection.
+                    if 'projected_pose' not in str(exc):
+                        raise
+                    return_budget=return_guard(actual.copy(),upcoming)
+                adapter.check()
+                if not isinstance(return_budget,dict) or not return_budget.get('allowed',False):
+                    emit('atlas_return_reserved',dict(step=step+1,action=kind,
+                         upcoming_seconds=upcoming,budget=return_budget,
+                         actual_pose=actual[:2].tolist(),input_sent=False))
+                    raise RuntimeError('Return reserve reached before the next input')
             pose_current=False
             adapter.perform_gesture(gesture)
             adapter.pause(.15)

@@ -5,8 +5,8 @@ import json
 from pathlib import Path
 import sys
 
-APP_VERSION = '0.3.5'
-POLICY_REVISION = 'balanced-landing-v1'
+APP_VERSION = '0.3.6'
+POLICY_REVISION = 'balanced-landing-single-zoom-v3'
 
 
 def source_identity(root):

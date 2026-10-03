@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from search_overlay import SearchOverlay
 from atlas_service import AtlasService, AtlasCallbacks
+import test_atlas_service as service_fixtures
 from engine import Runner
 
 
@@ -48,7 +49,8 @@ class AtlasEndToEndTests(unittest.TestCase):
         def choice(owner,report,candidate,rules,**ctx):
             return dict(candidate_id=candidate['id'],verified=True,accepted=True,
                         actual_pose=[[1,0,candidate['dx']],[0,1,candidate['dy']]])
-        service=AtlasService(AtlasCallbacks(acquire,build,default,choice))
+        service=AtlasService(AtlasCallbacks(acquire,build,default,choice,
+                                            prepare=service_fixtures.ServiceTests().prepare))
         overlay=SimpleNamespace(batch_id=None,candidate_rows={},selection_sent=False,phase='choosing',
                                 select_candidate=None)
         events=[]

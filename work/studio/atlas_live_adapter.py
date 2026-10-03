@@ -11,17 +11,19 @@ from contextlib import nullcontext
 import numpy as np
 from live_atlas_capture import acquire
 from atlas_adapter import build_from_capture
-from atlas_execution import CandidateBatch, Context, execute_candidate, reposition_budget
+from atlas_execution import CandidateBatch, Context, execute_candidate, reposition_budget, verify_result
 from atlas_service import AtlasCallbacks, _protected_route
 from atlas_runtime import Adapter
 from workflow_budget import earliest_deadline
 from atlas_pose import homogeneous,candidate_pose,pose_fields
-from atlas_replan import reachable_candidates
+from atlas_replan import reachable_candidates, bind_nearby_zoom_detents
 from atlas_pose_scoring import rescore_candidate
 from atlas_bound_route import bind_candidate
 from candidate_ranking import candidate_rank,candidate_quality
+from atlas_similarity import select_color_candidates
 from atlas_stage_budget import ExecutionStageBudget
 from execution_diagnostics import execution_diagnostics
+from platform_win import Interrupted
 
 
 def acquire_current(_owner, _rules, capture_dir, entry=None, strategy='grid', entry_size=None, **context):
@@ -67,7 +69,22 @@ def build_current(capture, rules, **_context):
         route_diagnostics.append(dict(candidate_id=row['id'],
             budget={k:v for k,v in budget.items() if k!='input_route'}))
         if ready is not None:prepared.append(ready)
-    if not any(row.get('family_consistent') for row in prepared) and time.monotonic()<deadline:
+    def _stable_translation(row):
+        actions=(row.get('execution_budget') or {}).get('actions') or {}
+        stability=row.get('route_stability') or {}
+        return (int(actions.get('rotate',0))==0 and int(actions.get('wheel',0))==0
+                and bool(row.get('family_consistent'))
+                and bool(stability.get('quality_preferred')))
+
+    # Translation alternatives are useful fallback routes. Their existence
+    # does not invalidate separately bound rotate/zoom endpoints: compare
+    # every supported endpoint using the same color and landing-risk score.
+    safe_translations=[row for row in prepared if _stable_translation(row)]
+    needs_translation_fallback=(not any(row.get('family_consistent') for row in prepared)
+        or any(row.get('family_consistent') and row.get('route_stability')
+               and not row['route_stability'].get('quality_preferred',False)
+               for row in prepared))
+    if needs_translation_fallback and time.monotonic()<deadline:
         # No transform route survived. Retain the already captured pose and
         # search its atlas for integer translations instead of publishing an
         # unattainable continuous candidate or throwing away the session.
@@ -88,19 +105,17 @@ def build_current(capture, rules, **_context):
             route_diagnostics.append(dict(candidate_id=first_id+index,fallback=True,
                 budget={k:v for k,v in budget.items() if k!='input_route'}))
             if ready is not None:prepared.append(ready)
+        safe_translations=[row for row in prepared if _stable_translation(row)]
     # Keep supported endpoints available to the shared quality/risk ordering.
     # A boolean family boundary must not discard a more balanced or reliable
     # endpoint before its actual bound route is compared.
     same_family_rows=[row for row in prepared if row.get('family_consistent')]
-    rows=[];seen=set()
-    for row in sorted(prepared,key=candidate_rank):
-        key=tuple(row['colors'])
-        if key in seen:continue
-        seen.add(key);rows.append(row)
-        if len(rows)>=8:break
+    rows=select_color_candidates(prepared,rules,8)
     report['candidates']=rows
     report['search_diagnostics']=dict(report.get('search_diagnostics') or {},route_binding=route_diagnostics,
         stability_required=True,stable_route_count=len(rows),
+        transform_routes_suppressed=False,
+        stable_translation_count=len(safe_translations),
         rejected_unstable_route_count=sum(d.get('budget',{}).get('reason') in
                                           ('unstable_landing','unstable_route')
                                           for d in route_diagnostics),
@@ -123,9 +138,85 @@ def build_current(capture, rules, **_context):
     return report
 
 
-def _execute_recorded(owner,report,candidate,rules,batch,reference,reservation='legacy'):
+def observe_current(owner, captured, rules, *, reason=None, selection_deadline=None, **_context):
+    """Read the current board after a read-only multi-region early exit.
+
+    No atlas, route, motion registration or mouse input is used here.  The
+    capture's own game deadline remains authoritative; ordinary OCR failures
+    produce an explicit unknown observation rather than a guessed colour.
+    """
+    game=captured.get('game') if isinstance(captured,dict) else None
+    scene=captured.get('scene') if isinstance(captured,dict) else None
+    if game is None or scene is None:
+        return None
+    game.check()
+    observed_frames=0
+    def unknown(detail):
+        return dict(candidate_id=None,verified=False,accepted=False,observed_accepted=False,
+                    actual_colors=[None]*3,actual_deltas=[None]*3,maximum=None,average=None,
+                    predicted_colors=[None]*3,predicted_deltas=[None]*3,
+                    actual_pose=None,marker_errors=None,pose_reliable=False,
+                    positioning_complete=False,recovered=True,best_result_current=False,
+                    recovery_reason=reason,observation_error=detail,
+                    observed_frames=observed_frames)
+    try:
+        limits=[captured.get('deadline'),captured.get('game_deadline'),selection_deadline]
+        game_limit=getattr(game,'until',None)
+        if game_limit is not None and np.isfinite(game_limit):limits.append(game_limit)
+        deadline=earliest_deadline(*limits)
+        if deadline is None:return unknown('deadline_unavailable')
+        if time.monotonic()>=deadline:
+            raise Interrupted('游戏倒计时已到安全截止时间。')
+        observation_deadline=min(deadline-.25,time.monotonic()+3.5)
+        if observation_deadline<=time.monotonic():return unknown('insufficient_observation_time')
+        budget=ExecutionStageBudget(observation_deadline,observation_deadline,deadline,
+                                    clock=time.monotonic)
+        adapter=Adapter(game,scene,'early-observation')
+        adapter.enabled=[bool(rule.get('enabled')) for rule in rules]
+        with adapter.execution_scope(budget):
+            first=adapter.capture();observed_frames=1
+            codes_first=adapter.read_codes(first)
+            adapter.pause(.15)
+            second=adapter.capture();observed_frames=2
+            codes_second=adapter.read_codes(second)
+            adapter.check_observation()
+    except Exception as exc:
+        if exc.__class__.__name__ in ('Interrupted','InterruptedError'):raise
+        # OCR/capture failures may coincide with F9, focus/geometry loss or
+        # the hard game deadline. Recheck safety before treating the failure
+        # as an ordinary unknown observation; this sends no new input.
+        game.check()
+        return unknown(str(exc))
+    stable=all((not rules[i].get('enabled')) or
+               (codes_first[i] is not None and codes_first[i]==codes_second[i])
+               for i in range(len(rules)))
+    if not stable:
+        return unknown('unstable_or_unreadable_hex')
+    observed=verify_result(dict(id=None,colors=[None]*len(scene.cards),
+                                deltas=[None]*len(scene.cards)),codes_second,rules)
+    return dict(observed,candidate_id=None,actual_pose=None,marker_errors=None,
+                pose_reliable=False,positioning_complete=False,recovered=True,
+                accepted=False,observed_accepted=bool(observed.get('accepted')),
+                best_result_current=False,
+                recovery_reason=reason,observed_frames=2,
+                predicted_colors=[None]*len(scene.cards),predicted_deltas=[None]*len(scene.cards),
+                compromise=not bool(observed.get('accepted')))
+
+
+def _execute_recorded(owner,report,candidate,rules,batch,reference,reservation='legacy',return_guard=None):
     events=[];result=None;failure=None
     adapter=report['adapter']
+    reference_pose=np.eye(3) if report.get('actual_pose') is None else homogeneous(report['actual_pose'])
+    if callable(return_guard):
+        def guarded_return(actual, upcoming, projected_pose=None):
+            current_global=homogeneous(actual) @ reference_pose
+            projected_global=(None if projected_pose is None else
+                              homogeneous(projected_pose) @ reference_pose)
+            return return_guard(current_global, upcoming,
+                                projected_pose=projected_global)
+        adapter.return_guard=guarded_return
+    else:
+        adapter.return_guard=None
     adapter.enabled=[bool(rule['enabled']) for rule in rules]
     stage_budget=ExecutionStageBudget.for_attempt(batch.deadline,
         report.get('selection_deadline',batch.deadline),clock=time.monotonic)
@@ -142,14 +233,27 @@ def _execute_recorded(owner,report,candidate,rules,batch,reference,reservation='
                     batch.context.board,batch.context.markers,active_rules,time.monotonic(),
                     batch.deadline,reference_pose=actual@reference,check=route_check,
                     require_stable=True,allow_color_compromise=True)
+                if (ready is None and _budget.get('reason')=='unreachable_scale'
+                        and not current.get('protect_observed_result')):
+                    ready,_budget=bind_nearby_zoom_detents(current,actual,
+                        runtime['atlas'],runtime['capture_offset'],batch.context.board,
+                        batch.context.markers,active_rules,time.monotonic(),batch.deadline,
+                        reference_pose=reference,wheel_direction=int(current.get('execution_zoom_direction',0)),
+                        check=route_check,require_stable=True,allow_color_compromise=True)
             except (ValueError,TypeError,KeyError):
                 return None
             route_check()
             # Color-family boundaries do not invalidate a supported route.
             # Optional trials still require a reliable return to the observed
             # checkpoint; compare their rescored quality in the service.
-            if current.get('protect_observed_result') and (ready is None or not _protected_route(ready,_budget)):
+            protected=(_protected_route(ready,_budget) if ready is not None else False)
+            if current.get('user_selected_route') and ready is not None:
+                stability=ready.get('route_stability') or {}
+                protected=bool(_budget.get('allowed') and stability.get('passed') and stability.get('samples_complete',True))
+            if current.get('protect_observed_result') and not protected:
                 return None
+            if ready is not None and current.get('user_selected_route'):
+                ready.update(user_selected_route=True,protect_observed_result=True)
             return ready
         adapter.rebind=rebind
         def replan(actual,current,active_rules):
@@ -299,7 +403,11 @@ def choice_current(owner, report, candidate, rules, **_context):
             raise RuntimeError('Prepared route reference changed')
         budget=reposition_budget(row,time.monotonic(),deadline,adapter.context().board,
                                  markers=adapter.context().markers)
-        if not _protected_route(row,budget):raise RuntimeError('Protected route is no longer available')
+        valid=_protected_route(row,budget)
+        if row.get('user_selected_route'):
+            stability=row.get('route_stability') or {}
+            valid=bool(budget.get('allowed') and stability.get('passed') and stability.get('samples_complete',True))
+        if not valid:raise RuntimeError('Protected route is no longer available')
     elif runtime.get('atlas') is not None:
         row,budget=bind_candidate(row,runtime['atlas'],runtime['capture_offset'],
             adapter.context().board,adapter.context().markers,rules,time.monotonic(),deadline,
@@ -309,7 +417,7 @@ def choice_current(owner, report, candidate, rules, **_context):
         owner.event('atlas_prediction_updated',candidate_id=row['id'],
             candidate=row,colors=row['colors'],deltas=row['deltas'],prediction_pose_source=row['prediction_pose_source'])
     batch=CandidateBatch([row],adapter.context(),deadline)
-    result=_execute_recorded(owner,report,row,rules,batch,reference)
+    result=_execute_recorded(owner,report,row,rules,batch,reference,return_guard=_context.get('return_guard'))
     if result.get('actual_pose') is not None:
         result['actual_pose']=(homogeneous(result['actual_pose'])@homogeneous(report['actual_pose']))[:2].tolist()
     report['pose_reference']=adapter.verified_frame
@@ -323,4 +431,5 @@ def callbacks(capture_dir, entry=None, strategy='grid', entry_size=None):
         acquire=lambda owner,rules,**ctx:acquire_current(
             owner,rules,capture_dir,entry,strategy=strategy,
             entry_size=entry_size,**ctx),
-        build=build_current,default=default_current,choice=choice_current,prepare=prepare_choice)
+        build=build_current,default=default_current,choice=choice_current,prepare=prepare_choice,
+        observe_current=observe_current)

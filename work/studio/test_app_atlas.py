@@ -9,6 +9,16 @@ import app
 
 
 class AppAtlasWiringTests(unittest.TestCase):
+    def test_main_window_result_detail_marks_verified_compromise(self):
+        window=SimpleNamespace(cards=[SimpleNamespace(best_label=MagicMock())],
+                               set_detail=MagicMock(),best_summary=None)
+        row=dict(outcome='compromise',maximum=12.,average=12.,regions=[
+            dict(delta=12.,color='#888888')])
+        app.App.display_best(window,row)
+        detail=window.set_detail.call_args.args[0]
+        self.assertIn('妥协方案（未达目标）',detail)
+        self.assertIn('最大色差 ΔE 12.00',detail)
+
     def test_stop_dismisses_completed_overlay_without_waiting_for_another_finished_event(self):
         window=SimpleNamespace(runner=None,busy=False,status=MagicMock(),overlay=MagicMock())
         app.App.stop(window)

@@ -106,6 +106,64 @@ class OcrSetupTests(unittest.TestCase):
         with patch('vision.ocr',return_value='420'):
             self.assertEqual(vision.timer_seconds(image,unit=81,previous=20),20)
 
+    def test_timer_ocr_accepts_localized_suffix_and_unicode_digits(self):
+        image=np.zeros((960,1280,3),np.uint8)
+        for text in ('120秒', '120 초', '120 seconds', '１２０秒'):
+            with self.subTest(text=text), patch('vision.ocr',return_value=text):
+                self.assertEqual(vision.timer_seconds(image,unit=81),120)
+
+    def test_timer_ocr_prefers_focused_digits_over_progress_bar(self):
+        image=np.zeros((960,1280,3),np.uint8)
+        # The first two crops isolate the timer digits; later fallback crops
+        # include the progress bar and return a plausible but wrong value.
+        def reading(crop,*args,**kwargs):
+            return '108' if crop.shape[1] <= 112 else '66'
+        with patch('vision.ocr',side_effect=reading):
+            self.assertEqual(vision.timer_seconds(image),108)
+            self.assertEqual(vision.timer_seconds(image,previous=20),108)
+
+    def test_timer_ocr_recovers_complete_high_value_when_focus_crop_is_clipped(self):
+        image=np.zeros((960,1280,3),np.uint8)
+        # Reproduce the observed 119 frame: the compact crop is clipped and
+        # reads 41, while the wider timer crops expose the complete value.
+        def reading(crop,*args,**kwargs):
+            if crop.shape[1] <= 100:return '41'
+            if crop.shape[1] <= 150:return '2119'
+            return '119'
+        with patch('vision.ocr',side_effect=reading):
+            self.assertEqual(vision.timer_seconds(image),119)
+            self.assertEqual(vision.timer_seconds(image,previous=41),119)
+
+    def test_detect_timer_track_returns_dynamic_right_edge(self):
+        image=np.zeros((960,1280,3),np.uint8)
+        image[23:30,94:812]=255
+        track=vision.detect_timer_track(image,unit=81)
+        self.assertIsNotNone(track)
+        self.assertLessEqual(track['track'][0],95)
+        self.assertEqual(track['track'][1],23)
+        self.assertGreaterEqual(track['track'][2],810)
+        self.assertLess(track['timer_right'],94)
+        self.assertGreater(track['confidence'],.8)
+
+    def test_detect_timer_track_handles_coloured_bar(self):
+        image=np.zeros((960,1280,3),np.uint8)
+        # Cyan/green HUD bars can be bright in HSV while their luminance is
+        # lower than white text; the detector must not require pure white.
+        image[20:29,150:700]=[40,220,180]
+        track=vision.locate_timer_track(image,unit=81)
+        self.assertIsNotNone(track)
+        self.assertLessEqual(track['track'][0],151)
+        self.assertGreaterEqual(track['track'][2],699)
+
+    def test_detect_timer_track_without_bar_is_safe(self):
+        image=np.zeros((960,1280,3),np.uint8)
+        self.assertIsNone(vision.detect_timer_track(image,unit=81))
+
+    def test_detect_timer_track_ignores_short_bright_text(self):
+        image=np.zeros((960,1280,3),np.uint8)
+        image[20:31,25:90]=255
+        self.assertIsNone(vision.detect_timer_track(image,unit=81))
+
     def test_unexpected_ocr_runtime_error_is_not_silently_swallowed(self):
         vision.OCR_AVAILABLE=True
         with patch('vision._ocr_text',side_effect=RuntimeError('unexpected bug')):

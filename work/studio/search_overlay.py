@@ -4,7 +4,7 @@ from ctypes import wintypes as W
 import customtkinter as ct
 import time
 from ui_settings import read_settings,save_settings
-from ui_progress import progress_text
+from ui_progress import progress_text,single_result_presentation
 from ui_performance import DeliberateSlider
 from i18n import tr,on_language
 from display_geometry import work_area,clamp_position
@@ -334,11 +334,29 @@ class SearchOverlay(ct.CTkToplevel):
             if color is None or delta is None:continue
             ct.CTkLabel(self.results,text=tr(f"区域 {i+1} · {color} · ΔE {delta:.2f}"),
                         anchor='w').pack(fill='x',padx=8,pady=4)
+    def show_single_result(self,data):
+        self.clear_candidates();self.phase='verified'
+        self.results.grid(row=4,column=0,padx=2,pady=(0,10),sticky='ew')
+        self._has_results=True;self._collapsed=False;self.copy.grid();self.activity.grid()
+        self.collapse.configure(text='收起');self.resize_surface()
+        title,body=single_result_presentation(data)
+        self.render(title,body)
+        for i,(color,delta) in enumerate(zip(data.get('actual_colors') or [None]*3,
+                                           data.get('actual_deltas') or [None]*3)):
+            if not self.rules[i]['enabled']:continue
+            text=f"区域 {i+1}\n"+tr('当前颜色  ')+(color or tr('读取失败'))
+            if delta is not None:text+=f" · ΔE {delta:.2f}"
+            ct.CTkLabel(self.results,text=tr(text),justify='left',anchor='w').pack(fill='x',padx=8,pady=8)
     def handle(self,kind,data):
         if getattr(self,'_dismissed',False):return
-        if kind=='atlas_progress':
+        if kind in ('atlas_progress','single_progress'):
             self.phase='waiting' if data.get('stage')=='waiting' else 'computing'
             self.update_activity(data);self.render(*progress_text(data));return
+        if kind=='single_action':
+            self.phase='computing';self.update_activity({'stage':'restore' if data.get('restoring') else 'position'})
+            self.render(*progress_text({'stage':'restore' if data.get('restoring') else 'position'}));return
+        if kind=='single_verified':
+            self.activity.stop();self.activity.set(1);self.show_single_result(data);return
         if kind=='atlas_command':
             self.phase='positioning';self.update_activity({'stage':'position'})
             self.render('移动到目标位置',f"步骤 {data.get('step',1)} · 根据图像实测位移校正；F9随时停止。");return

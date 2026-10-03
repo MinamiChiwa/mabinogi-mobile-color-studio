@@ -168,5 +168,41 @@ class UiLanguageTests(unittest.TestCase):
             self.assertEqual(str(i18n.tr(body)),'Rechecking the countdown reading')
         finally:i18n.set_language(original)
 
+    def test_single_region_compromise_is_explicit_and_translated(self):
+        from ui_progress import single_result_presentation
+        result=dict(verified=True,accepted=False,best_verified=True,best_current=True,
+                    outcome='compromise')
+        title,body=single_result_presentation(result)
+        self.assertIn('妥协方案',title)
+        self.assertIn('正常结束状态',body)
+        original=i18n.language
+        try:
+            for language in ('English','繁體中文'):
+                i18n.set_language(language)
+                translated_title=str(i18n.tr(title));translated_body=str(i18n.tr(body))
+                self.assertNotIn('妥协方案',translated_title if language=='English' else '')
+                self.assertNotIn('正常结束状态',translated_body if language=='English' else '')
+                if language=='English':
+                    self.assertIn('Compromise',translated_title)
+                    self.assertIn('normal outcome',translated_body)
+                else:
+                    self.assertIn('折衷',translated_title)
+                    self.assertIn('正常結束狀態',translated_body)
+        finally:i18n.set_language(original)
+
+    def test_single_region_unrestored_best_is_separate_from_normal_compromise(self):
+        from ui_progress import single_result_presentation
+        title,body=single_result_presentation(dict(verified=True,accepted=False,
+            best_verified=True,best_current=False,outcome='compromise'))
+        self.assertIn('妥协方案',title)
+        self.assertIn('未能恢复',body)
+
+    def test_single_region_unverified_is_not_labeled_as_compromise(self):
+        from ui_progress import single_result_presentation
+        title,body=single_result_presentation(dict(verified=False,accepted=False,
+            outcome='unverified'))
+        self.assertNotIn('妥协',title)
+        self.assertIn('未完成复核',body)
+
 
 if __name__=='__main__':unittest.main()

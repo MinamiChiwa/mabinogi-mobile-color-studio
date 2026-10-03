@@ -98,8 +98,8 @@ def build_preview(target,tolerance):
     return pixels,overview(pixels)
 
 def build_runner(emit,folder,strategy='atlas',entry=None,entry_size=None):
-    # Search always uses this round's stitched atlas. Legacy remains available
-    # only for explicit diagnostics and recovery operations in Runner.launch.
+    # Runner uses current-board search for one region and the shared atlas
+    # service for multiple regions. Legacy is reserved for diagnostics.
     if strategy not in ('atlas','legacy'):raise ValueError('Unknown search strategy')
     service=AtlasService(atlas_callbacks(Path(folder)/'atlas_capture',strategy='grid'))
     return Runner(emit,folder,atlas_runner=service.run)
@@ -399,7 +399,13 @@ class App(ct.CTk):
             text=f'{color or "—"} · ΔE {delta:.2f}' if delta is not None else f'{color or "—"} · 未参与匹配'
             c.best_label.configure(text=text,fg_color=color or '#28364A',text_color='#17202B' if color and sum(rgb(color))>430 else 'white')
         if row['maximum'] is not None:
-            self.set_detail(f'{"本次结果" if row.get("outcome") else "最佳组合"} · 最大色差 ΔE {row["maximum"]:.2f} / 平均 {row["average"]:.2f} · 色差越小越接近目标')
+            if row.get('outcome')=='compromise':
+                prefix='妥协方案（未达目标） · 本次结果'
+            else:
+                prefix='本次结果' if row.get('outcome') else '最佳组合'
+            self.set_detail(tr(prefix)+tr(' · 最大色差 ΔE ')+
+                            f'{row["maximum"]:.2f}'+tr(' / 平均 ')+
+                            f'{row["average"]:.2f}'+tr(' · 色差越小越接近目标'))
     def set_detail(self,text):
         self.detail.configure(text=text)
         if text:self.detail.grid()
@@ -539,10 +545,25 @@ class App(ct.CTk):
             elif k=='waiting':
                 self.status.configure(text=tr('等待染色界面') if d.get('seconds') is None else tr('等待染色界面 · 剩余 ')+str(d['seconds'])+tr(' 秒'))
                 self.set_detail(tr(d['message']))
-            elif k=='atlas_progress':
+            elif k in ('atlas_progress','single_progress'):
                 from ui_progress import progress_text
                 title,body=progress_text(d)
                 self.status.configure(text=tr(title));self.set_detail(tr(body))
+            elif k=='single_verified':
+                for i,(card,color) in enumerate(zip(self.cards,d.get('actual_colors') or [None]*3)):
+                    disabled=self.active_rules is not None and not self.active_rules[i]['enabled']
+                    card.current.configure(text='当前颜色  '+(color or ('未参与匹配' if disabled else '读取失败')))
+                from ui_progress import single_result_presentation
+                title,detail=single_result_presentation(d)
+                self.status.configure(text=tr(title))
+                self.set_detail(tr(detail))
+                if d.get('verified') and self.active_rules:
+                    try:
+                        row=save_result(DATA/'history.json',d['actual_colors'],self.active_rules,
+                            'matched' if d.get('accepted') else 'compromise',
+                            d.get('restored'),d.get('best_actual_colors'))
+                        self.history=read_history(DATA/'history.json');self.display_best(row)
+                    except OSError:self.set_detail(tr('本轮结果未能保存，请检查程序文件夹是否可写。'))
             elif k=='atlas_status':
                 self.status.configure(text=tr('自动染色'))
                 self.set_detail(tr(d.get('message','')))

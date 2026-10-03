@@ -84,6 +84,25 @@ class CompromiseRecoveryTests(unittest.TestCase):
             result=self.build([same,closer],ConstantAtlas())
         self.assertEqual([r['id'] for r in result['candidates']],[1,0])
 
+    def test_translation_alternative_keeps_independently_bound_transform_routes(self):
+        transform=dict(self.row,id=0,angle=8,scale=.9,dx=20,dy=0,
+                       family_consistent=True,accepted=True)
+        translation=dict(self.row,id=1,angle=0,scale=1,dx=8,dy=0,
+                         family_consistent=True,accepted=False,colors=['#EEEEEE']*3)
+        def binding(candidate,*args,**kwargs):
+            row=dict(candidate,
+                     route_stability=dict(quality_preferred=candidate.get('angle',0)==0),
+                     execution_budget=dict(actions=dict(rotate=int(bool(candidate.get('angle',0))),
+                                                        wheel=0,drag=1)))
+            return row,dict(allowed=True,needed=4.,actions=row['execution_budget']['actions'])
+        with patch('atlas_live_adapter.bind_candidate',side_effect=binding):
+            result=self.build([transform,translation],ConstantAtlas())
+        self.assertTrue(result['candidates'])
+        self.assertIn(0,[row['id'] for row in result['candidates']])
+        self.assertIn(1,[row['id'] for row in result['candidates']])
+        self.assertFalse(result['search_diagnostics']['transform_routes_suppressed'])
+        self.assertGreater(result['search_diagnostics']['stable_translation_count'],0)
+
     def test_rescoring_drops_old_neighbourhood_and_route_claims(self):
         previous=dict(self.row,landing_family_maximum=0,landing_family_safe=True,
             route_stability=dict(passed=True),cross_family_fallback=True,landing_uncertain=True)

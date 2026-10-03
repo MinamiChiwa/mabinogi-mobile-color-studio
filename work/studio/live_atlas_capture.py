@@ -19,11 +19,111 @@ import numpy as np
 from PIL import Image, ImageGrab
 from platform_win import Game, Interrupted, u
 from window_target import WindowUnavailable, MultipleWindows
-from vision import recognize, green_buttons, measure_board_motion, configure_ocr
+from vision import (recognize, green_buttons, measure_board_motion, configure_ocr,
+                    timer_bar_signal)
 from atlas_masks import board_texture_mask
 from workflow_budget import WorkflowBudget
 from atlas_capture_worker import CaptureWorker
 from scan_settling import ScanSettlingObserver
+from session_store import ACTIVE_MARKER
+
+
+def _validated_long_countdown(observations):
+    """Return a later full reading that safely corrects a clipped first one.
+
+    A short first OCR result (``19`` for a visible ``119``) is never replaced
+    by one coincidental high reading.  Before input starts we require two
+    independent, complete three-digit readings whose decrease follows elapsed
+    time and whose progress-bar endpoint does not grow.  This helper
+    deliberately returns ``None`` when the bar is unavailable: the conservative
+    initial deadline is safer than inferring extra time from OCR alone.
+    """
+    valid=[row for row in observations if row and row[0] is not None and
+           getattr(row[0],'seconds',None) is not None]
+    if not valid or not 1<=int(valid[0][0].seconds)<=30:return None
+    rows=[row for row in valid[1:] if 100<=int(row[0].seconds)<=180]
+    if len(rows)<2:return None
+    # Distinct captures are required; callers already append one row per new
+    # frame, but retaining this check prevents duplicated test/OCR rows from
+    # becoming deadline evidence.
+    if len({float(row[1]) for row in rows})<2:return None
+    for row in rows:
+        elapsed=max(0.,float(row[1])-float(valid[0][1]))
+        expected=int(valid[0][0].seconds)+100-elapsed
+        if abs(float(row[0].seconds)-expected)>2.0:return None
+    previous=rows[0]
+    for row in rows[1:]:
+        before,after=previous,row
+        dt=max(0.,float(after[1])-float(before[1]))
+        drop=int(before[0].seconds)-int(after[0].seconds)
+        # OCR and capture each have small scheduling jitter.  Reject both an
+        # increase and a jump that cannot be explained by elapsed time.
+        tolerance=max(2.0,dt*.75+1.0)
+        if drop<0 or abs(float(drop)-dt)>tolerance:return None
+        previous=row
+    bars=[row[3].get('fill_end') if len(row)>3 and row[3] else None
+          for row in [valid[0],*rows]]
+    if any(value is None for value in bars):return None
+    # The filled bar may jitter by a few pixels, but it must not grow while
+    # the timer is counting down.
+    if any(float(current)-float(before)>3.0
+           for before,current in zip(bars,bars[1:])):return None
+    return rows[-1]
+
+
+def _choose_countdown_observation(observations):
+    """Choose a timer reading using independent frames and elapsed time.
+
+    OCR variants from one frame are correlated.  A short sequence of frames
+    is therefore used as the confidence boundary: ordinary readings should
+    decrease by roughly the elapsed seconds, while a large high/low conflict
+    is treated as a clipped OCR result and keeps the complete high reading.
+    A corrected first-frame value is returned only with independent temporal
+    and bar evidence; the caller may replace its provisional deadline before
+    input starts. All ordinary readings keep the initial hard deadline.
+    """
+    valid=[row for row in observations if row and row[0] is not None and
+           getattr(row[0],'seconds',None) is not None]
+    if not valid:return None
+    anchor=valid[0];anchor_scene,anchor_at=anchor[:2]
+    values=[int(row[0].seconds) for row in valid]
+    maximum=max(values);minimum=min(values)
+    # OCR may clip the leading digit on the first frame (for example ``19``
+    # while the actual timer is ``119``).  Treat a later, repeated three-digit
+    # reading as the authoritative anchor. The entry-only caller may then
+    # replace the provisional clipped deadline, bounded by the missing hundred
+    # seconds and both complete readings.
+    corrected=_validated_long_countdown(observations)
+    if corrected is not None:
+        return corrected
+    # With a short first frame, a single later three-digit reading is not
+    # enough evidence to extend the deadline.  Keep the original anchor until
+    # the caller has collected a second confirming frame.
+    if int(anchor_scene.seconds)<100 and maximum>=100:
+        return anchor
+    if maximum>=90 and maximum-minimum>=30:
+        # A 119->41 style result is a crop/OCR conflict, not a real one
+        # second countdown. Prefer the complete high reading; the deadline
+        # calculation below still clamps to the anchor and cannot add time.
+        return max(valid,key=lambda row:int(row[0].seconds))
+    scored=[]
+    for row in valid:
+        scene,at=row[:2]
+        elapsed=max(0.,float(at-anchor_at))
+        expected=max(1.,float(anchor_scene.seconds)-elapsed)
+        value=float(scene.seconds)
+        monotonic_penalty=0. if value<=float(anchor_scene.seconds)+1 else 120.
+        bar_penalty=0.
+        if len(row)>3 and row[3] and anchor[3]:
+            current_end=row[3].get('fill_end');anchor_end=anchor[3].get('fill_end')
+            if current_end is not None and anchor_end is not None:
+                # The filled bar should contract as time passes.
+                bar_penalty=max(0.,float(current_end)-float(anchor_end)-3.)
+        scored.append((abs(value-expected)+monotonic_penalty+bar_penalty*2.,row))
+    # When two readings fit the elapsed-time model equally well, prefer the
+    # later frame.  It carries the freshest countdown while preserving the
+    # anchor whenever the bar signal contradicts the apparent increase.
+    return min(scored,key=lambda item:(item[0],-float(item[1][1])))[1]
 
 
 def sampling_frame_is_safe(scene, shape, margin=8):
@@ -76,6 +176,63 @@ class ZoomMotionTracker:
 
     def clear(self):
         self.features.clear();self.mask=None;self.geometry=None
+
+
+def summarize_zoom_calibration(measurements, current_scale=None):
+    """Summarize one-notch directional zoom measurements.
+
+    ``measurements`` contains the direct registration result for each wheel
+    notch.  Keep the fitted affine matrix intact: callers that need to replay
+    a pose can use it instead of reconstructing a transform from a rounded
+    scalar.  The returned log steps are therefore derived from one notch,
+    rather than from a multi-notch burst divided by its step count.
+    """
+    by_direction={int(row.get('steps', 0)): row.get('motion')
+                  for row in measurements
+                  if isinstance(row, dict)}
+    down=by_direction.get(-1)
+    up=by_direction.get(1)
+    def measured(motion):
+        try:
+            if not isinstance(motion,dict):return None
+            matrix=np.asarray(motion.get('matrix'),float)
+            if matrix.shape!=(2,3) or not np.isfinite(matrix).all():return None
+            linear=matrix[:,:2]
+            if not np.allclose(linear,[[linear[0,0],-linear[1,0]],
+                                       [linear[1,0],linear[0,0]]],atol=1e-6):return None
+            scale=float(np.hypot(linear[0,0],linear[1,0]))
+            angle=float(np.degrees(np.arctan2(linear[1,0],linear[0,0])))
+            return dict(scale=scale,angle=angle,matrix=matrix)
+        except (TypeError, ValueError):
+            return None
+    down_measurement=measured(down);up_measurement=measured(up)
+    passed=bool(down_measurement and up_measurement and
+                0<down_measurement['scale']<.998 and up_measurement['scale']>1.002 and
+                abs(down_measurement['angle'])<.25 and
+                abs(up_measurement['angle'])<.25)
+    result=dict(passed=passed, measurements=list(measurements))
+    if not passed:
+        result.update(down_log_step=None, up_log_step=None,
+                      current_scale=None)
+        return result
+    # These are the observed one-notch log responses.  They are deliberately
+    # not extrapolated from a +/-4 burst.
+    # The scalar in measure_board_motion is rounded for diagnostics.  Using
+    # it as the detent spacing magnifies that rounding over long routes.
+    # Derive the planning values from the retained affine matrices instead.
+    down_scale=down_measurement['scale'];up_scale=up_measurement['scale']
+    net_matrix=(np.vstack((up_measurement['matrix'],[0.,0.,1.]))@
+                np.vstack((down_measurement['matrix'],[0.,0.,1.])))[:2]
+    net_scale=float(np.hypot(net_matrix[0,0],net_matrix[1,0]))
+    result.update(
+        down_log_step=abs(float(np.log(down_scale))),
+        up_log_step=abs(float(np.log(up_scale))),
+        down_scale=down_scale,up_scale=up_scale,
+        scale_source='measured_affine_matrix',net_matrix=net_matrix.tolist(),
+        current_scale=None if current_scale is None else float(current_scale)*net_scale,
+        net_scale=net_scale,
+    )
+    return result
 
 
 class CaptureGame(Game):
@@ -268,19 +425,202 @@ def preflight(folder):
     return result
 
 
-def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=False,entry_size=None,emit=None,row_stagger=0.,response_protocol='baseline',settling_probes=False):
+def open_capture_game(stop, target=None, activate=False, *, log=lambda *a,**k:None, emit=None):
+    """Wait for a game window without sending dye-entry input."""
+    g=None
+    next_window_notice=0.
+    while g is None:
+        if stop.is_set() or u.GetAsyncKeyState(0x78)&0x8000:
+            stop.set();raise Interrupted('已停止，鼠标已释放。')
+        try:g=CaptureGame(stop,target=target)
+        except WindowUnavailable as exc:
+            # Auto-detection may start before the game. Keep the session
+            # cancellable while waiting; an ambiguous selection needs an
+            # explicit choice and cannot resolve itself by waiting.
+            if target is not None or isinstance(exc,MultipleWindows):raise
+            if time.monotonic()>=next_window_notice:
+                log('waiting_window',message=str(exc))
+                if emit:emit('waiting',message=str(exc),seconds=None)
+                next_window_notice=time.monotonic()+5
+            if stop.wait(.5):raise Interrupted('已停止，鼠标已释放。')
+    if activate:
+        try:g.focus()
+        except RuntimeError as exc:
+            message='未能自动切回游戏。请点击游戏窗口，程序会继续等待识别，无需再次开始。'
+            log('activation',message=message,detail=str(exc))
+            if emit:emit('activation',message=message)
+    return g
+
+
+def wait_for_dye_board(g, stop, *, started=None, log=lambda *a,**k:None,
+                      snap=None, emit=None, keep_active=lambda:None,
+                      verify_countdown=True, progress_stage="zoom"):
+    """Shared read-only entry and temporal countdown confirmation. No zoom."""
+    started=time.monotonic() if started is None else started
+    if snap is None:snap=lambda _name,_scene:g.capture()
+    log('waiting',message='等待用户手动进入倒计时染色界面')
+    scene=None;im=None
+    while True:
+        keep_active()
+        # Launching the batch file temporarily focuses Explorer/console.
+        # Waiting is read-only, so tolerate that focus loss until the user
+        # brings the game forward; input guards remain strict after ready.
+        if stop.is_set() or u.GetAsyncKeyState(0x78)&0x8000:
+            stop.set(); raise Interrupted('已停止，鼠标已释放。')
+        if stop.wait(.25):raise Interrupted('已停止，鼠标已释放。')
+        try:
+            waiting_frame_at=time.monotonic()
+            im=g.capture_waiting()
+            if im is None:continue
+            recognition_started=time.monotonic()
+            candidate=recognize(im,with_ocr=True,read_colors=False)
+            recognition_seconds=time.monotonic()-recognition_started
+            if candidate.seconds is not None:
+                scene=candidate;break
+        except WindowUnavailable:
+            if g.manual_target is not None:raise
+            continue
+        except (ValueError,RuntimeError):
+            continue
+    ready_at=time.monotonic()
+    initial_game_deadline=waiting_frame_at+scene.seconds
+    waiting_image=im
+    log('ready',board=scene.board,markers=scene.markers,cards=scene.cards,
+        recognition_seconds=recognition_seconds,
+        frame_elapsed_seconds=waiting_frame_at-started)
+    original_at=time.monotonic()
+    im=snap('original',scene)
+    if verify_countdown:
+        timed_scene=None
+        timer_source='temporal'
+        timer_attempts=4
+        timer_recognition_seconds=0.
+        # Pair the first OCR value with the frame/timestamp that produced it;
+        # the later saved "original" frame may already be several seconds
+        # newer on a slower machine.
+        timer_observations=[(scene,waiting_frame_at,waiting_image,
+                             timer_bar_signal(waiting_image))]
+        # Every recheck
+        # must capture a new frame; re-running OCR on ``im`` would only
+        # duplicate the same pixels and could falsely satisfy the
+        # two-observation confidence boundary (the source of the old
+        # 119 -> 41 regression).
+        for attempt in range(1,timer_attempts+1):
+            if stop.wait(.25):raise Interrupted('已停止，鼠标已释放。')
+            g.check()
+            original_at=time.monotonic()
+            im=snap('timer_recheck_%02d'%attempt,scene)
+            # Snapshot encoding/IO can be slower than capture. Use the time
+            # before capturing, so a delayed writer cannot grant extra input.
+            observed_at=original_at
+            recognition_started=time.monotonic()
+            try:observed_scene=recognize(im,with_ocr=True,previous=scene,read_colors=False)
+            except (ValueError,RuntimeError):observed_scene=None
+            timer_recognition_seconds+=time.monotonic()-recognition_started
+            if observed_scene is not None and observed_scene.seconds is not None:
+                timer_observations.append((observed_scene,observed_at,im,
+                                           timer_bar_signal(im)))
+            valid_count=sum(row[0] is not None and row[0].seconds is not None
+                            for row in timer_observations)
+            log('timer_recheck',attempt=attempt,attempts=timer_attempts,
+                recognized=bool(observed_scene is not None and
+                                observed_scene.seconds is not None),
+                seconds=None if observed_scene is None else observed_scene.seconds,
+                valid_observations=valid_count)
+            # Two independent frames are the normal confidence boundary.  A
+            # suspicious short first reading (for example 19) needs two later
+            # complete readings with temporal/bar evidence before it can be
+            # replaced; one coincidental 119 must keep the conservative short
+            # deadline.
+            suspicious_short=(scene.seconds is not None and 1<=int(scene.seconds)<=30)
+            high_conflict=any(int(row[0].seconds)>=100 for row in timer_observations[1:])
+            if valid_count>=2 and not (suspicious_short and high_conflict):break
+            if suspicious_short and _validated_long_countdown(timer_observations) is not None:
+                break
+            if emit:emit('atlas_progress',stage=progress_stage,message='正在复核倒计时识别')
+        selected=_choose_countdown_observation(timer_observations)
+        if selected is None or selected[0] is None or selected[0].seconds is None:
+            # The waiting frame already provided a valid countdown and
+            # established the hard deadline. A later frame may hide the
+            # timer behind a transient animation or produce an OCR miss;
+            # that is not a reason to abort the session before input.
+            # Keep the conservative initial deadline and continue only
+            # after the normal CaptureGame guard has passed.
+            timed_scene=scene
+            timer_source='initial'
+            log('timer_recheck_fallback',seconds=scene.seconds,
+                message='倒计时复核暂时不可用，沿用首次识别结果；未延长安全截止时间。')
+            if emit:
+                emit('atlas_progress',stage=progress_stage,
+                     message='倒计时复核暂时不可用，沿用首次识别结果')
+            game_deadline=initial_game_deadline
+        else:
+            timed_scene,selected_at=selected[:2]
+            corrected=_validated_long_countdown(timer_observations)
+            if corrected is not None:
+                # No game input has been issued in this read-only entry
+                # helper. Replace a proven clipped first deadline only here,
+                # with the earlier bound of every complete frame and the
+                # recovered first value. Later input deadlines never extend.
+                complete=[row for row in timer_observations
+                          if row[0] is not None and int(row[0].seconds)>=100]
+                game_deadline=min(initial_game_deadline+100,
+                    *(float(row[1])+int(row[0].seconds) for row in complete))
+                timer_source='corrected_clipped_first_frame'
+            else:
+                game_deadline=min(initial_game_deadline,selected_at+timed_scene.seconds)
+        scene=timed_scene
+        if game_deadline is None:
+            game_deadline=initial_game_deadline
+        budget=WorkflowBudget(ready_at,game_deadline)
+        g.until=budget.deadline
+        g.stage_until=budget.sampling_deadline
+        g.check()
+        log('timer',seconds=timed_scene.seconds,source=timer_source,
+            recognition_seconds=timer_recognition_seconds,attempts=attempt,
+            deadline_elapsed_seconds=game_deadline-started,
+            workflow_deadline_elapsed_seconds=budget.workflow_deadline-started,
+            effective_deadline_elapsed_seconds=budget.deadline-started,
+            sampling_deadline_elapsed_seconds=budget.sampling_deadline-started,
+            workflow_seconds=60)
+    else:
+        game_deadline=initial_game_deadline
+        budget=WorkflowBudget(ready_at,game_deadline)
+    return dict(scene=scene,image=im,game_deadline=game_deadline,
+                ready_at=ready_at,budget=budget)
+
+
+def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=False,entry_size=None,emit=None,row_stagger=0.,response_protocol='baseline',settling_probes=False,probe_cycles=3,probe_anchors=None):
     if not np.isfinite(row_stagger) or not 0 <= row_stagger <= .1:
         raise ValueError('row_stagger must be between 0 and 0.1')
-    if response_protocol not in ('baseline','rotation_compare') or (response_protocol!='baseline' and strategy!='response'):
+    if (response_protocol not in ('baseline','rotation_compare','zoom_reversibility') or
+            (response_protocol!='baseline' and strategy!='response')):
         raise ValueError('Comparison protocol requires response diagnostics')
+    if isinstance(probe_cycles, bool) or int(probe_cycles) != probe_cycles or int(probe_cycles) < 1:
+        raise ValueError('Probe cycles must be a positive integer')
+    probe_cycles = int(probe_cycles)
     stop=stop or threading.Event();g=None
     folder.mkdir(parents=True,exist_ok=False)
+    active_marker=folder/ACTIVE_MARKER
+    try:active_marker.write_text('active',encoding='ascii')
+    except OSError:active_marker=None
     started=time.monotonic();records=[];game_deadline=None;session_scene=None;final_image=None
     input_started=False;worker=None
+    active_touched=started
+    def keep_active(force=False):
+        nonlocal active_touched
+        if active_marker is None:return
+        now=time.monotonic()
+        if not force and now-active_touched<30:return
+        try:
+            active_marker.touch()
+            active_touched=now
+        except OSError:pass
     def log(kind,**data):
         row=dict(elapsed_seconds=time.monotonic()-started,kind=kind,**data)
         records.append(row)
         (folder/'log.json').write_text(json.dumps(records,indent=2),encoding='utf-8')
+        keep_active(force=True)
         if kind=='waiting':
             try:print(data['message'],flush=True)
             except (UnicodeError,OSError,ValueError):pass  # Optional console output.
@@ -320,108 +660,15 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
         # coordinates must never bypass the OCR precondition.
         if strategy in ('grid','probe','response'):
             configure_ocr(strict=True)
-        next_window_notice=0.
-        while g is None:
-            if stop.is_set() or u.GetAsyncKeyState(0x78)&0x8000:
-                stop.set();raise Interrupted('已停止，鼠标已释放。')
-            try:g=CaptureGame(stop,target=target)
-            except WindowUnavailable as exc:
-                # Auto-detection may start before the game. Keep the session
-                # cancellable while waiting; an ambiguous selection needs an
-                # explicit choice and cannot resolve itself by waiting.
-                if target is not None or isinstance(exc,MultipleWindows):raise
-                if time.monotonic()>=next_window_notice:
-                    log('waiting_window',message=str(exc))
-                    if emit:emit('waiting',message=str(exc),seconds=None)
-                    next_window_notice=time.monotonic()+5
-                if stop.wait(.5):raise Interrupted('已停止，鼠标已释放。')
-        if activate:
-            try:g.focus()
-            except RuntimeError as exc:
-                message='未能自动切回游戏。请点击游戏窗口，程序会继续等待识别，无需再次开始。'
-                log('activation',message=message,detail=str(exc))
-                if emit:emit('activation',message=message)
+        g=open_capture_game(stop,target,activate,log=log,emit=emit)
         if entry is not None or entry_size is not None:
             log('legacy_entry_ignored',message='入口坐标参数已忽略；等待用户手动进入倒计时染色界面')
-        log('waiting',message='等待用户手动进入倒计时染色界面')
-        scene=None;im=None
-        while True:
-            # Launching the batch file temporarily focuses Explorer/console.
-            # Waiting is read-only, so tolerate that focus loss until the user
-            # brings the game forward; input guards remain strict after ready.
-            if stop.is_set() or u.GetAsyncKeyState(0x78)&0x8000:
-                stop.set(); raise Interrupted('已停止，鼠标已释放。')
-            if stop.wait(.25):raise Interrupted('已停止，鼠标已释放。')
-            try:
-                waiting_frame_at=time.monotonic()
-                im=g.capture_waiting()
-                if im is None:continue
-                recognition_started=time.monotonic()
-                candidate=recognize(im,with_ocr=True,read_colors=False)
-                recognition_seconds=time.monotonic()-recognition_started
-                if candidate.seconds is not None:
-                    scene=candidate;break
-            except WindowUnavailable:
-                if g.manual_target is not None:raise
-                continue
-            except (ValueError,RuntimeError):
-                continue
-        ready_at=time.monotonic()
-        initial_game_deadline=waiting_frame_at+scene.seconds
-        log('ready',board=scene.board,markers=scene.markers,cards=scene.cards,
-            recognition_seconds=recognition_seconds,
-            frame_elapsed_seconds=waiting_frame_at-started)
-        original_at=time.monotonic()
-        im=snap('original',scene)
-        if strategy in ('grid','probe','response'):
-            timed_scene=None
-            timer_source='ocr'
-            timer_attempts=4
-            timer_recognition_seconds=0.
-            for attempt in range(timer_attempts):
-                if attempt:
-                    if stop.wait(.25):raise Interrupted('已停止，鼠标已释放。')
-                    g.check()
-                    original_at=time.monotonic()
-                    im=snap('timer_recheck_%02d'%attempt,scene)
-                recognition_started=time.monotonic()
-                try:timed_scene=recognize(im,with_ocr=True,previous=scene,read_colors=False)
-                except (ValueError,RuntimeError):timed_scene=None
-                timer_recognition_seconds+=time.monotonic()-recognition_started
-                if timed_scene is not None and timed_scene.seconds is not None:break
-                log('timer_recheck',attempt=attempt+1,attempts=timer_attempts,recognized=False)
-                if emit:emit('atlas_progress',stage='zoom',message='正在复核倒计时识别')
-            if timed_scene is None or timed_scene.seconds is None:
-                # The waiting frame already provided a valid countdown and
-                # established the hard deadline. A later frame may hide the
-                # timer behind a transient animation or produce an OCR miss;
-                # that is not a reason to abort the session before input.
-                # Keep the conservative initial deadline and continue only
-                # after the normal CaptureGame guard has passed.
-                timed_scene=scene
-                timer_source='initial'
-                log('timer_recheck_fallback',seconds=scene.seconds,
-                    message='倒计时复核暂时不可用，沿用首次识别结果；未延长安全截止时间。')
-                if emit:
-                    emit('atlas_progress',stage='zoom',
-                         message='倒计时复核暂时不可用，沿用首次识别结果')
-                game_deadline=initial_game_deadline
-            else:
-                game_deadline=min(initial_game_deadline,original_at+timed_scene.seconds)
-            scene=timed_scene
-            if game_deadline is None:
-                game_deadline=initial_game_deadline
-            budget=WorkflowBudget(ready_at,game_deadline)
-            g.until=budget.deadline
-            g.stage_until=budget.sampling_deadline
-            g.check()
-            log('timer',seconds=timed_scene.seconds,source=timer_source,
-                recognition_seconds=timer_recognition_seconds,attempts=attempt+1,
-                deadline_elapsed_seconds=game_deadline-started,
-                workflow_deadline_elapsed_seconds=budget.workflow_deadline-started,
-                effective_deadline_elapsed_seconds=budget.deadline-started,
-                sampling_deadline_elapsed_seconds=budget.sampling_deadline-started,
-                workflow_seconds=60)
+        ready=wait_for_dye_board(g,stop,started=started,log=log,snap=snap,
+            emit=emit,keep_active=keep_active,
+            verify_countdown=strategy in ("grid","probe","response"))
+        scene=ready["scene"];im=ready["image"];game_deadline=ready["game_deadline"]
+        ready_at=ready["ready_at"];budget=ready["budget"]
+        if strategy in ("grid","probe","response"):
             # Probe the game's own zoom limit in short bursts.  Capturing and
             # recognizing every single notch made acquisition unnecessarily
             # slow.  A burst is committed only when its final frame is safe;
@@ -467,9 +714,12 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
                 game_limit_observed=(zoom_stop_reason=='no_scale_change'),timing=zoom_timing)
             if strategy in ('grid','response') and zoomed>=4:
                 # The game's up/down ticks are not reciprocal (about 1.01
-                # and .99). Measure both before generating any joint route.
+                # and .99). Measure one native notch in each direction. A
+                # multi-notch burst divided by its count hides quantization
+                # and state-dependent response, while the affine matrix from
+                # this single frame is directly usable by later analysis.
                 calibration=[]
-                for ticks in (-4,4):
+                for ticks in (-1,1):
                     g.wheel(scene.board,ticks);g.pause(.035)
                     observed=g.capture()
                     measurement_error=None
@@ -478,15 +728,15 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
                     except Interrupted:raise
                     except Exception as exc:
                         motion=None;measurement_error=str(exc)
-                    calibration.append(dict(steps=ticks,motion=motion,error=measurement_error))
+                    calibration.append(dict(steps=ticks,motion=motion,error=measurement_error,
+                                            direction='down' if ticks<0 else 'up'))
                     im=observed
-                down,up=(row['motion'] for row in calibration)
-                passed=bool(down and up and 0<down['scale']<.998 and up['scale']>1.002 and
-                            abs(down.get('angle',0))<.25 and abs(up.get('angle',0))<.25)
-                log('zoom_calibration',passed=passed,measurements=calibration,
-                    down_log_step=abs(float(np.log(down['scale'])/4)) if passed else None,
-                    up_log_step=abs(float(np.log(up['scale'])/4)) if passed else None,
-                    current_scale=previous_scale*down['scale']*up['scale'] if passed else None)
+                summary=summarize_zoom_calibration(
+                    calibration, previous_scale)
+                # Keep a direct per-notch affine matrix in the event record;
+                # scale/angle are convenient summaries, not replacements for
+                # the measured transform.
+                log('zoom_calibration',**summary)
             zoom_tracker.clear()
             log('sampling_ready',board=scene.board,markers=scene.markers,cards=scene.cards)
             session_scene=scene
@@ -502,7 +752,9 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
                 from gesture_response_probe import run_response_probe
                 try:g.response_probe_dpi=int(u.GetDpiForWindow(g.hwnd)) or None
                 except (AttributeError,TypeError,ValueError,OSError):g.response_probe_dpi=None
-                final_image,outcome=run_response_probe(g,scene,final_image,snap,log,protocol=response_protocol)
+                final_image,outcome=run_response_probe(
+                    g,scene,final_image,snap,log,protocol=response_protocol,
+                    probe_cycles=probe_cycles,probe_anchors=probe_anchors)
                 log('CAPTURE_COMPLETE',strategy='response',outcome=outcome)
                 return dict(folder=folder,deadline=budget.deadline,game_deadline=game_deadline,
                     workflow_deadline=budget.workflow_deadline,ready_at=ready_at,
@@ -570,6 +822,9 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
     finally:
         if input_started:g.send(4);g.send(16)
         if worker is not None:worker.close()
+        if active_marker is not None:
+            try:active_marker.unlink(missing_ok=True)
+            except OSError:pass
     print(json.dumps(records[-1],indent=2))
     return dict(folder=folder,deadline=game_deadline,game=g,scene=session_scene,
                 image=final_image,geometry=tuple(g.geometry()))
@@ -580,7 +835,11 @@ if __name__=='__main__':
     parser.add_argument('mode',choices=['preflight','acquire']);parser.add_argument('folder',type=Path)
     parser.add_argument('--entry',nargs=2,type=int)
     parser.add_argument('--strategy',choices=['legacy','grid','probe','response'],default='legacy')
-    parser.add_argument('--response-protocol',choices=['baseline','rotation_compare'],default='baseline')
+    parser.add_argument('--response-protocol',choices=['baseline','rotation_compare','zoom_reversibility'],default='baseline')
+    parser.add_argument('--probe-cycles',type=int,default=3,
+                        help='Number of paired one-notch zoom cycles per anchor')
+    parser.add_argument('--probe-anchors',nargs='+',choices=['center','offset','edge'],
+                        default=None,help='Anchors for zoom reversibility diagnostics')
     parser.add_argument('--row-stagger',type=float,default=0.,choices=(0.,.05),
                         help='Optional 5%% row offset for the next capture-only calibration')
     parser.add_argument('--settling-probes',action='store_true',
@@ -595,5 +854,6 @@ if __name__=='__main__':
         if args.mode=='preflight':
             if not preflight(args.folder)['passed']:raise SystemExit(1)
         else:acquire(args.folder,args.entry,args.strategy,row_stagger=args.row_stagger,
-                     response_protocol=args.response_protocol,settling_probes=args.settling_probes)
+                     response_protocol=args.response_protocol,settling_probes=args.settling_probes,
+                     probe_cycles=args.probe_cycles,probe_anchors=args.probe_anchors)
     finally:kernel.CloseHandle(mutex)

@@ -14,6 +14,71 @@ from candidate_ranking import candidate_rank,candidate_order,exact_priority,exac
 from color_family import family_penalties,family_priority,family_fields
 
 
+def select_color_candidates(rows, rules, limit, *, preserve_routes=False):
+    """Keep the balanced default and distinct nearest-exact alternatives.
+
+    Reserve separate tail slots only when no proposal hits every exact
+    region. A one-row result always remains the best balanced proposal.
+    This selection is also applied after route binding, where colors change.
+    """
+    ranked=[];seen=set()
+    if preserve_routes:
+        # Similarity search runs before live route binding. Keep a bounded set
+        # of distinct input geometries for each colour tuple so an attractive
+        # but unbindable micro-rotation cannot hide a reachable translation.
+        # The live builder applies the normal colour de-duplication again after
+        # binding and rescoring, so this only widens the pre-bind evidence pool.
+        best_colors=select_color_candidates(rows,rules,limit)
+        by_color={tuple(row['colors']):[] for row in best_colors}
+        for row in sorted(rows,key=candidate_rank):
+            colors=tuple(row.get('colors',()))
+            if colors not in by_color:continue
+            route_key=(colors,
+                       round(float(row.get('dx',0.) or 0.),3),
+                       round(float(row.get('dy',0.) or 0.),3),
+                       round(float(row.get('angle',0.) or 0.),3),
+                       round(float(row.get('scale',1.) or 1.),5))
+            if route_key in seen:continue
+            seen.add(route_key);by_color[colors].append(row)
+        def operation_class(row):
+            return (abs(float(row.get('angle',0.) or 0.))>1e-6,
+                    abs(float(row.get('scale',1.) or 1.)-1.)>1e-6)
+        for options in by_color.values():
+            selected=[];classes=set()
+            # First keep one representative for each operation class, then
+            # fill spare slots from the original balanced ordering.
+            for row in options:
+                kind=operation_class(row)
+                if kind in classes:continue
+                classes.add(kind);selected.append(row)
+            selected.extend(row for row in options if row not in selected)
+            ranked.extend(selected[:4])
+        return sorted(ranked,key=candidate_rank)
+    for row in sorted(rows,key=candidate_rank):
+        key=tuple(row['colors'])
+        if key in seen:continue
+        seen.add(key);ranked.append(row)
+    selected=ranked[:limit]
+    exact=[i for i,r in enumerate(rules) if r.get('enabled') and r.get('exact')]
+    if len(selected)<2 or not exact:return selected
+    all_exact=any(all(row['colors'][i] is not None and
+        row['colors'][i].upper() in [c.upper() for c in rules[i]['colors']]
+        for i in exact) for row in ranked)
+    if all_exact:return selected
+    reserved=set();slot=len(selected)-1
+    for region in exact:
+        options=[row for row in ranked if row.get('deltas',[None]*3)[region] is not None]
+        if not options:continue
+        nearest=min(options,key=lambda row:(float(row['deltas'][region]),candidate_rank(row)))
+        key=tuple(nearest['colors'])
+        if key in {tuple(r['colors']) for r in selected}:
+            reserved.add(key);continue
+        while slot>0 and tuple(selected[slot]['colors']) in reserved:slot-=1
+        if slot<=0:break
+        selected[slot]=nearest;reserved.add(key);slot-=1
+    return sorted(selected,key=candidate_rank)
+
+
 def _distances(values, rule):
     targets=np.asarray([rgb(v) for v in rule['colors']],np.uint8)
     if not len(targets):raise ValueError('Enabled region requires target colors')
@@ -130,6 +195,7 @@ def similarity_candidates(atlas, markers, rules, current_translation, board_shap
                 cycle_radius=cycle_radius,hit_counts={},seed_counts={},evaluated_transforms=0)
     diag['scale_levels']=None if levels is None else levels.tolist()
     diag['include_compromises']=bool(include_compromises)
+    diag['exact_fallback_pool']=0
     points={}; source_risk={}
     for region in enabled:
         if cancelled():raise InterruptedError('Calculation cancelled')
@@ -201,7 +267,7 @@ def similarity_candidates(atlas, markers, rules, current_translation, board_shap
             # Keep a bounded pool for the joint neighborhood check. Pair seed
             # risk is a screening score only, not a full three-region bound.
             risk=pair_risk[ii,jj]
-            hits,exact_max,exact_avg,_=exact_priority(colors,distances,rules)
+            hits,exact_max,exact_avg,exact_total=exact_priority(colors,distances,rules)
             family_max,family_avg,_=family_priority(colors,rules)
             ids=ids[candidate_order(hits[ids],maximum[ids],average[ids],passed[ids],False,
                                     risk[ids],best[ids],exact_maximum=exact_max[ids],
@@ -214,7 +280,25 @@ def similarity_candidates(atlas, markers, rules, current_translation, board_shap
                                     exact_maximum=exact_max[rejected],exact_average=exact_avg[rejected],
                                     family_maximum=family_max[rejected],family_average=family_avg[rejected])][:256]
                 ids=np.r_[ids,rejected]
-            for k in ids:
+                # If no candidate in this transform batch contains any exact
+                # hit, keep a separate nearest-exact slice before the bounded
+                # overall-quality pool is discarded.  A narrow dark (or
+                # otherwise exact) island can have a poor joint score while
+                # still being the only useful compromise for that selected
+                # exact region.  This slice is never marked accepted: the
+                # strict RGB exact gate remains unchanged.
+                if exact_total and not np.any(hits[usable] > 0):
+                    exact_pool=np.flatnonzero(usable)
+                    exact_pool=exact_pool[np.lexsort((
+                        exact_pool,
+                        average[exact_pool],
+                        maximum[exact_pool],
+                        exact_avg[exact_pool],
+                        exact_max[exact_pool]))]
+                    fallback_ids=exact_pool[:64]
+                    diag['exact_fallback_pool']+=int(len(fallback_ids))
+                    ids=np.r_[ids,fallback_ids]
+            for k in np.unique(ids):
                 pool.append((a[k],relative_offset[k],absolute_offset[k],center_move[k],
                              maximum[k],average[k]))
     if not pool:return []
@@ -246,12 +330,15 @@ def similarity_candidates(atlas, markers, rules, current_translation, board_shap
             search_space='periodic_similarity',execution_verified=False))
         rows[-1].update(exact_fields(hits,exact_max,exact_avg,exact_total,k))
         rows[-1].update(family_fields(family_max,family_avg,family_losses,k))
-    result=[]; seen=set()
-    for row in sorted(rows,key=candidate_rank):
-        key=tuple(row['colors'])
-        if key in seen:continue
-        seen.add(key);row['id']=len(result);result.append(row)
-        if len(result)>=limit:break
+    result=[]
+    # Keep the normal balanced ranking first so the automatic default is not
+    # replaced by a single-region compromise.  When no exact transform exists
+    # at all, reserve one public slot per exact region for its nearest
+    # supported compromise; otherwise a narrow dark/bright island can be
+    # pushed out by candidates with a slightly better joint average.
+    for row in select_color_candidates(rows,rules,limit,preserve_routes=True):
+        row['id']=len(result);result.append(row)
+        if len(result)>=max(int(limit),int(limit)*4):break
     diag['accepted_pool']=sum(row['accepted'] for row in rows)
     diag['compromise_pool']=sum(not row['accepted'] for row in rows)
     diag['family_consistent_pool']=sum(row['family_consistent'] for row in rows)

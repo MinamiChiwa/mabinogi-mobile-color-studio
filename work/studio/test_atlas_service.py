@@ -45,6 +45,57 @@ class ServiceTests(unittest.TestCase):
         self.assertFalse(owner.events[-1][1]['search_performed'])
         self.assertEqual(owner.events[-1][1]['reason'],'atlas_quality_failed')
 
+    def test_optional_current_observation_runs_after_plain_early_exits(self):
+        for mode in ('build_error','quality','no_rows','budget','default_error','default_none','default_missing_pose'):
+            with self.subTest(mode=mode):
+                owner=Owner();callbacks=self.callbacks();captured={'game':'test-game','scene':'test-scene'}
+                callbacks.acquire=lambda *a,**k:captured
+                calls=[]
+                def observed(_owner,artifact,_rules,**context):
+                    self.assertIs(artifact,captured);calls.append(context)
+                    return dict(verified=True,actual_colors=['#112233']*3,
+                        actual_deltas=[4.]*3,maximum=4.,average=4.,observed_accepted=False,
+                        predicted_colors=[None]*3,predicted_deltas=[None]*3)
+                callbacks.observe_current=observed
+                if mode=='build_error':callbacks.build=lambda *a,**k:(_ for _ in ()).throw(ValueError('atlas'))
+                elif mode=='quality':callbacks.build=lambda *a,**k:dict(quality_gate={'passed':False})
+                elif mode=='no_rows':callbacks.build=lambda *a,**k:dict(quality_gate={'passed':True},candidates=[])
+                elif mode=='budget':
+                    callbacks.build=lambda *a,**k:dict(quality_gate={'passed':True},
+                        candidates=[dict(id=0,dx=1e8,dy=0.,accepted=False,maximum=4.,average=4.)],board=(0,0,900,900))
+                elif mode=='default_error':callbacks.default=lambda *a,**k:(_ for _ in ()).throw(RuntimeError('ocr'))
+                elif mode=='default_none':callbacks.default=lambda *a,**k:None
+                elif mode=='default_missing_pose':callbacks.default=lambda *a,**k:dict(verified=True,actual_pose=None)
+                result=AtlasService(callbacks).run(owner,[],selection_deadline=time.monotonic()+30.)
+                self.assertEqual(len(calls),1)
+                self.assertTrue(result['verified']);self.assertFalse(result['accepted'])
+                self.assertTrue(result['early_exit']);self.assertFalse(result['best_result_current'])
+                self.assertIsNone(result['candidate_id']);self.assertIsNone(result['actual_pose'])
+                self.assertFalse(result['pose_reliable']);self.assertFalse(result['positioning_complete'])
+                self.assertEqual(owner.events[-1][0],'atlas_recovery')
+                self.assertNotIn('atlas_default_verified',[kind for kind,_ in owner.events])
+
+    def test_current_observation_is_never_fabricated_after_acquire_error_or_safety_stop(self):
+        for mode in ('acquire_error','build_stop','observation_stop'):
+            with self.subTest(mode=mode):
+                owner=Owner();callbacks=self.callbacks(False);calls=[]
+                def observe(*a,**k):calls.append(True);raise InterruptedError('F9')
+                callbacks.observe_current=observe
+                if mode=='acquire_error':callbacks.acquire=lambda *a,**k:(_ for _ in ()).throw(ValueError('capture'))
+                elif mode=='build_stop':callbacks.build=lambda *a,**k:(_ for _ in ()).throw(InterruptedError('focus'))
+                if mode=='acquire_error':
+                    self.assertIsNone(AtlasService(callbacks).run(owner,[]));self.assertEqual(calls,[])
+                else:
+                    with self.assertRaises(InterruptedError):AtlasService(callbacks).run(owner,[])
+                    self.assertEqual(len(calls),int(mode=='observation_stop'))
+
+    def test_current_observation_plain_failure_keeps_unknown_without_global_error(self):
+        owner=Owner();callbacks=self.callbacks(False)
+        callbacks.observe_current=lambda *a,**k:(_ for _ in ()).throw(ValueError('ocr unavailable'))
+        self.assertIsNone(AtlasService(callbacks).run(owner,[]))
+        self.assertEqual(owner.events[-1][0],'atlas_recovery_unavailable')
+        self.assertIn('ocr unavailable',owner.events[-1][1]['detail'])
+
     def test_failed_map_validation_is_distinguished_from_color_delta(self):
         message=quality_failure_message({'thresholds':{'max_rgb_rmse':8},'regions':[
             {'region':2,'required':True,'passed':False,'heldout_rgb_rmse':8.6224}]})
@@ -145,6 +196,7 @@ class ServiceTests(unittest.TestCase):
         rows=next(data['candidates'] for kind,data in owner.events if kind=='atlas_candidates')
         self.assertEqual([row['id'] for row in rows],[1,0])
         self.assertFalse(next(data for kind,data in owner.events if kind=='atlas_candidates')['compromise_only'])
+
 
     def test_any_tolerance_with_no_match_auto_positions_best_compromise(self):
         owner=Owner();base=self.callbacks();calls=[]
@@ -262,17 +314,17 @@ class ServiceTests(unittest.TestCase):
 
     def test_unreachable_choice_does_not_claim_time_was_insufficient(self):
         owner=Owner();owner.selection=1;base=self.callbacks()
-        from atlas_execution import reposition_budget
-        def budget(candidate,*args,**kwargs):
-            if candidate['id']==1 and 'matrix' in candidate:
-                return dict(allowed=False,reason='no_measurable_motion',remaining=23.45,needed=11.35)
-            return reposition_budget(candidate,*args,**kwargs)
-        with patch('atlas_service.reposition_budget',side_effect=budget):
-            AtlasService(base).run(owner,[],selection_deadline=time.monotonic()+30)
+        prepare=base.prepare
+        def unreachable(owner,report,candidate,rules,**context):
+            if candidate['id']==1:
+                return None,dict(allowed=False,reason='no_measurable_motion',remaining=23.45,needed=11.35)
+            return prepare(owner,report,candidate,rules,**context)
+        base.prepare=unreachable
+        AtlasService(base).run(owner,[],selection_deadline=time.monotonic()+30)
         event=owner.events[-1]
         self.assertEqual(event[0],'atlas_choice_rejected')
         self.assertNotIn('时间不足',event[1]['message'])
-        self.assertIn('无法从当前位置可靠到达',event[1]['message'])
+        self.assertIn('无法完成路线复核',event[1]['message'])
 
     def test_automatic_candidate_balances_regions_before_exact_hits(self):
         owner=Owner();base=self.callbacks();selected=[]

@@ -67,6 +67,17 @@ class RuntimeMotionTests(unittest.TestCase):
         self.assertIs(adapter.last_motion_after,b)
         self.assertTrue(adapter.last_motion_diagnostics['passed'])
 
+    def test_motion_reuses_previous_frame_features(self):
+        """A repeated registration must not run SIFT twice for old frames."""
+        a,b=self.frames((25,75));cache={}
+        original=atlas_runtime.cv2.SIFT_create
+        with patch.object(atlas_runtime.cv2,'SIFT_create',side_effect=original) as create:
+            self.assertIsNotNone(motion(a,b,self.scene(),feature_cache=cache))
+            first=create.call_count
+            self.assertGreaterEqual(first,2)
+            self.assertIsNotNone(motion(a,b,self.scene(),feature_cache=cache))
+            self.assertEqual(create.call_count,first)
+
     def test_rotation_and_zoom_with_fixed_material_boundaries(self):
         scene=self.scene();a,_=self.frames((0,0))
         y,x=np.mgrid[:498,:498]

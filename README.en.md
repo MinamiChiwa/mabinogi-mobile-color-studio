@@ -14,18 +14,20 @@ This tool was developed with AI assistance.
 
 ## Getting started
 
-Download `ColorStudio-v0.3.5.zip` from Releases, extract it and run `ColorStudio.exe`. Keep the `_internal` folder in the same directory. OCR and English recognition data are included; Python and a separate Tesseract installation are not required. Close the previous version before upgrading, and extract into a separate folder to avoid mixing files.
+The current release is `ColorStudio-v0.3.6`. Extract the complete package and run `ColorStudio.exe`, keeping the `_internal` folder beside it. OCR and English recognition data are included; Python and a separate Tesseract installation are not required. Close older copies before upgrading and extract this release into a separate folder.
 
 1. Set the game window to 1280 × 960. All three regions are enabled by default; turn off any not required. Enter HEX colors, use the color picker or screen eyedropper, and optionally add alternatives.
 2. Choose Exact HEX or Similar independently for each region. Exact mode requires identical HEX codes; Similar mode uses the configured tolerance. Combinations are compared using all regions’ color differences and nearby color variation, favoring stable combinations that meet every setting. Compromises balance closeness across regions; Exact hits take priority when overall quality is equal, without sacrificing another region for one exact match. The overlay identifies measured results outside the targets and color-family mismatches.
 3. Similar regions use their individual Delta E tolerances. If no candidate meets every setting, the tool selects an executable compromise that balances differences across regions and nearby color variation.
-4. Select the game window, then click Start or press **F8**. Open the timed dye screen after the overlay appears. The tool first builds this round’s stitched board, then searches, positions and verifies in-game HEX. Press **F9** to stop.
+4. Select the game window, then click Start or press **F8**. Open the timed dye screen after the overlay appears. With one region enabled, the tool searches the current board directly and leaves time for manual adjustment. With multiple regions enabled, it first builds this round’s stitched board, then searches, positions and verifies in-game HEX. Press **F9** to stop.
+
+**Single-region tip:** Exact mode prioritizes an identical HEX during the main search phase, about 60 seconds after board detection. If no exact match is found, the tool attempts to position the best measured compromise; finalization may take a few extra seconds. Similar mode stops after two consecutive readings meet the configured tolerance. Search uses limited translation and measured zoom steps. Unverified zoom responses end that route, and scale limits are not repeatedly pressed. The remaining game time is available for manual adjustment. If no target is met, the overlay labels the result “Target not reached · Compromise.” This is the closest verified result from the search, not a tool failure.
 
 Auto-detection accepts spacing variations in the title and recognizes the game executable. Select manually if multiple candidates exist; select again if that window closes. Borderless fullscreen is supported. Keep the game in the foreground and its geometry unchanged during active searching.
 
 After positioning, the tool shows the in-game HEX. Check the result in the game before applying the dye manually.
 
-Exact and Similar modes both search the current stitched board and calculate rotation, zoom and translation for each candidate. Avoid moving the mouse during automatic operation. Moving or resizing the game window during a search stops it; press F8 to detect the new layout.
+With one region enabled, Exact and Similar modes skip full-board stitching and explore the board directly using translation and limited zoom. With multiple regions enabled, they use this round’s stitched board and calculate rotation, zoom and translation for each candidate. Avoid moving the mouse during automatic operation. Moving or resizing the game window during a search stops it; press F8 to detect the new layout.
 
 Choose Simplified Chinese, Traditional Chinese or English in the upper-right selector. The main window, overlay and open information dialogs switch immediately without restarting. The main layout adapts from three columns to two or one; the help button opens the tutorial, and Support offers Afdian and Patreon.
 
@@ -36,7 +38,7 @@ Choose Simplified Chinese, Traditional Chinese or English in the upper-right sel
 - The last 50 results retain the three colors, per-region ΔE, maximum and mean differences.
 - The normal search workflow verifies the in-game HEX values and shows the result in the overlay. Exact mode disables the tolerance slider.
 - Settings, results and diagnostic screenshots are stored in the adjacent `data` folder by default. If the install directory is not writable, the tool uses `%LOCALAPPDATA%\MabinogiMobileColorStudio\data`, then the system temporary directory as a last resort.
-- Old-session cleanup runs in the background when a new run starts. The latest 20 sessions and sessions updated within the last five minutes are protected. Other sessions may be removed after 30 days or when total session storage exceeds 512 MiB. Protected data can therefore keep the total above 512 MiB. Data in the system temporary directory may be removed by the operating system.
+- Diagnostic records are cleaned automatically in the background, retaining the latest three runs. Active records and records updated within the last five minutes are temporarily protected. Cleanup has no aggregate size cap. Data in the system temporary directory may be removed by the operating system.
 
 ## Development
 

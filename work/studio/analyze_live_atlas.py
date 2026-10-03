@@ -82,8 +82,15 @@ def measure_periods(images,offsets,masks,feature_cache=None,check=None):
         for j in range(i):
             if check:check()
             delta=np.asarray(offsets[i])-np.asarray(offsets[j])
+            # A row-to-row return can be shorter than half of the viewport
+            # when the live route uses interleaved coverage fills.  Requiring
+            # .45*extent discarded the only valid vertical evidence in some
+            # complete 48-frame scans.  Keep a conservative .30 threshold;
+            # residual registration and RGB error gates below still reject
+            # unrelated pairs.
             axes=[axis for axis,extent in enumerate((w,h))
-                  if abs(delta[axis])>.45*extent and abs(delta[1-axis])<2]
+                  if abs(delta[axis])>.30*extent and
+                     abs(delta[1-axis])<max(2.,.08*extent)]
             if not axes:continue
             # Distant frame pairs often have no overlap. Their failure is
             # already handled by trying another return pair; denser extraction
@@ -94,14 +101,22 @@ def measure_periods(images,offsets,masks,feature_cache=None,check=None):
             rmse=translation_error(images[j],images[i],masks,*residual)
             if not np.isfinite(rmse) or rmse>8:continue
             for axis in axes:
-                if abs(difference[axis])<.3*(w,h)[axis] or abs(difference[1-axis])>2:continue
+                if (abs(difference[axis])<.3*(w,h)[axis] or
+                        abs(difference[1-axis])>max(2.,.02*(w,h)[1-axis])):continue
                 evidence[axis].append((float(abs(difference[axis])),float(rmse)))
     result=[]
     for axis,rows in enumerate(evidence):
-        if len(rows)<2:raise ValueError(f'Insufficient validated period returns on axis {axis}')
+        # A complete scan can occasionally expose only one independent return
+        # on an axis (for example when a connector corridor hides the second
+        # pair).  The measured return is still preferable to discarding the
+        # entire atlas: held-out validation and the route stability gate remain
+        # responsible for rejecting a bad period.  Keep the hard failure only
+        # when there is no validated return at all.
+        if not rows:raise ValueError(f'Insufficient validated period returns on axis {axis}')
         period=float(np.median([r[0] for r in rows]))
         agreeing=[r for r in rows if abs(r[0]-period)<1]
-        if len(agreeing)<2:raise ValueError(f'Inconsistent period returns on axis {axis}')
+        if not agreeing:
+            raise ValueError(f'Inconsistent period returns on axis {axis}')
         result.append((float(np.median([r[0] for r in agreeing])),max(r[1] for r in agreeing)))
     return result
 

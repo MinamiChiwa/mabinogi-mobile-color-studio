@@ -2,7 +2,8 @@ from types import SimpleNamespace
 import unittest
 import numpy as np
 from atlas_pose import homogeneous
-from gesture_response_probe import response_probe_plan,run_response_probe
+from gesture_response_probe import (response_probe_plan,run_response_probe,
+                                    zoom_probe_anchors,zoom_reversibility_plan)
 
 
 class ProbeGame:
@@ -54,6 +55,48 @@ class ResponseProbeTests(unittest.TestCase):
                 self.assertTrue(all(isinstance(v,int) for v in point))
         self.assertEqual({p.anchor_name for p in plan},{'center','offset'})
         self.assertEqual([p.gesture.wheel_steps for p in plan if p.gesture.kind=='wheel'],[-1,1,-1,1])
+
+    def test_zoom_reversibility_plan_covers_anchor_pairs_and_both_orders(self):
+        board=self.scene.board
+        plan=zoom_reversibility_plan(board)
+        self.assertEqual(len(plan),36)  # 3 cycles × 3 anchors × 2 pairs × 2 inputs
+        self.assertEqual({p.anchor_name for p in plan},{'center','offset','edge'})
+        self.assertEqual({p.direction for p in plan},{-1,1})
+        for cycle in range(1,4):
+            for anchor in ('center','offset','edge'):
+                rows=[p for p in plan if p.cycle==cycle and p.anchor_name==anchor]
+                self.assertEqual([(p.phase,p.direction) for p in rows],
+                                 [('forward',1),('return',-1),
+                                  ('forward',-1),('return',1)])
+                self.assertEqual(rows[0].gesture.anchor,zoom_probe_anchors(board)[anchor])
+
+    def test_zoom_reversibility_plan_accepts_selected_anchors_and_cycles(self):
+        plan=zoom_reversibility_plan(self.scene.board,cycles=2,anchors=('edge','center'))
+        self.assertEqual(len(plan),16)
+        self.assertEqual([p.anchor_name for p in plan[:4]],['edge']*4)
+        self.assertEqual([p.anchor_name for p in plan[4:8]],['center']*4)
+        self.assertEqual([p.anchor_name for p in plan[8:12]],['center']*4)
+        self.assertEqual([p.anchor_name for p in plan[12:]],['edge']*4)
+        with self.assertRaises(ValueError):zoom_reversibility_plan(self.scene.board,cycles=0)
+        with self.assertRaises(ValueError):zoom_reversibility_plan(self.scene.board,anchors=('bad',))
+
+    def test_zoom_reversibility_probe_records_each_step_and_pair(self):
+        _, result = run_response_probe(
+            self.game, self.scene, np.eye(3), self.snap,
+            lambda k, **d: self.events.append(dict(kind=k, **d)),
+            register=self.register, clock=lambda: self.game.now,
+            protocol='zoom_reversibility', probe_cycles=1,
+            probe_anchors=('center',))
+        self.assertEqual(result['status'], 'complete')
+        self.assertEqual(result['completed'], 4)
+        self.assertEqual(result['completed_pairs'], 2)
+        rows=[e for e in self.events if e['kind']=='zoom_reversibility_measurement']
+        self.assertEqual([(r['phase'],r['direction']) for r in rows],
+                         [('forward',1),('return',-1),('forward',-1),('return',1)])
+        pairs=[e for e in self.events if e['kind']=='zoom_reversibility_pair']
+        self.assertEqual(len(pairs),2)
+        self.assertTrue(all('net' in p for p in pairs))
+        self.assertEqual(self.game.releases,[4,16])
 
     def test_complete_uses_measured_state_and_never_assumes_wheel_return(self):
         frame,result=self.run_probe()

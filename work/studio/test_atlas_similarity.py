@@ -60,9 +60,15 @@ class SimilarityTests(unittest.TestCase):
     def test_no_exact_target_uses_nearby_colors_without_changing_acceptance(self):
         self.rules[2]['colors']=['#0000FE']
         self.assertEqual(self.solve(),[])
-        rows=self.solve(include_compromises=True)
+        diagnostics={}
+        rows=similarity_candidates(self.atlas,self.markers,self.rules,self.current,(64,64),
+                                   scale_bounds=(.7,.8),include_compromises=True,
+                                   diagnostics=diagnostics)
         self.assertTrue(rows)
         self.assertFalse(any(r['accepted'] for r in rows))
+        self.assertGreater(diagnostics['exact_fallback_pool'],0)
+        self.assertAlmostEqual(rows[0]['exact_maximum'],
+                               min(row['exact_maximum'] for row in rows))
 
     def test_disabled_region_does_not_constrain_geometry_or_colors(self):
         self.rules[2]=dict(enabled=False,colors=[],exact=False,tolerance=8)

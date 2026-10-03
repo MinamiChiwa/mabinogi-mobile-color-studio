@@ -15,6 +15,28 @@ class Button:
 
 
 class SearchOverlayAtlasTests(unittest.TestCase):
+    def test_single_region_compromise_result_is_labeled_as_expected_outcome(self):
+        import i18n
+        original=i18n.language
+        try:
+            overlay=SearchOverlay.__new__(SearchOverlay)
+            overlay.rules=[dict(enabled=True),dict(enabled=False),dict(enabled=False)]
+            overlay.clear_candidates=Mock();overlay.results=Mock();overlay.copy=Mock()
+            overlay.activity=Mock();overlay.collapse=Mock();overlay.resize_surface=Mock()
+            overlay.render=Mock()
+            data=dict(verified=True,accepted=False,best_verified=True,best_current=True,
+                      outcome='compromise',actual_colors=['#888888',None,None],
+                      actual_deltas=[12.,None,None])
+            with patch('search_overlay.ct.CTkLabel'):
+                overlay.show_single_result(data)
+            self.assertEqual(overlay.render.call_args.args,
+                             ('未命中目标 · 妥协方案',
+                              '未找到满足目标的颜色；下方显示本轮已实测确认的妥协结果。这是寻色未命中后的正常结束状态，并非程序故障。请查看色差，并在游戏内手动确认是否采用。'))
+            i18n.set_language('English')
+            self.assertIn('Compromise',str(i18n.tr(overlay.render.call_args.args[0])))
+            self.assertIn('normal outcome',str(i18n.tr(overlay.render.call_args.args[1])))
+        finally:i18n.set_language(original)
+
     def test_pose_only_recovery_does_not_claim_colors_were_read(self):
         import i18n
         original=i18n.language

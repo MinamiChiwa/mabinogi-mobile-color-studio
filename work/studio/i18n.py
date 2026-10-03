@@ -6,6 +6,17 @@ from opencc import OpenCC
 language='简体中文'
 traditional=OpenCC('s2twp')
 EN={
+'读取当前游戏色码':'Reading current game HEX',
+'恢复已测最佳颜色':'Restoring the best measured color',
+'单区域目标已达标':'Single-region target matched',
+'单区域寻色完成':'Single-region search complete',
+'单区域寻色已结束':'Single-region search ended',
+'自动移动已结束，可继续在游戏内手动调整。':'Automatic movement has ended. Manual adjustment is available in the game.',
+'当前色码未完成复核，请以游戏内显示为准。':'Current HEX could not be verified. Refer to the colors shown in the game.',
+'无法为所选方案预留可靠的返回与复核时间，已保留当前实测结果。':'The selected option does not allow a reliable return and verification within the remaining time. The current measured result has been kept.',
+'所选方案无法完成路线复核，已保留当前实测结果。':'The selected route could not be verified. The current measured result has been kept.',
+'所选方案的返回路线尚未完成验证，已保留当前实测结果。':'The selected option has no verified return route. The current measured result has been kept.',
+'剩余时间不足以完成切换、返回与颜色复核，已保留当前实测结果。':'There is insufficient time to switch, return and verify the colors. The current measured result has been kept.',
 '本轮候选实测未达标；当前颜色如下，尚不能判断色板无解。':'The tested candidates did not meet the targets. Current colors are shown below; this does not prove the board has no solution.',
 '当前候选实测未达标':'The current candidate did not meet the targets',
 '正在检查剩余候选和游戏时间；F9随时停止。':'Checking other candidates and remaining game time. F9 stops at any time.',

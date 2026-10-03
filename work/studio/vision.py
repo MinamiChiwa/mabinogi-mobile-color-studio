@@ -3,6 +3,8 @@ from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import itertools, re, sys, os, shutil, subprocess, io, shlex, time
+import unicodedata
+from collections import Counter
 import cv2
 import numpy as np
 import pytesseract
@@ -319,17 +321,139 @@ def _timer_values(text):
     safe input window.
     """
     values=[]
-    for run in re.findall(r'\d+',str(text)):
+    # Keep every decimal digit and ignore the surrounding server-language
+    # suffix/prefix (秒, 초, s, etc.).  ``\d`` is not enough here because OCR
+    # engines can return full-width or other Unicode decimal digits.
+    normalized=[];run=[]
+    for char in str(text):
+        if char.isdigit():
+            try:run.append(str(unicodedata.digit(char)))
+            except (TypeError,ValueError):run.append(char)
+        elif run:
+            normalized.append(''.join(run));run=[]
+    if run:normalized.append(''.join(run))
+    for run in normalized:
         # Keep the complete run and its short suffixes. A leading hourglass
         # glyph may be merged into a three-digit reading (``420`` for ``20``)
         # just as it may be merged into a four-digit reading (``4120``).
-        candidates=(run,)+tuple(run[-size:] for size in (3,2,1)
-                                if size<len(run))
+        # When the complete run is already a valid countdown, suffixes are
+        # not alternative readings; adding them would let the final digit
+        # outvote a clear value such as ``108``.  Suffixes remain available
+        # for an icon-merged run such as ``420`` or ``4108`` whose complete
+        # value is outside the countdown range.
+        try:full_value=int(run)
+        except ValueError:full_value=None
+        if full_value is not None and 1<=full_value<=180:
+            candidates=(run,)
+        else:
+            candidates=(run,)+tuple(run[-size:] for size in (3,2,1)
+                                    if size<len(run))
+        seen=set()
         for candidate in candidates:
+            if candidate in seen:continue
+            seen.add(candidate)
             try:value=int(candidate)
             except ValueError:continue
-            if 1<=value<=120:values.append(value)
+            if 1<=value<=180:values.append(value)
     return values
+
+
+def detect_timer_track(image, *, unit=None):
+    """Locate the bright horizontal countdown track in a game frame.
+
+    The timer digits are rendered immediately before the track on the game's
+    HUD.  A fixed right edge is fragile when the client is resized, so this
+    helper looks for the longest compact, bright horizontal component in the
+    upper HUD band.  It returns the track geometry and a safe right edge for
+    a timer OCR crop, or ``None`` when no plausible track is visible.  No OCR
+    is performed here; callers can keep their existing textual fallbacks.
+
+    Coordinates use the image convention (left, top, right, bottom), with
+    ``right`` and ``bottom`` exclusive.  ``timer_right`` leaves a small gap
+    before the track so the first OCR crop cannot include its digits.
+    """
+    arr=np.asarray(image)
+    if arr.ndim==2:
+        gray=arr.astype(np.uint8,copy=False)
+    elif arr.ndim==3 and arr.shape[2]>=3:
+        # HSV V preserves bright coloured tracks that have lower luminance
+        # than white text while still allowing the confidence gate below to
+        # reject dim textured game content.
+        rgb_arr=np.asarray(arr[...,:3],dtype=np.uint8)
+        gray=cv2.cvtColor(rgb_arr,cv2.COLOR_RGB2GRAY)
+        value=cv2.cvtColor(rgb_arr,cv2.COLOR_RGB2HSV)[...,2]
+    else:
+        return None
+    h,w=gray.shape[:2]
+    if h<12 or w<32:return None
+    # The track is in the top HUD, but keep enough room for high-DPI layouts.
+    band_h=max(12,min(h,round(max(h*.30,float(unit or 0)*3.0))))
+    band=gray[:band_h]
+    if 'value' in locals(): band_v=value[:band_h]
+    else: band_v=band
+    # A fixed 220 threshold misses coloured tracks.  The adaptive floor keeps
+    # dark frames from turning a bright background patch into a candidate.
+    high=max(145.0,min(230.0,float(np.percentile(band_v,90))))
+    mask=(band_v>=high).astype(np.uint8)*255
+    # Close tiny anti-aliased gaps along the horizontal track, without
+    # connecting vertically separated HUD elements.
+    close_w=max(3,min(31,round(max(3,float(unit or 0)*.10))))
+    mask=cv2.morphologyEx(mask,cv2.MORPH_CLOSE,
+                          np.ones((3,close_w),np.uint8))
+    contours=cv2.findContours(mask,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)[0]
+    candidates=[]
+    min_width=max(32,round(w*.18),round(float(unit or 0)*3.0))
+    for contour in contours:
+        x,y,cw,ch=cv2.boundingRect(contour)
+        if cw<min_width or ch<2 or ch>max(18,round(h*.035)):continue
+        if y>=band_h or y+ch>round(h*.30):continue
+        area=float(cv2.contourArea(contour))
+        density=area/max(1.0,cw*ch)
+        # A true bar remains bright over most of its rectangle.  This rejects
+        # long text baselines and isolated bright UI strokes.
+        patch=band_v[y:y+ch,x:x+cw]
+        fill=float(np.mean(patch>=high)) if patch.size else 0.0
+        if fill<.55 or density<.45:continue
+        # Prefer the longest bar, then the most compact/bright one.  The
+        # score avoids selecting a one-pixel decorative line over the track.
+        score=float(cw)*(0.55+0.45*min(1.0,fill))*(0.75+0.25*min(1.0,ch/6.0))
+        candidates.append((score,x,y,cw,ch,fill,density))
+    if not candidates:return None
+    _,x,y,cw,ch,fill,density=max(candidates,key=lambda c:(c[0],c[5],c[3]))
+    # Keep OCR clear of the antialiased track edge; the gap scales with the
+    # card/unit size but is bounded for tiny and very large clients.
+    margin=max(2,round(max(1.0,float(unit or min(w,h)*.08))*.05))
+    timer_right=max(1,x-margin)
+    track_right=int(x+cw)
+    track_bottom=int(y+ch)
+    return {'track':(int(x),int(y),track_right,track_bottom),
+            'left':int(x), 'top':int(y), 'right':track_right,
+            'bottom':track_bottom,
+            # ``fill_end`` is deliberately the observed bright endpoint.
+            # It is used only as a monotonic cross-check; OCR remains the
+            # source of the countdown value.
+            'fill_end':track_right,
+            'timer_right':int(timer_right),
+            'center_y':float(y+ch/2),
+            'width':int(cw),
+            'height':int(ch),
+            'fill':round(float(fill),3),
+            'confidence':round(float(min(1.0,fill*.7+density*.3)),3)}
+
+
+# Descriptive alias used by diagnostics and future callers.
+locate_timer_track=detect_timer_track
+
+
+def timer_bar_signal(image, *, unit=None):
+    """Return the compact timer-bar observation used by live capture.
+
+    Keep this small compatibility wrapper separate from ``timer_seconds`` so
+    a missing or stylized progress bar never makes OCR fail.  The returned
+    mapping is either ``None`` or the geometry produced by
+    :func:`detect_timer_track`, including ``fill_end`` for temporal scoring.
+    """
+    return detect_timer_track(image, unit=unit)
 
 
 def timer_seconds(image, unit=None, previous=None):
@@ -352,12 +476,62 @@ def timer_seconds(image, unit=None, previous=None):
                 min(w,round(ref*1.65)),min(h,round(h*.13))),
                (0,0,min(w,round(ref*2.2)),min(h,round(h*.16)))]
     else:
-        boxes=[(round(ref*.68),0,min(w,round(ref*1.85)),
-                min(h,round(ref*1.25))),
-               (round(ref*.50),0,min(w,round(ref*2.2)),
-                min(h,round(ref*1.50))),
-               (0,0,min(w,round(max(ref*3.0,220))),
-                min(h,round(max(ref*1.5,90))))]
+        # The timer glyphs occupy a short, bright cluster immediately to the
+        # right of the hourglass.  The progress bar starts just after that
+        # cluster and is itself a long bright component; including it in the
+        # OCR crop produced false readings such as ``66`` for a visible
+        # ``108``.  The dimensions below are proportional to the 1280x960
+        # client and therefore follow DPI/window scaling.
+        scale=max(.55,min(3.,min(w,h)/960.))
+        focus_left=round(20*scale)
+        focus_top=round(10*scale)
+        # Keep the compact crop between the timer and the progress bar.  The
+        # old 90 px edge cut through the third digit at 1280x960, turning a
+        # visible 119 into readings such as 41.  112 px includes the complete
+        # three-digit glyph while retaining a margin before the bar (the
+        # proportional value follows the client scale).
+        focus_right=round(112*scale)
+        focus_bottom=round(46*scale)
+        suffix_right=round(145*scale)
+        # Use the HUD bar as a layout anchor when it is visible.  The bar is
+        # drawn immediately after the timer digits and scales with the game
+        # viewport, so its left edge is more reliable than a client-specific
+        # pixel constant on resized/high-DPI windows.  Keep a generous
+        # preceding span for the hourglass and localized prefix, while
+        # stopping OCR before the bright bar itself.
+        track=detect_timer_track(image,unit=unit)
+        if track is not None and track.get('confidence',0.)>=.55:
+            track_left=int(track.get('left',track['track'][0]))
+            track_right=int(track.get('timer_right',track_left))
+            span=max(round(90*scale),round(ref*1.15))
+            focus_left=max(0,track_left-span)
+            focus_right=max(focus_left+1,min(w,track_right))
+            focus_top=max(0,int(track.get('top',round(10*scale)))-round(20*scale))
+            focus_bottom=min(h,int(track.get('bottom',round(46*scale)))+round(7*scale))
+            # A short suffix crop remains useful for language labels, but do
+            # not run it across the full bright bar, which creates spurious
+            # digit-shaped OCR contours.
+            suffix_right=min(w,focus_right+round(20*scale))
+        # The number is followed by localized text on some servers.  Keep the
+        # same upper-left anchor, but let the OCR crop include that suffix;
+        # the digit whitelist and _timer_values discard the language itself.
+        # Keep the left edge at the window edge.  On the 1280x960 client the
+        # hourglass begins around x=32 and the first digit around x=48; the
+        # former x=52 crop could cut the first digit and turn ``119`` into
+        # ``19`` or ``20``.  The timer is the only numeric HUD element in
+        # this bounded upper-left region, so the wider anchor is safe.
+        boxes=[(focus_left,focus_top,min(w,focus_right),
+                min(h,focus_bottom)),
+               # A slightly wider crop covers a localized suffix when it is
+               # rendered directly after the digits.  It is lower priority
+               # because its right edge can overlap the progress bar.
+               (focus_left,focus_top,min(w,suffix_right),
+                min(h,focus_bottom)),
+               # Broad fallback: retain the old large crop for layouts where
+               # the timer is shifted, while keeping it lower priority than
+               # the two focused crops above.
+               (0,0,min(w,round(max(ref*5.0,480))),
+                min(h,round(max(ref*1.9,110))))]
     jobs=[]
     for left,top,right,bottom in boxes:
         left=max(0,min(w-1,left));top=max(0,min(h-1,top))
@@ -372,24 +546,76 @@ def timer_seconds(image, unit=None, previous=None):
         variant,psm=job
         return _timer_values(ocr(variant,'0123456789',psm=psm))
     values=[]
+    sources=[]
+    flat=[(box_index,job) for box_index,group in enumerate(jobs)
+          for job in group]
     if previous is not None:
         # Rechecks require every crop/variant to disambiguate short or merged
         # digits. Two independent OCR processes overlap that work without
         # weakening selection, changing task order, or using more workers on
         # machines with many cores. Initial detection retains its early exit.
         with ThreadPoolExecutor(max_workers=2,thread_name_prefix='timer-ocr') as pool:
-            for found in pool.map(read,[job for group in jobs for job in group]):
-                values.extend(found)
+            for (box_index,_),found in zip(flat,pool.map(read,[job for _,job in flat])):
+                values.extend(found);sources.extend([box_index]*len(found))
     else:
-        for box_index,group in enumerate(jobs):
-            for job in group:
-                values.extend(read(job))
-                if values and max(values)>=100:return max(values)
-            # A clean crop is normally sufficient; continue to the broad
-            # crop only when the earlier crops found no candidate.
-            if values and box_index>=1:break
+        # Initial recognition must inspect the broad crop as well.  A narrow
+        # crop can read the trailing ``19`` of a real ``119`` and the old
+        # early return treated that as the complete countdown, cutting a long
+        # session short.  Read all bounded variants before choosing a value;
+        # the final crop is still limited to the timer's upper-left area and
+        # candidates remain constrained to the known 1..180 second range.
+        # Tesseract calls are independent and bounded to two workers, just as
+        # in the recheck path.  This keeps the broader initial verification
+        # from adding several seconds to the game countdown.
+        with ThreadPoolExecutor(max_workers=2,thread_name_prefix='timer-ocr') as pool:
+            for (box_index,_),found in zip(flat,pool.map(read,[job for _,job in flat])):
+                values.extend(found);sources.extend([box_index]*len(found))
     if not values:return None
+    # Prefer the tight timer crop.  OCR from the broad fallback may contain
+    # the progress bar or another HUD number, while independent variants of
+    # the focused crop normally agree on the actual countdown.  A frequency
+    # tie is resolved toward the larger reading on the initial frame so a
+    # clipped leading digit cannot shorten the workflow.
+    focused=[v for v,s in zip(values,sources) if s==0]
+    if focused:
+        counts=Counter(focused)
+        best=max(counts, key=lambda value:(counts[value],value))
+        fallback=[v for v,s in zip(values,sources) if s>=1]
+        fallback_high=[v for v in fallback if v>=100]
+        # If the tight crop captured an incomplete/incorrect value, a high
+        # three-digit reading repeated by the wider timer crops is stronger
+        # evidence.  This covers both a short suffix (20 -> 119) and a
+        # clipped first crop (41 -> 119), while requiring agreement between
+        # at least two fallback readings when the focused value is plausible.
+        fallback_sources={s for v,s in zip(values,sources) if s>=1 and v>=100}
+        if fallback_high and (best < 90 or len(fallback_sources)>=2):
+            high_counts=Counter(fallback_high)
+            high=max(high_counts,key=lambda value:(high_counts[value],value))
+            # A previous value below 90 is still in the suspicious clipped
+            # range; permit the complete three-digit correction before the
+            # ordinary non-increasing countdown guard is applied.
+            if previous is None or int(previous)<90 or high<=int(previous)+1:
+                return high
+        if previous is None:return best
+        # On a recheck, retain the monotonic countdown rule.  If the focused
+        # crop only saw an icon or an incomplete suffix, fall through to the
+        # combined candidates below.
+        if int(previous)<=30:
+            high=[v for v in focused if v>=100]
+            if len(high)>=2:return max(high)
+        ordered=[v for v in focused if v<=int(previous)+1]
+        if ordered:return min(ordered,key=lambda v:abs(v-int(previous)))
     if previous is not None:
+        # A first-frame partial crop can establish an erroneously short value
+        # such as 20 while a subsequent frame clearly shows 119.  Permit a
+        # correction only for that suspiciously short range and only when the
+        # long value is repeated or comes from the broad timer crop.  This
+        # preserves the non-increasing countdown guard for ordinary readings.
+        if int(previous)<=30:
+            high=[v for v,s in zip(values,sources) if v>=100]
+            if high and (len(high)>=2 or any(s>=2 and v>=100
+                                             for v,s in zip(values,sources))):
+                return max(high)
         # A countdown can only stay the same or decrease between frames.
         ordered=[v for v in values if v<=int(previous)+1]
         if ordered:return min(ordered,key=lambda v:abs(v-int(previous)))

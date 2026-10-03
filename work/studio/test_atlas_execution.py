@@ -49,6 +49,34 @@ class WheelDetentFake(Fake):
         self.pose=gesture@self.pose
 
 
+class ReferenceMaterialMismatchFake(Fake):
+    """Adapter whose first atlas comparison fails only its RGB gate."""
+    def __init__(self, second_translation=(0.,0.)):
+        super().__init__()
+        self.motion_calls=0
+        self.second_translation=np.asarray(second_translation,float)
+
+    def motion(self,a,b):
+        self.motion_calls+=1
+        if self.motion_calls==1:
+            self.last_motion_diagnostics={
+                'reason':'material_rgb_mismatch',
+                'matrix':[[1.,0.,0.],[0.,1.,0.]],
+            }
+            return None
+        if self.motion_calls>2:
+            return super().motion(a,b)
+        translation=self.second_translation
+        self.last_motion_diagnostics={
+            'reason':'ok',
+            'matrix':[[1.,0.,float(translation[0])],
+                      [0.,1.,float(translation[1])]],
+        }
+        return dict(matrix=[[1.,0.,float(translation[0])],
+                            [0.,1.,float(translation[1])]],
+                    scale=1.,angle=0.)
+
+
 class ExecutionTests(unittest.TestCase):
     def test_reposition_budget_keeps_default_when_time_is_short(self):
         row=dict(dx=300,dy=-50)
@@ -97,6 +125,47 @@ class ExecutionTests(unittest.TestCase):
         self.setUp();self.adapter.read_codes=lambda image:[None]*3
         with self.assertRaises(RuntimeError):self.execute()
         self.assertTrue(self.adapter.released)
+
+    def test_material_only_initial_mismatch_rebases_before_sending_input(self):
+        adapter=ReferenceMaterialMismatchFake()
+        batch=CandidateBatch([self.row],adapter.ctx,100,clock=lambda:0)
+        events=[]
+        result=execute_candidate(adapter,batch,batch.id,0,adapter.capture(),self.rules,
+                                 clock=lambda:0,emit=lambda k,d:events.append((k,d)))
+        self.assertTrue(result['verified'])
+        self.assertTrue(result['accepted'])
+        self.assertTrue(any(k=='atlas_reference_rebased' for k,_ in events))
+        # The extra captures/registration happen before the first drag; no
+        # input is sent while the reference is being rebuilt.
+        self.assertGreaterEqual(adapter.motion_calls,2)
+        self.assertTrue(adapter.moves)
+
+    def test_material_mismatch_with_real_initial_motion_keeps_safe_failure(self):
+        adapter=ReferenceMaterialMismatchFake(second_translation=(0.,0.))
+        # Replace the first diagnostic with a non-identity transform.  The
+        # material mismatch is then not eligible for reference rebuilding.
+        original=adapter.motion
+        def moved_first(a,b):
+            if adapter.motion_calls==0:
+                adapter.motion_calls+=1
+                adapter.last_motion_diagnostics={
+                    'reason':'material_rgb_mismatch',
+                    'matrix':[[1.,0.,4.],[0.,1.,0.]],
+                }
+                return None
+            return original(a,b)
+        adapter.motion=moved_first
+        batch=CandidateBatch([self.row],adapter.ctx,100,clock=lambda:0)
+        with self.assertRaisesRegex(CandidateExpired,'同材质颜色校验未通过'):
+            execute_candidate(adapter,batch,batch.id,0,adapter.capture(),self.rules,clock=lambda:0)
+        self.assertEqual(adapter.moves,[])
+
+    def test_unstable_reference_recheck_keeps_safe_failure(self):
+        adapter=ReferenceMaterialMismatchFake(second_translation=(3.,0.))
+        batch=CandidateBatch([self.row],adapter.ctx,100,clock=lambda:0)
+        with self.assertRaisesRegex(CandidateExpired,'同材质颜色校验未通过'):
+            execute_candidate(adapter,batch,batch.id,0,adapter.capture(),self.rules,clock=lambda:0)
+        self.assertEqual(adapter.moves,[])
 
     def test_failed_first_motion_records_command_and_failure_before_stopping(self):
         original=self.adapter.motion;events=[]

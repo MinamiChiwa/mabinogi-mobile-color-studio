@@ -20,6 +20,69 @@ class ProbeAction:
     variant: str = 'legacy'
 
 
+@dataclass(frozen=True)
+class ZoomReversibilityAction:
+    """One wheel notch in a paired reversibility measurement."""
+    name: str
+    anchor_name: str
+    cycle: int
+    pair: int
+    phase: str
+    direction: int
+    gesture: object
+
+
+def zoom_probe_anchors(board):
+    """Return conservative center, offset and near-edge client anchors."""
+    l, t, r, b = map(int, board)
+    w, h = r - l, b - t
+    inset_x, inset_y = max(12, round(w * .08)), max(12, round(h * .08))
+    return {
+        'center': (round((l + r) / 2), round((t + b) / 2)),
+        'offset': (round(l + w * .22), round(t + h * .72)),
+        'edge': (r - inset_x, t + inset_y),
+    }
+
+
+def zoom_reversibility_plan(board, cycles=3, anchors=None):
+    """Build paired +1/-1 and -1/+1 tests for each requested anchor.
+
+    Each pair starts from the frame left by the previous pair.  The return
+    action is therefore measured against its pair baseline, never assumed to
+    restore the image.  This intentionally exposes cumulative drift.
+    """
+    if isinstance(cycles, bool) or int(cycles) != cycles or int(cycles) < 1:
+        raise ValueError('Probe cycles must be a positive integer')
+    cycles = int(cycles)
+    available = zoom_probe_anchors(board)
+    selected = tuple(available) if anchors is None else tuple(anchors)
+    if not selected:
+        raise ValueError('At least one probe anchor is required')
+    if any(name not in available for name in selected):
+        raise ValueError('Unknown probe anchor')
+    if len(set(selected)) != len(selected):
+        raise ValueError('Probe anchors must be unique')
+    result = []
+    # Both orders are needed: a single direction pair cannot distinguish
+    # directional scale from a state-dependent response. Rotate anchor order
+    # on each cycle to reduce confounding between anchor and cumulative zoom.
+    orders = ((1, -1), (-1, 1))
+    for cycle in range(cycles):
+        shift = cycle % len(selected)
+        ordered = selected[shift:] + selected[:shift]
+        for anchor_name in ordered:
+            anchor = available[anchor_name]
+            for pair, order in enumerate(orders, 1):
+                for phase, direction in zip(('forward', 'return'), order):
+                    result.append(ZoomReversibilityAction(
+                        name=(f'{anchor_name}_c{cycle + 1:02d}_p{pair}_'
+                              f'{phase}_{direction:+d}'),
+                        anchor_name=anchor_name, cycle=cycle + 1, pair=pair,
+                        phase=phase, direction=direction,
+                        gesture=wheel_gesture(board, direction, anchor)))
+    return tuple(result)
+
+
 def response_probe_plan(board):
     l,t,r,b=board
     anchors={'center':(round((l+r)/2),round((t+b)/2)),
@@ -55,8 +118,180 @@ def rotation_comparison_plan(board):
     return tuple(result)
 
 
+def _probe_hex(image, scene, check=lambda: None):
+    """Best-effort card HEX read for diagnostics; OCR failure is recorded as null."""
+    try:
+        from vision import read_codes
+        values = read_codes(image, scene.cards, scene.markers, check=check)
+        return list(values)
+    except Exception as exc:
+        if exc.__class__.__name__ in ('Interrupted', 'InterruptedError'):
+            raise
+        return [None] * len(getattr(scene, 'cards', ()))
+
+
+def _probe_cursor_trace(game):
+    trace = getattr(game, 'last_input_trace', None)
+    if trace is None:
+        return None
+    # Copy the trace so a later gesture cannot mutate the journaled record.
+    return [dict(item) for item in trace]
+
+
+def run_zoom_reversibility_probe(game, scene, reference, snap, log, *,
+                                 register=None, clock=time.monotonic,
+                                 cycles=3, anchors=None):
+    """Measure one-notch zoom pairs without installing a response model.
+
+    The diagnostic sends only ``+1`` and ``-1`` wheel notches.  Every input
+    gets its own settled PNG, input trace, optional HEX read and registration;
+    the second input in each pair additionally records the composed net pose.
+    No compensating input is generated when a pair fails to close.
+    """
+    if register is None:
+        from atlas_runtime import motion as register
+    game.check()
+    plan = zoom_reversibility_plan(scene.board, cycles=cycles, anchors=anchors)
+    local = np.asarray(scene.markers, float) - np.asarray(scene.board[:2], float)
+    geometry = tuple(game.geometry())
+    park = (int(geometry[2] * .5), int(geometry[3] * .15))
+    l, t, r, b = scene.board
+    if l <= park[0] <= r and t <= park[1] <= b:
+        raise ValueError('No cursor parking position outside the board')
+    log('zoom_reversibility_plan', protocol='zoom_reversibility', cycles=int(cycles),
+        anchors=list(dict.fromkeys(p.anchor_name for p in plan)),
+        actions=[dict(name=p.name, anchor_name=p.anchor_name, cycle=p.cycle,
+                      pair=p.pair, phase=p.phase, direction=p.direction,
+                      gesture=p.gesture.record()) for p in plan],
+        board=list(scene.board), markers=[list(v) for v in scene.markers],
+        geometry=list(geometry), dpi=getattr(game, 'response_probe_dpi', None),
+        reference='max_sampling', response_model_installed=False)
+    current = reference
+    current_name = 'max_sampling'
+    pose = np.eye(3)
+    completed = 0
+    completed_pairs = 0
+    status = 'complete'
+    pair_baseline = None
+    pair_baseline_name = None
+    pair_forward = None
+    pair_forward_name = None
+    previous_trace = getattr(game, 'capture_input_trace', False)
+    game.capture_input_trace = True
+    try:
+        for index, action in enumerate(plan, 1):
+            game.check()
+            if tuple(game.geometry()) != geometry:
+                raise InterruptedError('Session geometry changed during response measurement')
+            gesture = action.gesture
+            deadline = min(game.until, getattr(game, 'stage_until', float('inf')))
+            if deadline - clock() < gesture.duration + .3 + 2.:
+                status = 'game_time_remaining'
+                break
+            if action.phase == 'forward':
+                pair_baseline, pair_baseline_name = current, current_name
+                pair_forward = pair_forward_name = None
+            before, before_name = current, current_name
+            log('zoom_reversibility_command', step=index, name=action.name,
+                anchor_name=action.anchor_name, cycle=action.cycle, pair=action.pair,
+                phase=action.phase, direction=action.direction,
+                reference=before_name, pair_baseline=pair_baseline_name,
+                pose_before=pose[:2].tolist(), gesture=gesture.record())
+            started = clock()
+            game.perform_gesture(gesture)
+            input_seconds = clock() - started
+            input_trace = _probe_cursor_trace(game)
+            log('zoom_reversibility_input', step=index, name=action.name,
+                phase=action.phase, direction=action.direction,
+                input_elapsed_seconds=input_seconds, input_trace=input_trace)
+            game.pause(.15)
+            game.check()
+            game.move_to(park)
+            frame_name = f'zoom_reversibility_{index:03d}_{action.phase}'
+            current = snap(frame_name, scene)
+            current_name = frame_name
+            hexes = _probe_hex(current, scene, check=game.check)
+            details = {}
+            try:
+                measured = register(before, current, scene, details)
+            except Exception as exc:
+                if exc.__class__.__name__ in ('Interrupted', 'InterruptedError'):
+                    raise
+                measured = None
+                details['error'] = str(exc)
+            record = dict(step=index, name=action.name, anchor_name=action.anchor_name,
+                          cycle=action.cycle, pair=action.pair, phase=action.phase,
+                          direction=action.direction, reference=before_name,
+                          pair_baseline=pair_baseline_name, frame=frame_name,
+                          gesture=gesture.record(), input_elapsed_seconds=input_seconds,
+                          input_trace=input_trace, hex=hexes, measurements=measured,
+                          diagnostics=details,
+                          registration_complete=measured is not None)
+            if measured is None:
+                log('zoom_reversibility_measurement', **record)
+                status = 'registration_incomplete'
+                break
+            matrix = homogeneous(measured['matrix'])
+            pose = matrix @ pose
+            completed += 1
+            record.update(response=pose_fields(matrix, scene.board),
+                          marker_errors=marker_errors(np.eye(3), matrix, local).tolist(),
+                          cumulative_pose=pose[:2].tolist())
+            if action.phase == 'forward':
+                pair_forward = matrix
+                pair_forward_name = current_name
+            else:
+                if pair_forward is not None and pair_baseline is not None:
+                    # R @ F is the observed net transform from the pair's
+                    # baseline, independent of the prior cumulative drift.
+                    net = matrix @ pair_forward
+                    net_fields = pose_fields(net, scene.board)
+                    net_fields['matrix'] = net[:2].tolist()
+                    record['pair_net'] = dict(net_fields,
+                                              marker_errors=marker_errors(np.eye(3), net, local).tolist(),
+                                              baseline=pair_baseline_name,
+                                              forward=pair_forward_name,
+                                              return_frame=current_name)
+                    completed_pairs += 1
+                    log('zoom_reversibility_pair', step=index,
+                        name=action.name, anchor_name=action.anchor_name,
+                        cycle=action.cycle, pair=action.pair,
+                        baseline=pair_baseline_name, forward=pair_forward_name,
+                        return_frame=current_name, net=record['pair_net'])
+            log('zoom_reversibility_measurement', **record)
+        outcome = dict(status=status, protocol='zoom_reversibility',
+                       planned=len(plan), completed=completed,
+                       completed_pairs=completed_pairs, last_frame=current_name,
+                       measured_pose=pose[:2].tolist(),
+                       response_model_installed=False)
+        if status == 'registration_incomplete':
+            outcome['measured_pose'] = None
+        log('zoom_reversibility_complete', **outcome)
+        return current, outcome
+    except Exception as exc:
+        log('zoom_reversibility_interrupted', completed=completed,
+            completed_pairs=completed_pairs, last_frame=current_name,
+            error=str(exc), input_trace=_probe_cursor_trace(game))
+        if exc.__class__.__name__ in ('Interrupted', 'InterruptedError'):
+            raise
+        outcome = dict(status='measurement_failed', protocol='zoom_reversibility',
+                       planned=len(plan), completed=completed,
+                       completed_pairs=completed_pairs, last_frame=current_name,
+                       measured_pose=None, response_model_installed=False,
+                       error=str(exc))
+        log('zoom_reversibility_complete', **outcome)
+        return current, outcome
+    finally:
+        game.capture_input_trace = previous_trace
+        try:
+            game.send(4)
+        finally:
+            game.send(16)
+
+
 def run_response_probe(game,scene,reference,snap,log,*,register=None,
-                       clock=time.monotonic,protocol='baseline'):
+                       clock=time.monotonic,protocol='baseline',probe_cycles=3,
+                       probe_anchors=None):
     """Run a bounded plan; return the last frame and a structured outcome.
 
     snap(name, scene) preserves original frames. log(kind, **data) journals
@@ -66,8 +301,12 @@ def run_response_probe(game,scene,reference,snap,log,*,register=None,
     if register is None:
         from atlas_runtime import motion as register
     game.check()
-    if protocol not in ('baseline','rotation_compare'):
+    if protocol not in ('baseline','rotation_compare','zoom_reversibility'):
         raise ValueError('Unknown response measurement protocol')
+    if protocol == 'zoom_reversibility':
+        return run_zoom_reversibility_probe(
+            game, scene, reference, snap, log, register=register, clock=clock,
+            cycles=probe_cycles, anchors=probe_anchors)
     plan=(rotation_comparison_plan if protocol=='rotation_compare' else response_probe_plan)(scene.board)
     local=np.asarray(scene.markers,float)-scene.board[:2]
     geometry=tuple(game.geometry())

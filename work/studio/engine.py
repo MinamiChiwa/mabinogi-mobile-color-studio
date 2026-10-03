@@ -10,7 +10,8 @@ from planner import joint_plan,decompose_gestures
 from best_result import BestResult,proximity,ranking
 from window_target import WindowUnavailable
 from input_response import assess_response,ResponseGuard
-from session_store import SessionStore,cleanup
+from session_store import (SessionStore,cleanup,mark_session,ACTIVE_MARKER,
+                           start_session_cleanup)
 from build_info import runtime_identity
 
 def local_offsets(radius=2):
@@ -147,14 +148,24 @@ class Runner:
         if strategy not in ('legacy','atlas'):
             raise ValueError('Unknown search strategy')
         if strategy=='atlas':
-            if self.atlas_runner is None:
+            single=mode=='search' and sum(bool(r.get('enabled')) for r in rules)==1
+            if not single and self.atlas_runner is None:
                 raise RuntimeError('Atlas strategy is not connected to this Runner')
+            # A normal atlas/quick-search session has no opt-in SessionStore
+            # worker. Mark its root explicitly so retention can recognize it.
+            mark_session(self.folder)
+            try:(self.folder/ACTIVE_MARKER).write_text('active',encoding='ascii')
+            except OSError:pass
             try:
                 # Atlas capture performs OCR before entering the legacy loop;
                 # initialize the bundled/system Tesseract path here as well.
                 configure_ocr()
-                self.event('config',rules=rules,strategy=strategy,auto_apply=False,
+                self.event('config',rules=rules,strategy='single_current_board' if single else strategy,auto_apply=False,
                            build=runtime_identity())
+                if single:
+                    from single_region_live import run_live_single_region
+                    return run_live_single_region(self,rules,activate=activate,target=target,
+                                                  **strategy_context)
                 return self.atlas_runner(self,rules,mode=mode,auto=auto,
                                          activate=activate,target=target,
                                          **strategy_context)
@@ -179,6 +190,9 @@ class Runner:
                         stop_requested=self.stop.is_set(),events=list(self.trace)),
                         ensure_ascii=False,indent=2),encoding='utf-8')
                 except (OSError,TypeError,ValueError):pass
+                try:(self.folder/ACTIVE_MARKER).unlink(missing_ok=True)
+                except OSError:pass
+                start_session_cleanup(self.folder.parent)
                 self.emit('finished',{})
                 self.trace.clear()
             return None

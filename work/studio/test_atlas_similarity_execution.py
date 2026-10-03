@@ -193,8 +193,14 @@ class SimilarityExecutionTests(unittest.TestCase):
                     batch=batch,batch_id=batch.id,board=self.game.ctx.board,adapter=self.game,
                     reference=self.game.capture(),selection_deadline=deadline)
         owner=Owner();owner.selection=1
+        def prepare(_owner,_report,row,_rules,**context):
+            budget=reposition_budget(row,time.monotonic(),context['selection_deadline'],
+                                     self.game.ctx.board,markers=self.game.ctx.markers)
+            return dict(row,route_stability=dict(passed=True,samples_complete=True,
+                        response_profile_verified=True),
+                        prepared_reference_pose=homogeneous(context['reference_pose'])[:2].tolist()),budget
         service=AtlasService(AtlasCallbacks(lambda *a,**k:None,lambda *a,**k:report,
-                                           default_current,choice_current))
+                                           default_current,choice_current,prepare=prepare))
         result=service.run(owner,self.rules)
         self.assertTrue(result['accepted']);self.assertEqual(result['candidate_id'],1)
         np.testing.assert_allclose(result['actual_pose'],self.game.pose[:2],atol=1e-9)

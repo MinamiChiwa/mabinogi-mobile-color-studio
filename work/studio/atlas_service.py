@@ -23,6 +23,7 @@ class AtlasCallbacks:
     choice: object
     select: object=None
     prepare: object=None
+    observe_current: object=None
 
 
 def quality_failure_message(gate):
@@ -68,19 +69,96 @@ class AtlasService:
     def __init__(self, callbacks):
         self.callbacks=callbacks
 
-    def _prepare_protected(self,owner,report,target,source_pose,rules,context):
+    def _prepare_route(self,owner,report,target,source_pose,rules,context,*,user_selected=False):
         if not callable(self.callbacks.prepare):return None
         move=relative_candidate(target,source_pose,report['board'])
         row,budget=self.callbacks.prepare(owner,report,move,rules,
-            **dict(context,reference_pose=source_pose))
-        if row is None or not _protected_route(row,budget):
+            **dict({k:v for k,v in context.items() if k!='return_guard'},reference_pose=source_pose))
+        stability=row.get('route_stability',{}) if row is not None else {}
+        eligible=(budget.get('allowed',False) and stability.get('passed',False) and
+                  stability.get('samples_complete',True))
+        if row is None or not (eligible if user_selected else _protected_route(row,budget)):
             owner.event('atlas_trial_route_unavailable',candidate_id=target['id'],
                 budget={k:v for k,v in budget.items() if k!='input_route'},
                 route_stability=row.get('route_stability') if row is not None else None)
             return None
         # Rebinding may correct the same endpoint, but cannot replace it with
         # a new search result while an observed checkpoint is at risk.
-        return dict(row,protect_observed_result=True),budget
+        return dict(row,protect_observed_result=True,
+                    **({'user_selected_route':True} if user_selected else {})),budget
+
+    def _observe_early_exit(self, owner, captured, rules, context, reason):
+        """Read the unchanged board after a non-safety search early exit.
+
+        This callback is deliberately read-only and optional.  It must never
+        turn a failed atlas build into a claimed candidate or best result; a
+        successful double-read is reported as the current observation only.
+        """
+        callback=getattr(self.callbacks,'observe_current',None)
+        if not callable(callback):return None
+        try:
+            observed=callback(owner,captured,rules,reason=reason,**context)
+        except Exception as exc:
+            if _is_safety_interrupt(exc):raise
+            owner.event('atlas_recovery_unavailable',
+                        message='当前动作未能可靠复核，已停止自动移动并保留游戏当前画面。',
+                        detail=str(exc),reason=reason)
+            return None
+        if not isinstance(observed,dict):return None
+        observed=dict(observed,early_exit=True,recovery_reason=reason,
+                      candidate_id=None,actual_pose=None,pose_reliable=False,
+                      accepted=False,recovered=True,best_result_current=False,positioning_complete=False)
+        owner.event('atlas_recovery',**observed)
+        return observed
+
+    def _prepare_protected(self,owner,report,target,source_pose,rules,context):
+        return self._prepare_route(owner,report,target,source_pose,rules,context)
+
+    def _return_guard(self,owner,report,target,rules,context):
+        """Reserve a freshly bound return from the latest global observation.
+
+        The return budget already includes final HEX verification and safety
+        time. The executor adds only its upcoming input and observation cost.
+        The callback belongs in execution context, never candidate diagnostics.
+        """
+        context={k:v for k,v in context.items() if k!='return_guard'}
+        deadline=context.get('selection_deadline')
+        def guard(actual_pose,upcoming_seconds=0.,projected_pose=None):
+            details=dict(allowed=False,reason='return_route_unavailable',needed=None,
+                         remaining=None,return_needed=None,upcoming_seconds=upcoming_seconds,
+                         checkpoint_candidate_id=target['id'])
+            try:
+                upcoming=float(upcoming_seconds)
+                if not math.isfinite(upcoming) or upcoming<0:raise ValueError('Invalid action duration')
+                measured=homogeneous(actual_pose)
+                if not all(math.isfinite(value) for value in measured.flat):
+                    raise ValueError('Invalid measured pose')
+                # Price the return from the predicted post-action pose when
+                # available.  This prevents a rotation/zoom input from being
+                # approved solely because the current pose is cheap to undo.
+                return_pose = measured if projected_pose is None else homogeneous(projected_pose)
+                returning=self._prepare_protected(owner,report,target,measured[:2].tolist(),rules,context)
+                if projected_pose is not None:
+                    projected=self._prepare_protected(owner,report,target,return_pose[:2].tolist(),rules,context)
+                    if projected is None:
+                        return dict(details,reason='projected_return_unavailable')
+                    returning=projected
+                if returning is None:
+                    return dict(details,reason='return_route_unavailable')
+                budget=returning[1]
+                return_needed=float(budget['needed'])
+                remaining=float(deadline)-time.monotonic()
+                needed=return_needed+upcoming
+                if not math.isfinite(needed) or needed<0:raise ValueError('Invalid return duration')
+                allowed=remaining>needed
+                return dict(details,allowed=allowed,
+                    reason=None if allowed else 'insufficient_return_time',needed=needed,
+                    remaining=remaining,return_needed=return_needed,upcoming_seconds=upcoming,
+                    actions=budget.get('actions',{}))
+            except Exception as exc:
+                if _is_safety_interrupt(exc):raise
+                return dict(details,detail=str(exc))
+        return guard
 
     def _restore_observed(self,owner,report,current,best,target,rules,context):
         """Keep historical HEX distinct from the actual board after a trial."""
@@ -130,12 +208,12 @@ class AtlasService:
             emit('atlas_recovery_unavailable',
                  message='颜色板校验未能完成，已停止自动移动并保留游戏当前画面。',
                  detail=str(exc))
-            return None
+            return self._observe_early_exit(owner,captured,rules,context,'atlas_build_failed')
         gate=report.get('quality_gate',{})
         if not gate.get('passed',False):
             emit('atlas_invalidated',reason='atlas_quality_failed',search_performed=False,
                  message=quality_failure_message(gate),quality_gate=gate)
-            return None
+            return self._observe_early_exit(owner,captured,rules,context,'atlas_quality_failed')
         batch=report.get('batch')
         deadline=earliest_deadline(context.get('selection_deadline'),report.get('selection_deadline'),
                                    batch.deadline if batch is not None else None)
@@ -170,7 +248,7 @@ class AtlasService:
                                              else 'bounded_search_no_match'),search_performed=True,message=message,
                  stable_route_count=stable_count,
                  search_diagnostics=report.get('search_diagnostics',{}))
-            return None
+            return self._observe_early_exit(owner,captured,rules,context,'no_executable_candidate')
         rows=sorted(rows,key=candidate_rank)
         batch_id=report.get('batch_id') or (batch.id if batch is not None else uuid.uuid4().hex)
         board=report.get('board')
@@ -188,7 +266,7 @@ class AtlasService:
         if not default_budget['allowed']:
             if batch is not None:batch.invalidate()
             emit('atlas_default_unavailable',message='剩余时间不足以安全定位并复核自动最佳方案，未发送定位操作。',budget=default_budget)
-            return None
+            return self._observe_early_exit(owner,captured,rules,context,'default_budget_unavailable')
         # Only publish routes that passed the complete motion simulation and
         # fit the remaining game time. Raw search results stay in diagnostics.
         rows=[row for row,_budget in available]
@@ -212,13 +290,13 @@ class AtlasService:
             emit('atlas_recovery_unavailable',
                  message='当前动作未能可靠复核，已停止自动移动并保留游戏当前画面。',
                  detail=str(exc), candidate_id=default.get('id'))
-            return None
+            return self._observe_early_exit(owner,captured,rules,context,'default_execution_failed')
         if not isinstance(result,dict):
             if batch is not None:batch.invalidate()
             emit('atlas_recovery_unavailable',
                  message='自动方案未返回可验证结果，已停止自动移动并保留游戏当前画面。',
                  detail='default callback returned no result', candidate_id=default.get('id'))
-            return None
+            return self._observe_early_exit(owner,captured,rules,context,'default_result_unavailable')
         result=dict(result, predicted_accepted=result.get('predicted_accepted',bool(default.get('accepted'))),
                     compromise=compromise_only or not bool(default.get('accepted')),
                     candidate_id=default['id'])
@@ -235,7 +313,12 @@ class AtlasService:
             emit('atlas_recovery_unavailable',
                  message='自动方案未能完成位置复核，已停止自动移动并保留当前游戏画面。',
                  detail='missing verified pose', candidate_id=default.get('id'))
-            return result if result.get('verified') else None
+            observed=self._observe_early_exit(owner,captured,rules,context,
+                                              'default_observation_unavailable')
+            # If no observer is wired, retain the historical verified payload;
+            # a wired observer supersedes it with a fresh double-read that has
+            # no candidate/pose claim.
+            return observed if observed is not None else (result if result.get('verified') else None)
         # Keep the original recovered HEX as the checkpoint. Newly searched
         # translation alternatives participate in the same bound trial/return
         # logic as ordinary candidates, rather than executing inside a callback.
@@ -275,6 +358,7 @@ class AtlasService:
                     continue
                 next_move=move;default=candidate
                 trial_deadline=deadline-returning[1]['needed']
+                trial_guard=self._return_guard(owner,report,checkpoint_target(),rules,context)
                 break
             if next_move is None:break
             emit('atlas_candidate_failed',**result)
@@ -283,7 +367,7 @@ class AtlasService:
             emit('atlas_status',message='当前候选实测未达标，正在定位并复核下一候选。')
             try:
                 trial=self.callbacks.choice(owner,report,next_move,rules,
-                    **dict(context,selection_deadline=trial_deadline))
+                    **dict(context,selection_deadline=trial_deadline,return_guard=trial_guard))
             except Exception as exc:
                 if _is_safety_interrupt(exc):raise
                 if batch is not None:batch.invalidate()
@@ -366,10 +450,30 @@ class AtlasService:
                  message='缺少当前姿态测量，未执行切换，保持当前颜色。')
             return result
         try:
-            move=relative_candidate(candidate,result['actual_pose'],board)
-            budget=(reposition_budget(move,time.monotonic(),deadline,board,markers=markers)
-                    if board else {'allowed':False})
+            prepared=self._prepare_route(owner,report,candidate,result['actual_pose'],rules,context,
+                                         user_selected=True)
+            if prepared is None:
+                if batch is not None:batch.invalidate()
+                emit('atlas_choice_rejected',candidate_id=selected,default_id=default['id'],
+                     message='所选方案无法完成路线复核，已保留当前实测结果。')
+                return result
+            move,budget=prepared
+            endpoint=(candidate_pose(move,board)@homogeneous(result['actual_pose']))[:2].tolist()
+            target=checkpoint_target()
+            returning=self._prepare_protected(owner,report,target,endpoint,rules,context)
+            if returning is None:
+                if batch is not None:batch.invalidate()
+                emit('atlas_choice_rejected',candidate_id=selected,default_id=default['id'],
+                     message='所选方案的返回路线尚未完成验证，已保留当前实测结果。')
+                return result
+            return_needed=returning[1]['needed']
+            needed=budget['needed']+return_needed
+            remaining=deadline-time.monotonic()
+            budget=dict(budget,allowed=remaining>needed,
+                        reason=None if remaining>needed else 'insufficient_return_time',
+                        needed=needed,remaining=remaining,return_needed=return_needed)
         except Exception as exc:
+            if _is_safety_interrupt(exc):raise
             if batch is not None:batch.invalidate()
             emit('atlas_choice_rejected',candidate_id=selected,default_id=default['id'],
                  message='所选方案无法生成安全操作，保持自动最佳方案。',detail=str(exc))
@@ -382,8 +486,8 @@ class AtlasService:
                  predicted_maximum=candidate.get('maximum'),
                  predicted_average=candidate.get('average'),
                  exact_matches=candidate.get('exact_matches'),
-                 message=('剩余时间不足，保持自动最佳方案。'
-                          if budget.get('reason') in ('deadline','insufficient_time') else
+                 message=('剩余时间不足以完成切换、返回与颜色复核，已保留当前实测结果。'
+                          if budget.get('reason') in ('deadline','insufficient_time','insufficient_return_time') else
                           '所选方案无法从当前位置可靠到达，已保留当前颜色。'),budget=budget)
             return result
         def incomplete_choice(observation):
@@ -393,7 +497,9 @@ class AtlasService:
             if restored.get('best_result_current'):emit('atlas_verified',**restored)
             return restored
         try:
-            choice=self.callbacks.choice(owner,report,move,rules,**context)
+            choice=self.callbacks.choice(owner,report,move,rules,
+                **dict(context,selection_deadline=deadline-return_needed,
+                       return_guard=self._return_guard(owner,report,target,rules,context)))
         except Exception as exc:
             if _is_safety_interrupt(exc):raise
             return incomplete_choice(dict(candidate_id=candidate['id'],verified=False,
