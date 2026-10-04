@@ -1,7 +1,8 @@
 import unittest
 import numpy as np
 from unittest.mock import patch
-from atlas_execution import CandidateBatch,Context,CandidateExpired,execute_candidate,reposition_budget
+from atlas_execution import (CandidateBatch,Context,CandidateExpired,execute_candidate,
+                             reposition_budget,_feedback_observation_result)
 from atlas_pose import homogeneous
 
 
@@ -145,6 +146,14 @@ class ExecutionTests(unittest.TestCase):
         self.assertEqual(result['actual_colors'], ['#000000'] * 3)
         self.assertEqual(result['best_result']['actual_colors'], ['#112233'] * 3)
         self.assertFalse(result['best_result']['actual_pose'] == result['actual_pose'])
+
+    def test_feedback_best_preserves_measured_linear_pose(self):
+        candidate=dict(id=0,colors=['#112233']*3,deltas=[0]*3)
+        rules=[dict(enabled=True,colors=['#112233'],exact=False,tolerance=1)]*3
+        matrix=[[.98,-.2,5.],[.2,.98,6.]]
+        result=_feedback_observation_result(candidate,
+            dict(codes=['#112233']*3,pose_matrix=matrix),rules,[1.,2.])
+        np.testing.assert_allclose(result['actual_pose'],matrix)
     def test_old_batch_and_duplicate_selection_never_drag(self):
         with self.assertRaises(CandidateExpired):self.batch.claim('wrong',0,self.adapter.ctx)
         self.assertEqual(self.adapter.moves,[])

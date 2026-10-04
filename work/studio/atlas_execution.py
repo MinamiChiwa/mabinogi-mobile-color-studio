@@ -552,10 +552,11 @@ def _feedback_refine(adapter, candidate, actual, before, codes, rules, markers,
     from hex_feedback_search import (stable_hex_read, score_observation,
         retain_best, NeighborhoodLimits, neighborhood_offsets,
         UnstableHexRead, SearchDeadlineExceeded)
-    if any(r.get('enabled') and codes[i] is None for i,r in enumerate(rules)):
+    if len(codes)!=len(rules) or any(r.get('enabled') and codes[i] is None for i,r in enumerate(rules)):
         return actual, before, list(codes), None, False, 'unreadable_initial'
     try:
         best = score_observation(codes, rules, pose=actual[:2,2])
+        best['pose_matrix']=actual[:2].tolist()
     except Exception:
         return actual, before, list(codes), None, False, 'unscorable_initial'
     current_actual = actual.copy(); current_frame = before; current_codes = list(codes)
@@ -631,6 +632,7 @@ def _feedback_refine(adapter, candidate, actual, before, codes, rules, markers,
             checked_translation(tail)
             sample = score_observation(stable['codes'], rules, pose=next_actual[:2,2],
                                        frames=2)
+            sample['pose_matrix']=next_actual[:2].tolist()
             probes += 1
             emit('atlas_hex_feedback', dict(step=probes, offset=command.tolist(),
                  codes=sample['codes'], rank=sample['rank'], improved=sample['score_key'] < best['score_key']))
@@ -713,7 +715,7 @@ def _feedback_observation_result(candidate, observation, rules, actual_pose):
     """
     codes=list(observation.get('codes') or [])
     result=verify_result(candidate,codes,rules)
-    pose=np.asarray(actual_pose, float)
+    pose=np.asarray(observation.get('pose_matrix',actual_pose), float)
     if pose.shape==(2,):
         pose=np.array([[1.,0.,pose[0]],[0.,1.,pose[1]]])
     if pose.shape!=(2,3):
@@ -738,7 +740,7 @@ def _unknown_feedback_result(candidate, codes, rules, actual_pose):
                 actual_deltas=[None]*len(rules),prediction_errors=[None]*len(rules),
                 maximum=None,average=None,accepted=False,verified=False,
                 actual_pose=np.asarray(actual_pose, float)[:2].tolist(),
-                feedback_best_available=True,feedback_best=True,
+                feedback_best_available=False,feedback_best=False,
                 prediction_pose_source='measured_hex_feedback_unreadable')
 
 
@@ -1259,7 +1261,8 @@ def execute_candidate(adapter,batch,batch_id,candidate_id,reference,rules,emit=l
         try:
             result=verify_result(candidate,second,rules)
         except (RuntimeError, ValueError):
-            if any(r.get('enabled') and second[i] is None for i,r in enumerate(rules)):
+            if len(second)!=len(rules) or any(r.get('enabled') and second[i] is None
+                                              for i,r in enumerate(rules)):
                 result=_unknown_feedback_result(candidate,second,rules,actual)
             else:
                 raise

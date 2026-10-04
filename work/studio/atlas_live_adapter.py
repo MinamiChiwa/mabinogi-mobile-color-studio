@@ -468,6 +468,10 @@ def choice_current(owner, report, candidate, rules, **_context):
     result=_execute_recorded(owner,report,row,rules,batch,reference,return_guard=_context.get('return_guard'))
     if result.get('actual_pose') is not None:
         result['actual_pose']=(homogeneous(result['actual_pose'])@homogeneous(report['actual_pose']))[:2].tolist()
+    if result.get('best_result', {}).get('actual_pose') is not None:
+        result['best_result']['actual_pose']=(
+            homogeneous(result['best_result']['actual_pose']) @
+            homogeneous(report['actual_pose']))[:2].tolist()
     report['pose_reference']=adapter.verified_frame
     report['actual_pose']=result['actual_pose']
     return result
