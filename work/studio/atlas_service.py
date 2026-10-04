@@ -300,6 +300,16 @@ class AtlasService:
         result=dict(result, predicted_accepted=result.get('predicted_accepted',bool(default.get('accepted'))),
                     compromise=compromise_only or not bool(default.get('accepted')),
                     candidate_id=default['id'])
+        # A local HEX feedback probe may have measured a better sample but
+        # failed to return to it before the deadline.  That payload is a
+        # terminal, explicitly split observation: the current game pose stays
+        # authoritative and ``best_result`` is historical only.  Do not feed
+        # it into the ordinary candidate loop or present it as a verified
+        # automatic result.
+        if result.get('feedback_best_available') and not result.get('best_result_current'):
+            if batch is not None:batch.invalidate()
+            emit('atlas_best_not_restored',**result)
+            return result
         # A recovery can continue only from a newly registered pose. The
         # alternate-candidate path keeps that observation as its checkpoint
         # and does not repeat the failed transform.

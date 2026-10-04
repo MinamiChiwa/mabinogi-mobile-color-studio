@@ -1,5 +1,6 @@
 import unittest
 import numpy as np
+from unittest.mock import patch
 from atlas_execution import CandidateBatch,Context,CandidateExpired,execute_candidate,reposition_budget
 from atlas_pose import homogeneous
 
@@ -123,6 +124,27 @@ class ExecutionTests(unittest.TestCase):
         self.assertTrue(result['feedback_refined'])
         self.assertEqual(result['actual_colors'], ['#112233'] * 3)
         self.assertEqual(adapter.moves, [(1, 0)])
+
+    def test_feedback_best_is_separate_when_return_budget_cannot_restore_it(self):
+        adapter = FeedbackHexFake()
+        row = dict(id=0, dx=0, dy=0, angle=0, scale=1,
+                   colors=['#112233'] * 3, deltas=[0] * 3)
+        rules = [dict(enabled=True, colors=['#112233'], exact=False,
+                      tolerance=1)] * 3
+        batch = CandidateBatch([row], adapter.ctx, 100, clock=lambda: 0)
+        best = dict(codes=['#112233'] * 3, deltas=[0., 0., 0.],
+                    accepted=True, target_exact=True, rank=(False, 0., 0, 0.),
+                    score_key=(False, 0., 0, 0.), pose=[1., 0.])
+        with patch('atlas_execution._feedback_refine', return_value=(
+                np.eye(3), adapter.capture(), ['#000000'] * 3, best, False,
+                'best_not_restored_deadline')):
+            result = execute_candidate(adapter, batch, batch.id, 0, np.zeros(2),
+                                       rules, clock=lambda: 0)
+        self.assertFalse(result['best_result_current'])
+        self.assertTrue(result['feedback_best_available'])
+        self.assertEqual(result['actual_colors'], ['#000000'] * 3)
+        self.assertEqual(result['best_result']['actual_colors'], ['#112233'] * 3)
+        self.assertFalse(result['best_result']['actual_pose'] == result['actual_pose'])
     def test_old_batch_and_duplicate_selection_never_drag(self):
         with self.assertRaises(CandidateExpired):self.batch.claim('wrong',0,self.adapter.ctx)
         self.assertEqual(self.adapter.moves,[])

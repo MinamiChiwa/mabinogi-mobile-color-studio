@@ -37,6 +37,27 @@ class SearchOverlayAtlasTests(unittest.TestCase):
             self.assertIn('normal outcome',str(i18n.tr(overlay.render.call_args.args[1])))
         finally:i18n.set_language(original)
 
+    def test_multi_region_compromise_notice_is_translated_in_three_languages(self):
+        import i18n
+        original=i18n.language
+        try:
+            for language in ('简体中文','繁體中文','English'):
+                i18n.set_language(language)
+                overlay=SearchOverlay.__new__(SearchOverlay)
+                for name in ('clear_candidates','results','copy','activity','collapse','resize_surface','render'):
+                    setattr(overlay,name,Mock())
+                overlay.candidate_rows={}
+                data=dict(batch_id='batch',default_id=0,compromise_only=True,
+                    candidates=[dict(id=0,colors=['#000000']*3,deltas=[20]*3,
+                                     maximum=20,average=20,accepted=False)])
+                with patch('search_overlay.ct.CTkFrame'),patch('search_overlay.ct.CTkButton'), \
+                     patch('search_overlay.ct.CTkLabel') as labels:
+                    overlay.show_candidates(data)
+                texts=' '.join(str(i18n.tr(c.kwargs.get('text',''))) for c in labels.call_args_list)
+                expected=str(i18n.tr('本轮没有预测达标方案；以下结果仅供参考，实际复核未达标时会停止。'))
+                self.assertIn(expected,texts)
+        finally:i18n.set_language(original)
+
     def test_pose_only_recovery_does_not_claim_colors_were_read(self):
         import i18n
         original=i18n.language

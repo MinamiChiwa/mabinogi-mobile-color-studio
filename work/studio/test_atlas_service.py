@@ -109,6 +109,27 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual([e[0] for e in owner.events],
                          ['atlas_status','atlas_ready','atlas_search_summary','atlas_candidates','atlas_default_verified','atlas_selection_expired'])
 
+    def test_feedback_best_not_restored_is_terminal_and_keeps_current_hex_separate(self):
+        owner=Owner();base=self.callbacks()
+        base.build=lambda *a,**k:{'quality_gate':{'passed':True},'candidates':[
+            dict(id=0,dx=0,dy=0,accepted=False,maximum=50,average=50,
+                 colors=['#FFFFFF']*3,deltas=[50]*3)],'board':(0,0,900,900)}
+        best=dict(candidate_id=0,actual_colors=['#112233']*3,
+                  actual_deltas=[0.,0.,0.],maximum=0.,average=0.,
+                  accepted=True,verified=True,actual_pose=[[1,0,1],[0,1,0]])
+        base.default=lambda *a,**k:dict(candidate_id=0,
+            predicted_colors=['#FFFFFF']*3,predicted_deltas=[50]*3,
+            actual_colors=['#000000']*3,actual_deltas=[50.,50.,50.],
+            maximum=50.,average=50.,accepted=False,verified=True,
+            actual_pose=[[1,0,0],[0,1,0]],feedback_best_available=True,
+            best_result_current=False,best_result=best)
+        result=AtlasService(base).run(owner,[],selection_deadline=time.monotonic()+30)
+        self.assertEqual(result['actual_colors'],['#000000']*3)
+        self.assertEqual(result['best_result']['actual_colors'],['#112233']*3)
+        self.assertFalse(result['best_result_current'])
+        self.assertEqual(owner.events[-1][0],'atlas_best_not_restored')
+        self.assertNotIn('atlas_default_verified',[kind for kind,_ in owner.events])
+
     def test_unreachable_scale_is_filtered_before_publication_and_input(self):
         owner=Owner();base=self.callbacks();calls=[]
         base.build=lambda *a,**k:{'quality_gate':{'passed':True},'candidates':[

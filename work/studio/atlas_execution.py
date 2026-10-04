@@ -703,6 +703,45 @@ def _feedback_refine(adapter, candidate, actual, before, codes, rules, markers,
     return current_actual, current_frame, current_codes, best, restored, reason
 
 
+def _feedback_observation_result(candidate, observation, rules, actual_pose):
+    """Convert one retained HEX feedback sample into the normal result shape.
+
+    ``score_observation`` intentionally stays adapter agnostic and therefore
+    only contains the measured codes and ranking fields.  The service/UI use
+    the same result contract as a regular candidate, so build that contract
+    here without ever treating the requested or historical pose as current.
+    """
+    codes=list(observation.get('codes') or [])
+    result=verify_result(candidate,codes,rules)
+    pose=np.asarray(actual_pose, float)
+    if pose.shape==(2,):
+        pose=np.array([[1.,0.,pose[0]],[0.,1.,pose[1]]])
+    if pose.shape!=(2,3):
+        raise ValueError('Measured feedback pose must be a 2x3 transform or point')
+    result.update(actual_pose=pose.tolist(),
+                  feedback_best=True, feedback_best_available=True,
+                  prediction_pose_source='measured_hex_feedback')
+    return result
+
+
+def _unknown_feedback_result(candidate, codes, rules, actual_pose):
+    """Represent the live pose when feedback HEX is no longer readable.
+
+    An input has already happened at this point.  Returning the pre-action
+    HEX would be unsafe, so retain only the current pose and explicit unknown
+    colour fields until the user verifies the game screen.
+    """
+    values=list(codes or [])
+    if len(values)!=len(rules):values=[None]*len(rules)
+    return dict(candidate_id=candidate['id'],predicted_colors=candidate.get('colors'),
+                predicted_deltas=candidate.get('deltas'),actual_colors=values,
+                actual_deltas=[None]*len(rules),prediction_errors=[None]*len(rules),
+                maximum=None,average=None,accepted=False,verified=False,
+                actual_pose=np.asarray(actual_pose, float)[:2].tolist(),
+                feedback_best_available=True,feedback_best=True,
+                prediction_pose_source='measured_hex_feedback_unreadable')
+
+
 def _recover_current_result(adapter, candidate, rules, actual, markers, target,
                             emit, reason, pose_frame=None, stage_budget=None, pose_current=False):
     """Read the colour currently under the picker without sending input.
@@ -1214,14 +1253,32 @@ def execute_candidate(adapter,batch,batch_id,candidate_id,reference,rules,emit=l
             errors=marker_errors(target,actual,markers)
             if np.max(errors)>FEEDBACK_POSITION_TOLERANCE:
                 raise CandidateExpired('Marker alignment changed during HEX feedback search')
-        result=verify_result(candidate,second,rules)
+        # ``second`` belongs to the live pose after feedback.  It may be
+        # unreadable when a settling read or the attempted return runs out of
+        # budget; never fall back to the HEX from before that input.
+        try:
+            result=verify_result(candidate,second,rules)
+        except (RuntimeError, ValueError):
+            if any(r.get('enabled') and second[i] is None for i,r in enumerate(rules)):
+                result=_unknown_feedback_result(candidate,second,rules,actual)
+            else:
+                raise
+        if feedback_best is not None:
+            # Keep the retained sample separate from the current live pose.
+            # This is the only safe way to tell the user that a better colour
+            # was measured but could not be restored before the countdown.
+            result['feedback_best_available']=True
+            if not feedback_restored:
+                result['best_result']=_feedback_observation_result(
+                    candidate,feedback_best,rules,feedback_best.get('pose',actual[:2,2]))
+            result['best_result_current']=bool(feedback_restored)
         result.update(actual_pose=actual[:2].tolist(),marker_errors=errors.tolist(),
                       replanned=pose_replanned,predicted_accepted=bool(candidate.get('accepted')),
                       prediction_pose_source=candidate.get('prediction_pose_source','proposal'),
                       prediction_pose=candidate.get('prediction_pose'),
                       feedback_refined=feedback_used,
                       feedback_reason=feedback_reason,
-                      best_result_current=bool(feedback_restored),
+                      best_result_current=result.get('best_result_current',bool(feedback_restored)),
                       compromise=not bool(result.get('accepted')))
         adapter.verified_frame=verified_frame
         if reservation=='choice':
