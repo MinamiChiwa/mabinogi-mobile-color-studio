@@ -7,7 +7,8 @@ from unittest.mock import patch
 import numpy as np
 from atlas_bound_route import bind_candidate, bound_motion, forecast_gesture
 from atlas_pose import candidate_pose, homogeneous, relative_candidate, marker_errors
-from atlas_execution import CandidateBatch, execute_candidate, reposition_budget
+from atlas_execution import (CandidateBatch, execute_candidate, reposition_budget,
+                              _route_needs_replan)
 from test_atlas_similarity_execution import SimilarityGame
 from test_atlas_pose_scoring import CoordinateAtlas
 
@@ -43,6 +44,12 @@ class BoundRouteTests(unittest.TestCase):
             self.game.ctx.markers,self.rules,0,1000)
         self.assertIsNotNone(row,budget)
         return row
+
+    def test_route_replan_uses_hysteresis_around_one_pixel_registration_noise(self):
+        self.assertFalse(_route_needs_replan([1.0, .9, 1.1]))
+        self.assertFalse(_route_needs_replan([1.24, 1.0, .8]))
+        self.assertTrue(_route_needs_replan([1.26, 1.0, .8]))
+        self.assertTrue(_route_needs_replan([.1, .1, .1], rotation_quantized=True))
 
     def execute(self,row,events=None):
         batch=CandidateBatch([row],self.game.ctx,1000,clock=lambda:0)
@@ -518,6 +525,27 @@ class BoundRouteTests(unittest.TestCase):
         with patch('atlas_live_adapter.time.monotonic',return_value=0):
             self.assertIsNone(self.game.rebind(np.eye(3),row,self.rules))
         self.assertEqual(self.game.sent,[])
+
+    def test_measured_replan_rejects_materially_worse_fallback(self):
+        from atlas_live_adapter import _candidate_is_no_worse
+        current=dict(self.row,accepted=False,maximum=10.,average=8.)
+        close=dict(self.row,accepted=False,maximum=10.5,average=8.2)
+        worse=dict(self.row,accepted=False,maximum=25.,average=20.)
+        self.assertTrue(_candidate_is_no_worse(close,current))
+        self.assertFalse(_candidate_is_no_worse(worse,current))
+
+    def test_live_builder_records_route_binding_time(self):
+        from atlas_live_adapter import build_current
+        deadline=time.monotonic()+1000
+        game=SimpleNamespace(until=deadline,check=lambda:None,geometry=lambda:self.game.ctx.geometry)
+        capture=dict(game=game,deadline=deadline,scene=SimpleNamespace(board=self.game.ctx.board,
+            markers=self.game.ctx.markers),image='reference')
+        report=dict(quality_gate={'passed':True},candidates=[dict(self.row,angle=0,scale=1)],
+                    runtime=dict(atlas=self.atlas,capture_offset=[0,0]))
+        with patch('atlas_live_adapter.build_from_capture',return_value=report):
+            built=build_current(capture,self.rules)
+        self.assertIn('route_binding_seconds',built['search_diagnostics'])
+        self.assertGreaterEqual(built['search_diagnostics']['route_binding_seconds'],0.)
 
     def test_live_builder_falls_back_to_current_pose_translation_when_routes_fail(self):
         from atlas_live_adapter import build_current

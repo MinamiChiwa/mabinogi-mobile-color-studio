@@ -9,65 +9,7 @@ import numpy as np
 
 from single_region_search import QuickSearchLimits,run_single_region
 from single_region_live import SingleRegionIO
-
-
-def scene():
-    return SimpleNamespace(board=(0,0,300,300),
-                           markers=[(50,150),(150,150),(250,150)],cards=[])
-
-
-def rules(exact=True):
-    return [dict(enabled=i==0,colors=['#000000'],exact=exact,
-                 tolerance=8) for i in range(3)]
-
-
-class StopRequested(Exception):pass
-
-
-class AffineGame:
-    def __init__(self,color=None,*,up=1.013,down=.991,native_limits=(.5,2),now=0.):
-        self.now=float(now);self.pose=np.eye(3);self.up=up;self.down=down
-        self.native_limits=native_limits;self.commands=[];self.events=[]
-        self.frames={};self.reads=0;self.stopped=False
-        self.color=color or (lambda game:'#111111')
-        self.motion_available=True
-
-    @property
-    def scale(self):return float(np.sqrt(np.linalg.det(self.pose[:2,:2])))
-
-    @property
-    def source(self):return (np.linalg.inv(self.pose) @ [50,150,1])[:2]
-
-    def clock(self):return self.now
-    def check(self):
-        if self.stopped:raise StopRequested('F9')
-    def pause(self,seconds):self.check();self.now+=seconds
-    def capture(self):
-        self.check();self.now+=.025
-        image=np.full((300,300,3),90,np.uint8)
-        self.frames[id(image)]=self.pose.copy()
-        return image
-    def drag(self,board,dx,dy):
-        self.check();self.commands.append(('drag',dx,dy,self.now));self.now+=.35
-        matrix=np.eye(3);matrix[:2,2]=[dx,dy];self.pose=matrix@self.pose
-    def wheel(self,board,steps,anchor=None):
-        self.check();self.commands.append(('wheel',int(steps),tuple(anchor),self.now))
-        self.now+=.15
-        gain=(self.up**steps if steps>0 else self.down**(-steps))
-        target=np.clip(self.scale*gain,*self.native_limits)
-        gain=float(target/self.scale)
-        pivot=np.asarray(anchor,float)
-        matrix=np.eye(3);matrix[:2,:2]*=gain;matrix[:2,2]=pivot-gain*pivot
-        self.pose=matrix@self.pose
-    def measure(self,before,after,_scene):
-        self.check();self.now+=.045
-        if not self.motion_available:return None
-        motion=self.frames[id(after)]@np.linalg.inv(self.frames[id(before)])
-        return dict(matrix=motion.tolist(),origin=[0,0])
-    def read(self,image,*,enabled,deadline):
-        self.check();self.reads+=1;self.now+=.10
-        return [self.color(self) if enabled[0] else None,None,None]
-    def emit(self,kind,**data):self.events.append((kind,data))
+from test_support import AffineGame, StopRequested, rules, scene
 
 
 class SingleZoomBehaviorTests(unittest.TestCase):

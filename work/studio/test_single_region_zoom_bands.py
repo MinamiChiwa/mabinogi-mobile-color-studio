@@ -2,7 +2,7 @@
 from unittest import TestCase
 
 from single_region_search import QuickSearchLimits, _Search
-from test_single_region_zoom import AffineGame, rules, scene
+from test_support import AffineGame, rules, scene
 
 
 class ZoomBandEvidenceTests(TestCase):

@@ -49,6 +49,16 @@ class WheelDetentFake(Fake):
         self.pose=gesture@self.pose
 
 
+class FeedbackHexFake(Fake):
+    """Initial HEX miss followed by an exact one-pixel neighbour."""
+
+    def read_codes(self, frame):
+        self.reads += 1
+        key = tuple(np.rint(np.asarray(frame, dtype=float)).astype(int))
+        code = '#112233' if key == (1, 0) else '#000000'
+        return [code] * 3
+
+
 class ReferenceMaterialMismatchFake(Fake):
     """Adapter whose first atlas comparison fails only its RGB gate."""
     def __init__(self, second_translation=(0.,0.)):
@@ -99,6 +109,20 @@ class ExecutionTests(unittest.TestCase):
         self.assertEqual(self.adapter.reads,2);self.assertTrue(self.adapter.released)
         np.testing.assert_allclose(self.adapter.pose,[300,-50],atol=1)
         self.assertTrue(all(max(abs(x),abs(y))<=144 for x,y in self.adapter.moves))
+
+    def test_execute_candidate_wires_measured_hex_feedback_after_prediction_miss(self):
+        adapter = FeedbackHexFake()
+        row = dict(id=0, dx=0, dy=0, angle=0, scale=1,
+                   colors=['#112233'] * 3, deltas=[0] * 3)
+        rules = [dict(enabled=True, colors=['#112233'], exact=False,
+                      tolerance=1)] * 3
+        batch = CandidateBatch([row], adapter.ctx, 100, clock=lambda: 0)
+        result = execute_candidate(adapter, batch, batch.id, 0, np.zeros(2),
+                                   rules, clock=lambda: 0)
+        self.assertTrue(result['accepted'], result)
+        self.assertTrue(result['feedback_refined'])
+        self.assertEqual(result['actual_colors'], ['#112233'] * 3)
+        self.assertEqual(adapter.moves, [(1, 0)])
     def test_old_batch_and_duplicate_selection_never_drag(self):
         with self.assertRaises(CandidateExpired):self.batch.claim('wrong',0,self.adapter.ctx)
         self.assertEqual(self.adapter.moves,[])

@@ -35,7 +35,7 @@ from display_geometry import logical_size,work_area
 
 from build_info import APP_VERSION
 CARD_WIDTH=344
-CARD_HEIGHT=400
+CARD_HEIGHT=340
 CARD_GAP=6
 BODY_SIDE_PADDING=12
 SCROLLBAR_WIDTH=17
@@ -72,10 +72,15 @@ class FixedContentScrollableFrame(ct.CTkScrollableFrame):
         # Stop that requested size from propagating back into the viewport.
         self._set_outer_viewport_size(self._desired_width)
 
-    def _set_outer_viewport_size(self,width):
+    def _set_outer_viewport_size(self,width,viewport_width=None):
         # CTkScrollableFrame's grid_propagate wrapper ignores its arguments, so
         # size and lock the actual outer frame that holds the canvas/scrollbar.
-        self._parent_frame.configure(width=width+SCROLLBAR_WIDTH,height=self._studio_viewport_height)
+        # The outer viewport follows the available window width.  Its embedded
+        # canvas may remain wider than the viewport only when the minimum card
+        # layout cannot fit, in which case horizontal clipping/scrolling is
+        # preferable to forcing the native window wider than requested.
+        outer_width=width if viewport_width is None else max(1,int(viewport_width))
+        self._parent_frame.configure(width=outer_width+SCROLLBAR_WIDTH,height=self._studio_viewport_height)
         self._parent_frame.grid_propagate(False)
 
     def _fit_frame_dimensions_to_canvas(self,event):
@@ -85,9 +90,10 @@ class FixedContentScrollableFrame(ct.CTkScrollableFrame):
         if self._orientation=='horizontal':
             super()._fit_frame_dimensions_to_canvas(event)
 
-    def set_fixed_content_width(self,width):
+    def set_fixed_content_width(self,width,viewport_width=None):
         self.configure(width=width)
-        self._set_outer_viewport_size(width)
+        if viewport_width is None:self._set_outer_viewport_size(width)
+        else:self._set_outer_viewport_size(width,viewport_width)
         self._parent_canvas.itemconfigure(
             self._create_window_id,
             width=self._apply_widget_scaling(width),
@@ -122,12 +128,12 @@ class Card(ct.CTkFrame):
         self.target=tk.StringVar(value='#202020'); self.alt=tk.StringVar(value='')
         self.grid_columnconfigure(0,weight=1)
         heading=ct.CTkFrame(self,fg_color='transparent')
-        heading.grid(row=0,column=0,padx=20,pady=(12,6),sticky='ew')
+        heading.grid(row=0,column=0,padx=16,pady=(7,3),sticky='ew')
         ct.CTkLabel(heading,text=f'0{index+1}  /  颜色区域',font=SECTION_FONT,text_color=INK,height=22).pack(side='left')
         self.enable_switch=ct.CTkSwitch(heading,text='已启用' if self.enabled.get() else '未启用',width=95,variable=self.enabled,progress_color=ACCENT,font=SMALL_FONT)
         self.enable_switch.pack(side='right')
         self.preview_frame=ct.CTkFrame(self,fg_color='transparent')
-        self.preview_frame.grid(row=2,column=0,padx=20,pady=(8,6),sticky='ew')
+        self.preview_frame.grid(row=2,column=0,padx=16,pady=(4,3),sticky='ew')
         self.swatch=ct.CTkButton(self.preview_frame,text='点击选色',height=30,corner_radius=10,command=self.pick,font=BODY_FONT,fg_color='#202020',hover_color='#35445B')
         self.preview_frame.grid_columnconfigure(0,weight=1)
         self.preview_frame.grid_columnconfigure(1,weight=1)
@@ -135,25 +141,25 @@ class Card(ct.CTkFrame):
         self.swatch.grid(row=0,column=0,sticky='ew',padx=(0,4))
         ct.CTkButton(self.preview_frame,text='⌖  屏幕吸管',width=110,height=30,fg_color='#28364A',hover_color='#364D63',font=SMALL_FONT,command=lambda:pick_screen(self.winfo_toplevel(),self.target.set)).grid(row=0,column=1,sticky='ew',padx=(4,0))
         self.palette=ct.CTkLabel(self.preview_frame,text='',height=38)
-        self.palette.grid(row=1,column=0,columnspan=2,sticky='ew',pady=(6,0))
+        self.palette.grid(row=1,column=0,columnspan=2,sticky='ew',pady=(3,0))
         self.palette.bind('<Button-1>',self.open_palette)
         self.palette.configure(cursor='hand2')
         self.palette_note=ct.CTkLabel(self.preview_frame,text='目标色集合',font=SMALL_FONT,text_color=MUTED,height=12,wraplength=260,anchor='w')
         self.palette_note.grid(row=2,column=0,columnspan=2,sticky='w')
         self._palette_future=None;self._palette_key=None;self._palette_pixels=None
         self._preview_job=None
-        self.target_entry=ct.CTkEntry(self,textvariable=self.target,height=32,font=HEX_FONT,border_color='#36445B');self.target_entry.grid(row=3,column=0,padx=20,sticky='ew')
-        self.label_alt=ct.CTkLabel(self,text='替代颜色 · 多个颜色用逗号分隔',font=SMALL_FONT,text_color=MUTED,height=18,wraplength=255,justify='left');self.label_alt.grid(row=4,column=0,padx=20,pady=(2,1),sticky='w')
-        self.alt_entry=ct.CTkEntry(self,textvariable=self.alt,height=30,placeholder_text='#FFFFFF, #EAEAEA');self.alt_entry.grid(row=5,column=0,padx=20,sticky='ew')
-        self.alts=ct.CTkFrame(self,fg_color='transparent',height=18); self.alts.grid(row=6,column=0,padx=20,pady=3,sticky='ew');self.alts.pack_propagate(False)
+        self.target_entry=ct.CTkEntry(self,textvariable=self.target,height=29,font=HEX_FONT,border_color='#36445B');self.target_entry.grid(row=3,column=0,padx=16,sticky='ew')
+        self.label_alt=ct.CTkLabel(self,text='替代颜色 · 多个颜色用逗号分隔',font=SMALL_FONT,text_color=MUTED,height=15,wraplength=255,justify='left');self.label_alt.grid(row=4,column=0,padx=16,pady=(1,0),sticky='w')
+        self.alt_entry=ct.CTkEntry(self,textvariable=self.alt,height=27,placeholder_text='#FFFFFF, #EAEAEA');self.alt_entry.grid(row=5,column=0,padx=16,sticky='ew')
+        self.alts=ct.CTkFrame(self,fg_color='transparent',height=12); self.alts.grid(row=6,column=0,padx=16,pady=1,sticky='ew');self.alts.pack_propagate(False)
         self.mode_selector=ct.CTkSegmentedButton(self,values=[tr('精准 HEX'),tr('相似颜色')],command=self.select_mode,font=BODY_FONT,selected_color='#236D62',selected_hover_color='#2C8275',height=30)
-        self.mode_selector.grid(row=7,column=0,padx=20,pady=(4,4),sticky='ew')
+        self.mode_selector.grid(row=7,column=0,padx=16,pady=(2,2),sticky='ew')
         i18n.on_language(self,self.refresh_language)
         self.slider=DeliberateSlider(self,from_=1,to=35,number_of_steps=34,variable=self.tolerance,command=self.change_mode,progress_color=ACCENT,button_color=ACCENT)
-        self.slider.grid(row=8,column=0,padx=20,sticky='ew')
-        self.hint=ct.CTkLabel(self,text='',font=SMALL_FONT,text_color=MUTED,height=25,wraplength=260,justify='left');self.hint.grid(row=9,column=0,padx=20,pady=(0,3),sticky='w')
-        self.current=ct.CTkLabel(self,text='当前颜色  —',font=BODY_FONT,text_color=MUTED,height=18);self.current.grid(row=10,column=0,padx=20,pady=(0,3),sticky='w')
-        self.best_label=ct.CTkLabel(self,text='最佳结果  —',font=SMALL_FONT,text_color=ACCENT,height=19,corner_radius=5);self.best_label.grid(row=11,column=0,padx=20,pady=(0,2),sticky='ew')
+        self.slider.grid(row=8,column=0,padx=16,sticky='ew')
+        self.hint=ct.CTkLabel(self,text='',font=SMALL_FONT,text_color=MUTED,height=19,wraplength=260,justify='left');self.hint.grid(row=9,column=0,padx=16,pady=(0,1),sticky='w')
+        self.current=ct.CTkLabel(self,text='当前颜色  —',font=BODY_FONT,text_color=MUTED,height=17);self.current.grid(row=10,column=0,padx=16,pady=(0,1),sticky='w')
+        self.best_label=ct.CTkLabel(self,text='最佳结果  —',font=SMALL_FONT,text_color=ACCENT,height=17,corner_radius=5);self.best_label.grid(row=11,column=0,padx=16,pady=(0,1),sticky='ew')
         self.target.trace_add('write',self.preview);self.alt.trace_add('write',self.preview); self.preview();self.change_mode()
         self.grid_propagate(False)
         self.enabled.trace_add('write',self.update_enabled)
@@ -244,6 +250,8 @@ class App(ct.CTk):
         self.after(100,self.fit_screen)
         self.selected_window=None;self.overlay=None;self.active_rules=None;self.history=read_history(DATA/'history.json');self.best_summary=None
         self.q=queue.Queue();self.runner=None;self.busy=False;self.picking=False;self.keys={};self.cards=[]
+        # The page follows the resizable native window. Its fixed-size card
+        # viewport remains centered inside the responsive page.
         self.grid_columnconfigure(0,weight=1); self.grid_rowconfigure(0,weight=1)
         # The page follows the native window. Fixed-size card content is
         # centered inside it, while the top and bottom bars use the full width.
@@ -251,6 +259,12 @@ class App(ct.CTk):
         self.page=ct.CTkFrame(self,fg_color='transparent')
         self.page.grid(row=0,column=0,sticky='nsew')
         self.page.grid_columnconfigure(0,weight=1)
+        self.page.grid_rowconfigure(0,weight=0)
+        self.page.grid_rowconfigure(1,weight=0)
+        self.page.grid_rowconfigure(2,weight=0)
+        self.page.grid_rowconfigure(3,weight=0)
+        self.page.grid_rowconfigure(4,weight=0)
+        self.page.grid_rowconfigure(5,weight=0)
         header=ct.CTkFrame(self.page,fg_color='transparent');header.grid(row=0,column=0,padx=BODY_SIDE_PADDING,pady=(14,6),sticky='ew')
         self.header=header;header.grid_columnconfigure(0,weight=1)
         brand=ct.CTkFrame(header,fg_color='transparent');self.brand=brand;brand.grid(row=0,column=0,sticky='w')
@@ -289,7 +303,8 @@ class App(ct.CTk):
             body.grid_columnconfigure(i,weight=1,uniform='cards');card=Card(body,i);card.grid(row=0,column=i,padx=CARD_GAP,pady=CARD_GAP);self.cards.append(card)
         # Keep the card viewport centered between the top and bottom bars.
         # The primary controls remain fixed and left aligned.
-        self.page.grid_rowconfigure(2,weight=1)
+        # Keep the fixed-height card viewport in normal flow; a weighted row creates large blank bands around it.
+        self.page.grid_rowconfigure(2,weight=0)
         controls=ct.CTkFrame(self.page,fg_color='transparent');controls.grid(row=3,column=0,padx=BODY_SIDE_PADDING,pady=(8,4),sticky='ew')
         self.start=ct.CTkButton(controls,text='开始寻色   F8',height=44,width=165,font=(FONT,13,'bold'),fg_color=ACCENT,text_color='#102A27',hover_color='#80E5CF',command=lambda:self.go(activate=True));self.start.grid(row=0,column=0,padx=(0,8),pady=4,sticky='w')
         self.stop_button=ct.CTkButton(controls,text='停止   F9',height=44,width=100,font=BODY_FONT,fg_color='#2B384C',command=self.stop);self.stop_button.grid(row=0,column=1,padx=(0,8),pady=4,sticky='w')
@@ -300,7 +315,7 @@ class App(ct.CTk):
         self.detail.grid(row=1,column=0,padx=18,pady=(0,8),sticky='ew');self.detail.grid_remove()
         label=ct.CTkLabel(intro,text='适用于港澳台服瑪奇Mobile。游戏中使用本工具可能存在风险，建议谨慎使用。',font=SMALL_FONT,text_color=MUTED,wraplength=320,justify='left',anchor='w');label.pack(fill='x',pady=(0,8));self.intro_labels.append(label)
         self.footer=ct.CTkLabel(self.page,text='F9 随时停止并释放鼠标  ·  切换窗口停止寻色  ·  不自动开启下一瓶染色剂',font=SMALL_FONT,text_color=MUTED,wraplength=340,justify='right');self.footer.grid(row=5,column=0,padx=BODY_SIDE_PADDING,pady=(0,8),sticky='e')
-        self._layout_columns=None;self._topbars_compact=None
+        self._layout_columns=None;self._layout_content_width=None;self._layout_width=None;self._pending_layout_width=None;self._resize_layout_job=None;self._topbars_compact=None
         self.apply_card_layout(3);self.apply_topbar_layout(False)
         self.load()
         if self.history:self.display_best(self.history[0])
@@ -316,24 +331,42 @@ class App(ct.CTk):
         try:scaling=self.page._get_widget_scaling()
         except (AttributeError,tk.TclError):return
         width=int(event.width/scaling)
-        columns=columns_for_width(width)
-        topbars_compact=columns==1
-        if columns==self._layout_columns and topbars_compact==self._topbars_compact:return
-        self.reflow(width)
-    def apply_card_layout(self,columns):
-        if columns==self._layout_columns:return
-        content_width=columns*(CARD_WIDTH+2*CARD_GAP)
-        self.body_scroll.set_fixed_content_width(content_width)
+        if width==getattr(self,'_layout_width',None):return
+        self._pending_layout_width=width
+        if self._resize_layout_job is not None:
+            try:self.after_cancel(self._resize_layout_job)
+            except tk.TclError:pass
+        self._resize_layout_job=self.after(45,self._run_scheduled_reflow)
+    def _run_scheduled_reflow(self):
+        self._resize_layout_job=None
+        width=self._pending_layout_width
+        self._pending_layout_width=None
+        if width is not None:self.reflow(width)
+    def apply_card_layout(self,columns,content_width=None,viewport_width=None):
+        minimum_content_width=columns*(CARD_WIDTH+2*CARD_GAP)
+        content_width=minimum_content_width if content_width is None else max(minimum_content_width,int(content_width))
+        if columns==self._layout_columns and content_width==getattr(self,'_layout_content_width',None):return
+        if viewport_width is None:self.body_scroll.set_fixed_content_width(content_width)
+        else:self.body_scroll.set_fixed_content_width(content_width,viewport_width)
         self.intro.configure(width=content_width)
         for label in self.intro_labels:label.configure(wraplength=max(280,content_width-24))
         self.card_body.configure(width=content_width,height=((3+columns-1)//columns)*(CARD_HEIGHT+2*CARD_GAP))
         for i in range(3):
-            self.card_body.grid_columnconfigure(i,weight=0,uniform='')
+            # Only active columns may absorb extra width.  Leaving hidden
+            # columns weighted makes a one-column layout reserve two thirds
+            # of the row for empty grid tracks, visibly narrowing the card.
+            if i < columns:
+                self.card_body.grid_columnconfigure(i,weight=1,uniform='cards')
+            else:
+                self.card_body.grid_columnconfigure(i,weight=0,uniform='')
         for i,card in enumerate(self.cards):
             column=i%columns
             columnspan=columns if columns==2 and i==2 else 1
-            card.grid_configure(row=i//columns,column=column,columnspan=columnspan,sticky='')
+            card_width=max(CARD_WIDTH,int(content_width*columnspan/columns)-2*CARD_GAP)
+            if hasattr(card,'configure'):card.configure(width=card_width)
+            card.grid_configure(row=i//columns,column=column,columnspan=columnspan,sticky='ew')
         self._layout_columns=columns
+        self._layout_content_width=content_width
     def apply_topbar_layout(self,compact):
         if compact==self._topbars_compact:return
         if compact:
@@ -359,8 +392,19 @@ class App(ct.CTk):
     def reflow(self,width=None):
         if width is None:width=int(self.winfo_width()/self.page._get_widget_scaling())
         columns=columns_for_width(width)
-        self.apply_card_layout(columns)
+        usable=max(0,int(width)-BODY_SIDE_PADDING*2-SCROLLBAR_WIDTH)
+        viewport_width=max(usable,int(width)-2*BODY_SIDE_PADDING)
+        self.apply_card_layout(columns,usable,viewport_width)
         self.apply_topbar_layout(columns==1)
+        # Keep the fixed card viewport centered in the responsive page while
+        # allowing the header, controls, status and footer to span the window.
+        self.page.grid_columnconfigure(0,weight=1)
+        # Center the fixed card viewport whenever the outer window is wider
+        # than the current card breakpoint; at narrow widths it remains
+        # flush with the normal page padding and scrolls horizontally only
+        # through the vertical viewport.
+        self.body_scroll.grid_configure(padx=BODY_SIDE_PADDING)
+        self._layout_width=int(width)
     def refresh_language(self):
         self.title(f"{tr('染色工坊 · 瑪奇 Mobile')}  v{APP_VERSION}")
         self.refresh_window_label()
@@ -448,10 +492,23 @@ class App(ct.CTk):
         ct.set_widget_scaling(self._ui_scale)
         self.update_idletasks()
         minimum_width=min(MIN_WINDOW_WIDTH,available_width)
-        minimum_height=min(max(560,self.page.winfo_reqheight()+round(COMPACT_HEADER_EXTRA_HEIGHT*self._ui_scale)),available_height)
+        # ``geometry()`` and ``minsize()`` take CTk's logical window units,
+        # while the widgets use the independent widget scale above.  On a
+        # high-DPI monitor the latter is intentionally capped at 1.0, so
+        # ``page.winfo_reqheight()`` is a native/Tk pixel size.  Passing that
+        # value directly to ``geometry`` makes CTk multiply it by the window
+        # DPI a second time (for example 1,243 px becomes 1,914 px), leaving
+        # a large empty band below the page.  Convert the requested native
+        # size back to the logical units expected by CTk before sizing the
+        # toplevel.
+        requested_native_height=max(560,self.page.winfo_reqheight())
+        requested_logical_height=int((requested_native_height+dpi-1)//dpi)
+        minimum_height=min(requested_logical_height,available_height)
         self.minsize(minimum_width,minimum_height)
         width=max(minimum_width,min(1120,available_width))
-        height=max(minimum_height,min(860,available_height))
+        # Start at the content height so high-resolution displays do not add
+        # a large empty area below the controls. The user can still resize freely.
+        height=min(available_height,minimum_height)
         self.geometry(f'{width}x{height}+20+20')
     def save(self):
         try:

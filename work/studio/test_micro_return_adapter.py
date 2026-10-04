@@ -8,7 +8,7 @@ from unittest.mock import patch
 import numpy as np
 from micro_return_adapter import MicroReturnAdapter, run_prepared_diagnostic
 from workflow_budget import WorkflowBudget
-from test_micro_return_probe import SimulatedReturnAdapter
+from test_support import SimulatedReturnAdapter
 from analyze_live_atlas import frame_sequence
 
 

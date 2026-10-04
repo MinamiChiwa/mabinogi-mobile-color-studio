@@ -3,82 +3,11 @@ import unittest
 import numpy as np
 from analyze_live_atlas import frame_sequence
 from micro_return_probe import ReturnLimits, run_micro_return
+from test_support import SimulatedReturnAdapter
 
 
 ANCHORS = {'x': [[250, 250], [274, 250]], 'y': [[250, 250], [250, 274]]}
 
-
-class SimulatedReturnAdapter:
-    """Reciprocal zoom about individual anchors, with explicit fault hooks."""
-    def __init__(self):
-        self.now = 0.
-        self.pose = np.eye(3)
-        self.ctx = 'same-session-geometry'
-        self.stopped = False
-        self.released = False
-        self.wheels = []
-        self.captures = []
-        self.reads = 0
-        self.after_wheel = lambda: None
-        self.before_input = lambda: None
-        self.after_capture = lambda: None
-        self.after_read = lambda: None
-        self.after_motion = lambda: None
-        self.after_pause = lambda: None
-        self.codes = lambda frame: ['#123456', '#789ABC', '#DEF012'] if frame['notches'] % 4 == 0 else ['#234567', '#89ABCD', '#EF0123']
-
-    def check(self):
-        if self.stopped:
-            raise RuntimeError('Stopped / focus / countdown guard')
-
-    def context(self):
-        return self.ctx
-
-    def marker_points(self):
-        return [[80, 350], [250, 250], [420, 360]]
-
-    def capture(self, name):
-        self.now += .05
-        frame = dict(name=name, pose=self.pose.copy(), notches=len(self.wheels))
-        self.captures.append(frame)
-        self.after_capture()
-        return frame
-
-    def motion(self, reference, frame):
-        self.now += .05
-        matrix = (frame['pose'] @ np.linalg.inv(reference['pose']))[:2]
-        self.after_motion()
-        return dict(matrix=matrix.tolist(), scale=float(np.hypot(*matrix[:, 0])),
-                    angle=float(np.degrees(np.arctan2(matrix[1, 0], matrix[0, 0]))), inliers=100)
-
-    def read_codes(self, frame):
-        self.now += .44
-        self.reads += 1
-        self.after_read()
-        return self.codes(frame)
-
-    def wheel(self, notch, anchor, *, deadline, guard):
-        # Model a cursor move that may consume time or change foreground before
-        # the final wheel boundary. Recheck there, not only in the controller.
-        self.before_input()
-        guard()
-        if self.now >= deadline:
-            raise RuntimeError('Input deadline')
-        scale = 1.01 if notch == 1 else 1 / 1.01
-        zoom = np.eye(3)
-        zoom[:2, :2] *= scale
-        zoom[:2, 2] = (1 - scale) * np.asarray(anchor)
-        self.pose = zoom @ self.pose
-        self.wheels.append(dict(notch=notch, anchor=np.asarray(anchor).tolist(), at=self.now))
-        self.now += .01
-        self.after_wheel()
-
-    def pause(self, seconds):
-        self.now += seconds
-        self.after_pause()
-
-    def release(self):
-        self.released = True
 
 
 class MicroReturnTests(unittest.TestCase):

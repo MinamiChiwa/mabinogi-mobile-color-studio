@@ -246,6 +246,11 @@ class SearchOverlay(ct.CTkToplevel):
         self.candidate_container.pack(fill='x')
         if not rows:
             ct.CTkLabel(self.candidate_container,text='有效覆盖不足，暂无可计算方案。').pack(padx=8,pady=12)
+        if data.get('compromise_only'):
+            ct.CTkLabel(self.candidate_container,
+                        text=tr('本轮没有预测达标方案；以下结果仅供参考，实际复核未达标时会停止。'),
+                        font=SMALL_FONT,text_color='#F2C879',wraplength=520,
+                        anchor='w',justify='left').pack(fill='x',padx=6,pady=(0,5))
         for row in rows:
             result=data.get('observations',{}).get(row['id']) if row['id']==default else None
             shown=candidate_display(row,result)

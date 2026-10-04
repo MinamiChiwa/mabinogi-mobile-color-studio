@@ -8,13 +8,27 @@ from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import patch,MagicMock
 from PIL import Image
-from atlas_live_adapter import acquire_current,_execute_recorded,observe_current,callbacks
+from atlas_live_adapter import acquire_current,_execute_recorded,observe_current,callbacks,_candidate_is_no_worse
 from atlas_pose import homogeneous
 from platform_win import Interrupted
 from atlas_service import AtlasService
 
 
 class LiveAdapterTests(unittest.TestCase):
+    def test_replan_candidate_quality_is_monotonic_within_tier(self):
+        # A measured-pose fallback may differ by a small resampling amount,
+        # but must not silently replace a good route with a materially worse
+        # compromise (the regression seen after repeated actions).
+        current=dict(accepted=False,maximum=12.,average=8.)
+        self.assertTrue(_candidate_is_no_worse(dict(accepted=False,maximum=12.9,average=9.), current))
+        self.assertFalse(_candidate_is_no_worse(dict(accepted=False,maximum=14.,average=9.), current))
+
+    def test_replan_preserves_acceptance_tier(self):
+        accepted=dict(accepted=True,maximum=4.,average=2.)
+        # A lower predicted error cannot compensate for losing the accepted
+        # tier; execution must retain the already publishable route.
+        self.assertFalse(_candidate_is_no_worse(dict(accepted=False,maximum=0.,average=0.), accepted))
+        self.assertTrue(_candidate_is_no_worse(dict(accepted=True,maximum=4.5,average=3.), accepted))
     def current_fixture(self,now=100.):
         scene=SimpleNamespace(board=(20,25,80,85),markers=[(30,60),(50,60),(70,60)],
                               cards=[(10,10,10,10),(30,10,10,10),(50,10,10,10)])

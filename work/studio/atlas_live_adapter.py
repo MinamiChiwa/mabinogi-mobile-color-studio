@@ -26,6 +26,30 @@ from execution_diagnostics import execution_diagnostics
 from platform_win import Interrupted
 
 
+def _candidate_is_no_worse(replacement, current, *, maximum_slack=1.0):
+    """Reject a measured-pose fallback that materially worsens the target.
+
+    A replan is allowed to trade a tiny amount of predicted colour error for
+    a route that is actually executable.  It must not silently replace the
+    current route with a much worse compromise, which was the source of the
+    visible ``gets worse after every action`` behaviour.
+    """
+    if replacement is None:
+        return False
+    old=candidate_quality(current)
+    new=candidate_quality(replacement)
+    # Accepted/family safety tiers remain authoritative.  For two candidates
+    # in the same tier compare the worst predicted Delta-E with a small
+    # allowance for resampling noise; lower ranked fields are only tie-breaks.
+    if bool(new[0]) != bool(old[0]):
+        return not bool(new[0])
+    try:
+        old_max=float(old[1]);new_max=float(new[1])
+    except (TypeError,ValueError):
+        return False
+    return new_max <= old_max + float(maximum_slack)
+
+
 def acquire_current(_owner, _rules, capture_dir, entry=None, strategy='grid', entry_size=None, **context):
     folder=Path(capture_dir)
     artifact=acquire(folder,None,strategy=strategy,
@@ -56,6 +80,7 @@ def build_current(capture, rules, **_context):
     if runtime.get('atlas') is None:
         raise RuntimeError('Atlas is unavailable for route endpoint scoring')
     prepared=[];route_diagnostics=[]
+    binding_started=time.perf_counter()
     progress=capture.get('progress')
     for index,row in enumerate(rows,1):
         game.check()
@@ -113,6 +138,7 @@ def build_current(capture, rules, **_context):
     rows=select_color_candidates(prepared,rules,8)
     report['candidates']=rows
     report['search_diagnostics']=dict(report.get('search_diagnostics') or {},route_binding=route_diagnostics,
+        route_binding_seconds=time.perf_counter()-binding_started,
         stability_required=True,stable_route_count=len(rows),
         transform_routes_suppressed=False,
         stable_translation_count=len(safe_translations),
@@ -278,9 +304,31 @@ def _execute_recorded(owner,report,candidate,rules,batch,reference,reservation='
                         require_stable=True,allow_color_compromise=True)
                 except (ValueError,TypeError,KeyError):
                     ready=None
-                if ready is not None:prepared.append(ready)
+                if ready is not None:
+                    # A measured-pose fallback may already be at the candidate
+                    # rotation/zoom endpoint. Do not replay stale transform
+                    # gestures; execute only residual translation.
+                    try:
+                        from atlas_pose import pose_fields
+                        residual_fields = pose_fields(
+                            relative_candidate(ready, actual, batch.context.board),
+                            batch.context.board)
+                        if (abs(float(residual_fields.get('angle', 0.0))) <= 0.35 and
+                                abs(float(residual_fields.get('scale', 1.0)) - 1.0) <= 0.003):
+                            ready = dict(ready, planned_route=None,
+                                         prediction_pose_source='measured_fallback_translation')
+                    except (TypeError, ValueError, KeyError):
+                        pass
+                    prepared.append(ready)
             route_check()
-            return min(prepared,key=candidate_rank) if prepared else None
+            if not prepared:
+                return None
+            replacement=min(prepared,key=candidate_rank)
+            # Keep the measured-pose fallback monotonic.  A route that is
+            # merely executable but clearly worse than the current proposal
+            # is unsafe from a user perspective; stop and let recovery report
+            # the measured result instead of degrading it repeatedly.
+            return replacement if _candidate_is_no_worse(replacement,current) else None
         adapter.replan=replan
         adapter.rescore=lambda actual,current,active_rules:rescore_candidate(
             runtime['atlas'],runtime['capture_offset'],current,actual,

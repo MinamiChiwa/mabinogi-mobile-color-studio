@@ -37,6 +37,7 @@ EN={
 '（上限 ':' (limit ',
 '）。尚未搜索目标组合，不能据此判断没有满足目标的方案。':'). The target colors have not been searched, so this does not mean that no matching combination exists.',
 '当前搜索未得到可执行方案':'The current search found no executable plan',
+'本轮没有预测达标方案；以下结果仅供参考，实际复核未达标时会停止。':'No predicted match was found this round. The entries below are for reference; execution stops if verification misses the targets.',
 '请先启动工具，再手动进入染色倒计时界面；识别成功后自动采样和定位，结果须在游戏内手动确认。':'Start the tool, then manually enter the timed dye screen. Sampling and positioning begin after recognition; the result must be confirmed in the game.',
 '旧版策略':'Legacy strategy',
 '周期图板实验':'Periodic atlas experiment',

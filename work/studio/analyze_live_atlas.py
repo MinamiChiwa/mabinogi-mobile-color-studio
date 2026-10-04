@@ -357,8 +357,10 @@ def run(source,game_codes=None,example_targets=None,target_rules=None,output=Non
     candidates=(translation_candidates(expanded,markers,rules,offsets[-1],cancelled=cancelled,
                                        landing_radius=1.,integer_moves=True,limit=32)
                 if rules and report['expanded']['quality_gate']['passed'] else [])
+    timings['translation_search_seconds']=time.perf_counter()-stage
     search_diagnostics={}
     if rules and report['expanded']['quality_gate']['passed']:
+        similarity_stage=time.perf_counter()
         progress(stage='similarity')
         levels,tick=captured_scale_levels(log)
         calibration=next((r for r in reversed(log) if r.get('kind')=='zoom_calibration'),{})
@@ -378,6 +380,9 @@ def run(source,game_codes=None,example_targets=None,target_rules=None,output=Non
         # countdown when a slightly better rotation/zoom proposal cannot.
         candidates=sorted(candidates+joint,key=candidate_rank)
         for index,row in enumerate(candidates):row['id']=index
+        timings['similarity_search_seconds']=time.perf_counter()-similarity_stage
+    else:
+        timings['similarity_search_seconds']=0.
     if check:check()
     timings['candidate_seconds']=time.perf_counter()-stage
     timings['candidate_computed']=bool(rules and report['expanded']['quality_gate']['passed'])

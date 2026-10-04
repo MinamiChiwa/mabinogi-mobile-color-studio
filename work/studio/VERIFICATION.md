@@ -1,10 +1,12 @@
 # Current verification scope
 
-Version: 0.3.6. Policy revision: balanced-landing-single-zoom-v3. Date: 2026-10-04. This tool was developed with AI assistance.
+Version: 0.3.6. Policy revision: balanced-landing-single-zoom-v3. Date: 2026-10-05. This tool was developed with AI assistance.
 
 ## Automated checks
 
-The current source regression suite contains 803 tests: 785 passed, 18 skipped because optional local capture archives were unavailable, and no failures or errors. `compileall` passed. The skipped count depends on private game screenshots/OCR fixtures that are not distributed with the snapshot; earlier 794/795/797 figures are historical. Coverage includes candidate-route diversity, projected return budgets, countdown correction, read-only early-exit observations, single-region zoom limits, safe stop after an unmeasured pose, wheel geometry fallback (including the direct `SingleRegionIO` fallback path), adjacent-frame feature caching, separate exploration and finalization budgets, measured-best recovery, multilingual UI, display geometry and session retention. The new single-region zoom behavior and its recovery paths still await independent real-game validation.
+The current source regression suite contains 823 tests: 805 passed, 18 skipped because optional local capture archives were unavailable, and no failures or errors. `compileall` passed. The skipped count depends on private game screenshots/OCR fixtures that are not distributed with the snapshot; earlier 794/795/797/803 figures are historical. Coverage includes candidate-route diversity, projected return budgets, countdown correction, read-only early-exit observations, single-region zoom limits, safe stop after an unmeasured pose, wheel geometry fallback (including the direct `SingleRegionIO` fallback path), adjacent-frame feature caching, separate exploration and finalization budgets, measured-best recovery, multilingual UI, display geometry and session retention. The new single-region zoom behavior and its recovery paths still await independent real-game validation.
+
+The 2026-10-05 test audit found no unconditional skips, duplicate test methods, or core tests that can be safely removed. The 18 skipped cases are all optional fixture/integration checks for private screenshots, OCR data, or archived failures. Probe, replay, and review modules remain useful for offline diagnostics and input-safety evidence, but their results are not game-mechanism validation. Shared deterministic fixtures used by the return and single-region suites now live in `test_support.py`, so those tests no longer import helpers from one another.
 
 Command: `python -m unittest discover -s work/studio -p "test_*.py"`.
 

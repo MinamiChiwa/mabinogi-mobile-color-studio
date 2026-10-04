@@ -20,7 +20,7 @@ class ResizeTests(unittest.TestCase):
         cards=[SimpleNamespace(grid_configure=MagicMock()) for _ in range(3)]
         body=SimpleNamespace(configure=MagicMock(),grid_columnconfigure=MagicMock())
         scroll=SimpleNamespace(configure=MagicMock(),set_fixed_content_width=MagicMock())
-        window=SimpleNamespace(_layout_columns=2,page=SimpleNamespace(configure=MagicMock()),card_body=body,body_scroll=scroll,cards=cards,
+        window=SimpleNamespace(_layout_columns=2,_layout_content_width=2*(344+12),page=SimpleNamespace(configure=MagicMock()),card_body=body,body_scroll=scroll,cards=cards,
                                _fixed_content_widgets=(),intro=SimpleNamespace(configure=MagicMock()),intro_labels=[])
         App.apply_card_layout(window,2)
         window.page.configure.assert_not_called()
@@ -33,7 +33,7 @@ class ResizeTests(unittest.TestCase):
         cards=[SimpleNamespace(grid_configure=MagicMock()) for _ in range(3)]
         body=SimpleNamespace(configure=MagicMock(),grid_columnconfigure=MagicMock())
         scroll=SimpleNamespace(configure=MagicMock(),set_fixed_content_width=MagicMock())
-        window=SimpleNamespace(_layout_columns=3,page=SimpleNamespace(configure=MagicMock()),card_body=body,body_scroll=scroll,cards=cards,
+        window=SimpleNamespace(_layout_columns=3,_layout_content_width=3*(344+12),page=SimpleNamespace(configure=MagicMock()),card_body=body,body_scroll=scroll,cards=cards,
                                _fixed_content_widgets=(),intro=SimpleNamespace(configure=MagicMock()),intro_labels=[])
         App.apply_card_layout(window,2)
         from app import CARD_GAP,CARD_WIDTH
@@ -43,11 +43,11 @@ class ResizeTests(unittest.TestCase):
         scroll.set_fixed_content_width.assert_called_once_with(2*(CARD_WIDTH+2*CARD_GAP))
         self.assertEqual(body.grid_columnconfigure.call_count,3)
         self.assertEqual([card.grid_configure.call_args.kwargs for card in cards],[
-            dict(row=0,column=0,columnspan=1,sticky=''),dict(row=0,column=1,columnspan=1,sticky=''),dict(row=1,column=0,columnspan=2,sticky='')])
+            dict(row=0,column=0,columnspan=1,sticky='ew'),dict(row=0,column=1,columnspan=1,sticky='ew'),dict(row=1,column=0,columnspan=2,sticky='ew')])
         for index in range(3):
             args=body.grid_columnconfigure.call_args_list[index].args
             self.assertEqual(args[0],index)
-            self.assertEqual(body.grid_columnconfigure.call_args_list[index].kwargs['weight'],0)
+            self.assertEqual(body.grid_columnconfigure.call_args_list[index].kwargs['weight'],1 if index < 2 else 0)
         for card in cards:card.grid_configure.reset_mock()
         App.apply_card_layout(window,2)
         for card in cards:card.grid_configure.assert_not_called()
@@ -79,15 +79,17 @@ class ResizeTests(unittest.TestCase):
         FixedContentScrollableFrame._set_outer_viewport_size(frame,356)
         outer.configure.assert_called_once_with(width=356+17,height=SCROLL_VIEWPORT_HEIGHT)
 
-    def test_resize_handler_ignores_changes_inside_current_breakpoint(self):
+    def test_resize_handler_debounces_width_changes_inside_current_breakpoint(self):
         from app import App
         window=SimpleNamespace(winfo_width=lambda:900,page=SimpleNamespace(_get_widget_scaling=lambda:1),
-                               _layout_columns=2,_topbars_compact=False,_controls_compact=False,reflow=MagicMock())
-        App.schedule_layout(window,SimpleNamespace(widget=window,width=900))
+                               _layout_columns=2,_topbars_compact=False,_controls_compact=False,_layout_width=900,
+                               _pending_layout_width=None,_resize_layout_job=None,after=MagicMock(side_effect=['job-1','job-2']),after_cancel=MagicMock(),_run_scheduled_reflow=MagicMock(),reflow=MagicMock())
         App.schedule_layout(window,SimpleNamespace(widget=window,width=850))
-        window.reflow.assert_not_called()
         App.schedule_layout(window,SimpleNamespace(widget=window,width=735))
-        window.reflow.assert_called_once_with(735)
+        window.reflow.assert_not_called()
+        window.after_cancel.assert_called_once_with('job-1')
+        self.assertEqual(window._pending_layout_width,735)
+        self.assertEqual(window.after.call_count,2)
 
     def test_wheel_never_changes_slider_or_invokes_callback(self):
         slider=SimpleNamespace(_update_value=MagicMock())
@@ -109,7 +111,7 @@ class ResizeTests(unittest.TestCase):
                     scaling.assert_called_once_with(window._ui_scale)
                     available_width=max(1,int(screen[0]/dpi)-80)
                     available_height=max(1,int(screen[1]/dpi)-100)
-                    required_height=max(560,600+round(COMPACT_HEADER_EXTRA_HEIGHT*window._ui_scale))
+                    required_height=int((max(560,600)+dpi-1)//dpi)
                     self.assertEqual(window.minsize.call_args.args,
                                      (min(MIN_WINDOW_WIDTH,available_width),min(required_height,available_height)))
                     parts=window.geometry.call_args.args[0].split('+')
