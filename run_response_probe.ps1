@@ -4,12 +4,27 @@ param(
     [ValidateSet('baseline', 'rotation_compare', 'zoom_reversibility')]
     [string]$Protocol = 'baseline',
     [int]$ProbeCycles = 2,
-    [ValidateSet('center', 'offset', 'edge')]
     [string[]]$ProbeAnchors,
     [switch]$SkipPreflight
 )
 
 $ErrorActionPreference = 'Stop'
+$validAnchors = @('center', 'offset', 'edge')
+if ($ProbeAnchors) {
+    # Accept both `-ProbeAnchors center,offset` and
+    # `-ProbeAnchors center offset` in Windows PowerShell. Validate after
+    # splitting comma-delimited values because ValidateSet on string[] treats
+    # the comma form as one scalar argument.
+    $ProbeAnchors = @($ProbeAnchors | ForEach-Object { $_ -split ',' } |
+        ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    $invalid = @($ProbeAnchors | Where-Object { $_ -notin $validAnchors })
+    if ($invalid.Count -gt 0) {
+        throw "Unknown probe anchor '$($invalid[0])'. Valid anchors: $($validAnchors -join ', ')"
+    }
+    if (@($ProbeAnchors | Select-Object -Unique).Count -ne $ProbeAnchors.Count) {
+        throw 'Probe anchors must be unique.'
+    }
+}
 $repo = $PSScriptRoot
 $capture = Join-Path $repo 'work\studio\live_atlas_capture.py'
 $venvPython = Join-Path $repo '.venv\Scripts\python.exe'
