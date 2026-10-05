@@ -85,6 +85,7 @@ def build_current(capture, rules, **_context):
     # reserved for an actual attempt, return, and two-frame verification.
     # These estimates are deliberately conservative and diagnostic only; the
     # hard game deadline and per-route budget remain authoritative.
+    budget_guard_enabled=bool(_context.get('enable_binding_budget_guard', False))
     finish_reserve=float(_context.get('finish_reserve_seconds',15.0))
     minimum_attempt_seconds=float(_context.get('minimum_attempt_seconds',8.0))
     binding_seconds_per_candidate=float(_context.get('binding_seconds_per_candidate',.5))
@@ -98,7 +99,7 @@ def build_current(capture, rules, **_context):
         remaining=deadline-time.monotonic()
         required=(finish_reserve+minimum_attempt_seconds+
                   binding_seconds_per_candidate)
-        if remaining<=required:
+        if budget_guard_enabled and remaining<=required:
             binding_stop_reason='finish_and_attempt_reserve'
             unbound_candidate_count=len(rows)-index+1
             break
@@ -158,6 +159,7 @@ def build_current(capture, rules, **_context):
     rows=select_color_candidates(prepared,rules,8)
     report['candidates']=rows
     report['search_diagnostics']=dict(report.get('search_diagnostics') or {},route_binding=route_diagnostics,
+        binding_budget_guard_enabled=budget_guard_enabled,
         route_binding_seconds=time.perf_counter()-binding_started,
         route_binding_stop_reason=binding_stop_reason,
         route_binding_unprocessed_count=unbound_candidate_count,
