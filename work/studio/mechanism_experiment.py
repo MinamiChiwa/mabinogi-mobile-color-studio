@@ -199,7 +199,7 @@ def record_probe_event(recorder: MechanismExperimentRecorder | None, kind: str,
                         direction=direction,
                         step=step,
                         frame_before=data.get("reference"),
-                        frame_after=data.get("settled"),
+                        frame_after=data.get("settled", data.get("frame")),
                         hex_before=data.get("hex_before"),
                         hex_after=data.get("hex_after"),
                         hex_first=data.get("hex_first"),
@@ -211,7 +211,12 @@ def record_probe_event(recorder: MechanismExperimentRecorder | None, kind: str,
                         registration_seconds=data.get(
                             "registration_seconds",
                             details.get("registration_seconds")),
-                        residual=data.get("closure_pixels"),
+                        # A regular rotation probe supplies forward/reverse
+                        # closure; the wheel probe supplies per-step marker
+                        # errors instead. Preserve whichever was actually
+                        # measured rather than inventing a common residual.
+                        residual=data.get("closure_pixels",
+                                         data.get("marker_errors")),
                         pose=data.get("pose_after"), clock=clock,
                         registration_complete=data.get("registration_complete"),
                         measured_motion=registration,

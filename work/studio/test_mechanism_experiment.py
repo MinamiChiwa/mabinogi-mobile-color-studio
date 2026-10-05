@@ -1,5 +1,5 @@
 import unittest
-from mechanism_experiment import MechanismExperimentRecorder
+from mechanism_experiment import MechanismExperimentRecorder, record_probe_event
 
 class MechanismRecorderTests(unittest.TestCase):
     def test_explicit_consumption_and_evidence_groups(self):
@@ -48,6 +48,32 @@ class MechanismRecorderTests(unittest.TestCase):
         unknown = MechanismExperimentRecorder(started_at=0.0).report()['summary']
         self.assertIsNone(unknown['max_delta_e'])
         self.assertIsNone(unknown['registration_seconds_p95'])
+
+    def test_probe_bridge_preserves_measured_action_fields(self):
+        r = MechanismExperimentRecorder(started_at=0.0)
+        record_probe_event(r, 'response_probe_plan', {
+            'protocol': 'baseline', 'markers': [[1, 2]],
+            'actions': [{'name': 'center_r0_a+1'}],
+            'hex_before': ['#010203'],
+        }, clock=lambda: 1.0)
+        record_probe_event(r, 'response_probe_measurement', {
+            'name': 'center_r0_a+1', 'reference': 'max_sampling',
+            'settled': 'response_01_settled',
+            'gesture': {'kind': 'rotate', 'requested_angle': 1.0},
+            'hex_before': ['#010203'], 'hex_after': ['#040506'],
+            'hex_first': ['#040506'], 'hex_settled': ['#040506'],
+            'input_elapsed_seconds': .25,
+            'countdown_before': 118., 'countdown_after': 117.,
+            'registration_seconds': .5,
+            'registration_complete': True,
+            'measurements': {'forward': {'matrix': [[1, 0], [0, 1]]}},
+        }, clock=lambda: 2.0)
+        action = r.events[-1]
+        self.assertEqual(action['hex_before'], ['#010203'])
+        self.assertEqual(action['hex_after'], ['#040506'])
+        self.assertEqual(action['input_seconds'], .25)
+        self.assertEqual(action['countdown_before'], 118.)
+        self.assertEqual(action['countdown_after'], 117.)
 
 if __name__ == '__main__':
     unittest.main()
