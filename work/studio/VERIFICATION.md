@@ -25,6 +25,27 @@ The single-region runs use direct board exploration and do not build a full atla
 
 ## Saved-capture replay
 
+The 2026-10-05 `translation_shared` mechanism probe completed 10 recorded
+actions without sending a formal multi-region dye search. The run measured
+about 3.595 seconds of input time, 4.720 seconds of registration time, and a
+registration P95 of about 0.509 seconds; about 79.3 seconds remained at the
+end. Four center/offset pairs of ±8-pixel translations measured approximately
+±8 pixels and returned to the initial three-region HEX combination after the
+reverse move. One down/up wheel pair measured scales of about 0.99013 and
+1.00988 and also returned close to the initial combination. This is same-game
+mechanism evidence only; it contains no target ΔE, precise-hit count, or
+multi-region candidate result, and does not establish cross-session or
+cross-device behavior.
+
+A follow-up offline replay correction was committed as `9bfb00d`. The
+progressive replay report now selects its best row with
+`progressive_candidate_rank`, records accepted and landing-safe counts, and
+labels the ranking used. This aligns diagnostic metadata with the opt-in
+progressive service without changing the production route. On the current
+contiguous replay source, both `full48` and `anchor_progressive` still fail
+the quality gate and produce no strict three-region candidate; the complete
+48-step route therefore remains the production baseline.
+
 A separate 1280 × 960 capture previously stopped because an adjacent image pair had only 18 default feature inliers. Denser feature extraction found 43 inliers without reducing the existing matching, geometry or atlas-quality thresholds. Reconstruction of all 48 steps passed the original checks and retained eight candidates after integer-route binding. This replay sent no game input.
 
 Three additional saved atlases from a 1920 × 1009 client retained eight bound candidates each. Their best central maximum ΔE76 predictions were 8.39 / 10.81 / 10.80. These values are offline predictions, not measurements from new game sessions.
