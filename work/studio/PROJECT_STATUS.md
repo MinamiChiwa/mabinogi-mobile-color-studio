@@ -1,6 +1,6 @@
 # 项目状态
 
-当前正式版本：0.3.6，策略修订号 `balanced-landing-single-zoom-v3`。验证依据、实机结果和已知限制统一记录于 [验证报告](VERIFICATION.md)；正式发布文件以发布页附件为准。
+当前状态：0.3.6 是已同步到 main、v0.3.6 标签和发布页的**验证中技术候选**，不是已完成游戏机制验收的稳定版。策略修订号为 balanced-landing-single-zoom-v3。自动化证据、实机结果和已知限制统一记录于 [验证报告](VERIFICATION.md)；发布前门槛见 [实机机制验收门槛](GAME_MECHANISM_VALIDATION_GATE.md)。
 
 现行目标、候选顺序和后续工作以 [现行策略与优化计划](REACHABLE_SEARCH_PLAN.md) 为准；共同变换、输入与坐标约定见 [几何与操作](GEOMETRY.md)。历史实验报告只代表其记录时的实现与条件。
 

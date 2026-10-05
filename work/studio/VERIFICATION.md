@@ -1,4 +1,5 @@
 # Current verification scope
+> **Release status: validation-in-progress technical candidate.** 0.3.6 has code-regression evidence and a published build, but game-mechanism acceptance is incomplete. The published/latest label must not be read as proof of cross-board, cross-device or multi-region precision. See GAME_MECHANISM_VALIDATION_GATE.md before changing code or release status.
 
 Version: 0.3.6. Policy revision: balanced-landing-single-zoom-v3. Date: 2026-10-05. This tool was developed with AI assistance.
 
