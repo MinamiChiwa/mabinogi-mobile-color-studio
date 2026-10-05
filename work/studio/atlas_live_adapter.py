@@ -81,10 +81,29 @@ def build_current(capture, rules, **_context):
         raise RuntimeError('Atlas is unavailable for route endpoint scoring')
     prepared=[];route_diagnostics=[]
     binding_started=time.perf_counter()
+    # Candidate route binding can be expensive and must not consume the time
+    # reserved for an actual attempt, return, and two-frame verification.
+    # These estimates are deliberately conservative and diagnostic only; the
+    # hard game deadline and per-route budget remain authoritative.
+    finish_reserve=float(_context.get('finish_reserve_seconds',15.0))
+    minimum_attempt_seconds=float(_context.get('minimum_attempt_seconds',8.0))
+    binding_seconds_per_candidate=float(_context.get('binding_seconds_per_candidate',.5))
+    if min(finish_reserve,minimum_attempt_seconds,binding_seconds_per_candidate)<0:
+        raise ValueError('Search budget estimates must be non-negative')
+    binding_stop_reason=None
+    unbound_candidate_count=0
     progress=capture.get('progress')
     for index,row in enumerate(rows,1):
         game.check()
+        remaining=deadline-time.monotonic()
+        required=(finish_reserve+minimum_attempt_seconds+
+                  binding_seconds_per_candidate)
+        if remaining<=required:
+            binding_stop_reason='finish_and_attempt_reserve'
+            unbound_candidate_count=len(rows)-index+1
+            break
         if progress:progress(stage='search',current=index,total=len(rows))
+        candidate_started=time.perf_counter()
         try:
             ready,budget=bind_candidate(row,runtime['atlas'],runtime['capture_offset'],
                 scene.board,scene.markers,rules,time.monotonic(),deadline,check=game.check,
@@ -92,6 +111,7 @@ def build_current(capture, rules, **_context):
         except (ValueError,TypeError,KeyError) as exc:
             ready=None;budget=dict(allowed=False,reason='invalid_route',detail=str(exc))
         route_diagnostics.append(dict(candidate_id=row['id'],
+            binding_seconds=time.perf_counter()-candidate_started,
             budget={k:v for k,v in budget.items() if k!='input_route'}))
         if ready is not None:prepared.append(ready)
     def _stable_translation(row):
@@ -109,7 +129,7 @@ def build_current(capture, rules, **_context):
         or any(row.get('family_consistent') and row.get('route_stability')
                and not row['route_stability'].get('quality_preferred',False)
                for row in prepared))
-    if needs_translation_fallback and time.monotonic()<deadline:
+    if needs_translation_fallback and binding_stop_reason is None and time.monotonic()<deadline:
         # No transform route survived. Retain the already captured pose and
         # search its atlas for integer translations instead of publishing an
         # unattainable continuous candidate or throwing away the session.
@@ -139,6 +159,11 @@ def build_current(capture, rules, **_context):
     report['candidates']=rows
     report['search_diagnostics']=dict(report.get('search_diagnostics') or {},route_binding=route_diagnostics,
         route_binding_seconds=time.perf_counter()-binding_started,
+        route_binding_stop_reason=binding_stop_reason,
+        route_binding_unprocessed_count=unbound_candidate_count,
+        route_binding_budget=dict(finish_reserve_seconds=finish_reserve,
+            minimum_attempt_seconds=minimum_attempt_seconds,
+            estimated_next_binding_seconds=binding_seconds_per_candidate),
         stability_required=True,stable_route_count=len(rows),
         transform_routes_suppressed=False,
         stable_translation_count=len(safe_translations),
