@@ -192,6 +192,10 @@ class Adapter:
         self.g, self.scene, self.session = game, scene, session
         self.last_motion_diagnostics = None
         self.last_motion_before = self.last_motion_after = None
+        # Keep extracted features across adjacent action registrations. The
+        # cache is identity-safe and bounded by _cached_features; all motion
+        # matching and material quality gates still run for every pair.
+        self._motion_feature_cache = {}
         self._code_cache = {}
         self._stage_budget = None
         self.code_read_stats = dict(calls=0,ocr_passes=0,ocr_cards=0,reused_cards=0,seconds=0.)
@@ -228,7 +232,16 @@ class Adapter:
         self.check_observation()
         self.last_motion_before, self.last_motion_after = before, after
         self.last_motion_diagnostics = {}
-        measured=motion(before, after, self.scene, self.last_motion_diagnostics)
+        try:
+            measured=motion(before, after, self.scene, self.last_motion_diagnostics,
+                            feature_cache=self._motion_feature_cache)
+        except TypeError as exc:
+            # Keep lightweight test/replay adapters that replace motion with a
+            # legacy four-argument callable working while the production
+            # implementation uses the feature cache.
+            if 'feature_cache' not in str(exc):
+                raise
+            measured=motion(before, after, self.scene, self.last_motion_diagnostics)
         try:self.check_observation()
         except StageBudgetExceeded:
             # The pair is already registered and there has been no further
