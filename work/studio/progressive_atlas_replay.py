@@ -17,7 +17,7 @@ from analyze_live_atlas import (CaptureAlignment, frame_sequence, material_masks
                                 measure_periods, quality_gate, scene_record,
                                 validation_summary, evaluate)
 from atlas_budget_review import load_capture, subset_indices, measure_subset
-from candidate_ranking import candidate_rank
+from candidate_ranking import candidate_rank, progressive_candidate_rank
 from periodic_atlas import PeriodicAtlas, progressive_translation_candidates, translation_candidates
 from replay_archive import refine, translation_error
 
@@ -78,12 +78,27 @@ def _saved_game_codes(capture):
     return {}
 
 
-def _candidate_metrics(rows, rules):
+def _candidate_metrics(rows, rules, *, rank_fn=candidate_rank, ranking='complete'):
+    """Summarise one offline candidate list using its actual route ranker.
+
+    The progressive route has a deliberately different ordering from the
+    complete atlas route.  Previously the replay report always used
+    ``candidate_rank`` for ``best``; that could make an offline comparison
+    report a different candidate than the opt-in progressive service would
+    actually choose.  This is report metadata only and never changes the
+    production search path.
+    """
     if not rows:
-        return dict(count=0, strict_accepted_count=0, best=None)
+        return dict(count=0, accepted_count=0, strict_accepted_count=0,
+                    landing_safe_count=0,
+                    ranking=ranking, best=None)
     accepted = [row for row in rows if row.get('accepted')]
-    return dict(count=len(rows), strict_accepted_count=len(accepted),
-                best=min(rows, key=candidate_rank))
+    safe = [row for row in accepted
+            if not row.get('landing_radius') or row.get('landing_safe')]
+    return dict(count=len(rows), accepted_count=len(accepted),
+                strict_accepted_count=len(safe),
+                landing_safe_count=len(safe), ranking=ranking,
+                best=min(rows, key=rank_fn))
 
 
 def replay(capture, output, *, review_path=None, resolution=768):
@@ -151,8 +166,12 @@ def replay(capture, output, *, review_path=None, resolution=768):
             periods=periods, motions=motions, coverage=coverage,
             validation=validation, quality_gate=gate, marker_samples=markers,
             elapsed_seconds=time.perf_counter() - started,
-            complete_search=_candidate_metrics(complete_rows, rules),
-            progressive_search=_candidate_metrics(progressive_rows, rules),
+            complete_search=_candidate_metrics(complete_rows, rules,
+                                               rank_fn=candidate_rank,
+                                               ranking='complete'),
+            progressive_search=_candidate_metrics(progressive_rows, rules,
+                                                  rank_fn=progressive_candidate_rank,
+                                                  ranking='progressive'),
             progressive_diagnostics=diagnostics)
 
     report = dict(schema=1, offline_only=True, verified=False,
