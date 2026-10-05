@@ -595,7 +595,7 @@ def wait_for_dye_board(g, stop, *, started=None, log=lambda *a,**k:None,
                 ready_at=ready_at,budget=budget)
 
 
-def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=False,entry_size=None,emit=None,row_stagger=0.,response_protocol='baseline',settling_probes=False,probe_cycles=3,probe_anchors=None):
+def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=False,entry_size=None,emit=None,row_stagger=0.,response_protocol='baseline',settling_probes=False,probe_cycles=3,probe_anchors=None,mechanism_experiment=False,dye_consumed=None):
     if not np.isfinite(row_stagger) or not 0 <= row_stagger <= .1:
         raise ValueError('row_stagger must be between 0 and 0.1')
     if (response_protocol not in ('baseline','rotation_compare','zoom_reversibility') or
@@ -610,6 +610,12 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
     try:active_marker.write_text('active',encoding='ascii')
     except OSError:active_marker=None
     started=time.monotonic();records=[];game_deadline=None;session_scene=None;final_image=None
+    mechanism_recorder=None
+    if mechanism_experiment:
+        from mechanism_experiment import MechanismExperimentRecorder
+        mechanism_recorder=MechanismExperimentRecorder(started_at=started)
+        if dye_consumed is not None:
+            mechanism_recorder.set_consumption(dye_consumed)
     input_started=False;worker=None
     active_touched=started
     def keep_active(force=False):
@@ -638,6 +644,23 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
             elif kind=='frame' and data.get('name','').startswith('grid_'):
                 emit('atlas_progress',stage='capture',current=int(data['name'].split('_')[1]),total=48)
         return row
+    def persist_mechanism(status, *, final_hexes=None,
+                          return_success=None, **extra):
+        """Persist a partial or complete mechanism journal exactly once."""
+        if mechanism_recorder is None:
+            return
+        if not any(event.get('kind') == 'mechanism_experiment_complete'
+                   for event in mechanism_recorder.events):
+            until = getattr(g, 'until', started) if g is not None else started
+            mechanism_recorder.finish(
+                status=status,
+                final_hexes=final_hexes,
+                countdown_seconds=max(0., float(until) - time.monotonic()),
+                return_success=return_success,
+                **extra)
+        (folder/'mechanism_experiment.json').write_text(
+            json.dumps(mechanism_recorder.report(), indent=2,
+                       ensure_ascii=False), encoding='utf-8')
     def snap(name,scene=None,command=None,sample=None):
         if sample is None:
             capture_started=time.monotonic();im=g.capture();captured_at=time.monotonic()
@@ -759,7 +782,12 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
                 except (AttributeError,TypeError,ValueError,OSError):g.response_probe_dpi=None
                 final_image,outcome=run_response_probe(
                     g,scene,final_image,snap,log,protocol=response_protocol,
-                    probe_cycles=probe_cycles,probe_anchors=probe_anchors)
+                    probe_cycles=probe_cycles,probe_anchors=probe_anchors,
+                    mechanism_recorder=mechanism_recorder,
+                    dye_consumed=dye_consumed)
+                if mechanism_recorder is not None:
+                    persist_mechanism(outcome.get('status', 'unknown'),
+                                      protocol=response_protocol)
                 log('CAPTURE_COMPLETE',strategy='response',outcome=outcome)
                 return dict(folder=folder,deadline=budget.deadline,game_deadline=game_deadline,
                     workflow_deadline=budget.workflow_deadline,ready_at=ready_at,
@@ -837,6 +865,7 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
         snap('heldout_xy',scene);log('command',dx=round(dx*.43),dy=round(dy*.37))
         log('CAPTURE_COMPLETE',message='No dye confirmation or cancel click sent. Inspect and cancel next.')
     except Exception as e:
+        persist_mechanism('aborted', error=str(e))
         log('ABORTED',message=str(e));raise
     finally:
         if input_started:g.send(4);g.send(16)
@@ -863,6 +892,8 @@ if __name__=='__main__':
                         help='Optional 5%% row offset for the next capture-only calibration')
     parser.add_argument('--settling-probes',action='store_true',
                         help='Record extra early scan frames for offline settling diagnostics')
+    parser.add_argument('--mechanism-experiment',action='store_true',
+                        help='Opt-in evidence journal; does not confirm/apply dye')
     args=parser.parse_args()
     kernel=C.windll.kernel32
     kernel.CreateMutexW.argtypes=[C.c_void_p,C.c_bool,C.c_wchar_p];kernel.CreateMutexW.restype=C.c_void_p
@@ -874,5 +905,6 @@ if __name__=='__main__':
             if not preflight(args.folder)['passed']:raise SystemExit(1)
         else:acquire(args.folder,args.entry,args.strategy,row_stagger=args.row_stagger,
                      response_protocol=args.response_protocol,settling_probes=args.settling_probes,
-                     probe_cycles=args.probe_cycles,probe_anchors=args.probe_anchors)
+                     probe_cycles=args.probe_cycles,probe_anchors=args.probe_anchors,
+                     mechanism_experiment=args.mechanism_experiment)
     finally:kernel.CloseHandle(mutex)
