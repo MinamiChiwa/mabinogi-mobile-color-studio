@@ -3,7 +3,8 @@ import unittest
 import numpy as np
 from atlas_pose import homogeneous
 from gesture_response_probe import (response_probe_plan,run_response_probe,
-                                    zoom_probe_anchors,zoom_reversibility_plan)
+                                    translation_shared_plan,zoom_probe_anchors,
+                                    zoom_reversibility_plan)
 
 
 class ProbeGame:
@@ -55,6 +56,27 @@ class ResponseProbeTests(unittest.TestCase):
                 self.assertTrue(all(isinstance(v,int) for v in point))
         self.assertEqual({p.anchor_name for p in plan},{'center','offset'})
         self.assertEqual([p.gesture.wheel_steps for p in plan if p.gesture.kind=='wheel'],[-1,1,-1,1])
+
+    def test_translation_shared_plan_is_bounded_and_uses_real_drag_gestures(self):
+        plan = translation_shared_plan(self.scene.board, cycles=2)
+        self.assertEqual(len(plan), 20)
+        self.assertEqual({p.anchor_name for p in plan}, {'center', 'offset'})
+        self.assertEqual(sum(p.gesture.kind == 'drag' for p in plan), 16)
+        self.assertEqual([p.gesture.wheel_steps for p in plan if p.gesture.kind == 'wheel'],
+                         [-1, 1, -1, 1])
+        self.assertTrue(all(p.gesture.has_effect for p in plan))
+
+    def test_translation_shared_probe_runs_without_recorder(self):
+        _, result = run_response_probe(
+            self.game, self.scene, np.eye(3), self.snap,
+            lambda k, **d: self.events.append(dict(kind=k, **d)),
+            register=self.register, clock=lambda: self.game.now,
+            probe_plan='translation_shared', probe_cycles=1)
+        self.assertEqual(result['status'], 'complete')
+        self.assertEqual(result['planned'], 10)
+        self.assertEqual(result['completed'], 10)
+        self.assertEqual(len(self.game.inputs), 10)
+        self.assertEqual(self.game.releases, [4, 16])
 
     def test_zoom_reversibility_plan_covers_anchor_pairs_and_both_orders(self):
         board=self.scene.board

@@ -4,6 +4,8 @@ param(
     [ValidateSet('baseline', 'rotation_compare', 'zoom_reversibility')]
     [string]$Protocol = 'baseline',
     [int]$ProbeCycles = 2,
+    [ValidateSet('default', 'translation_shared')]
+    [string]$ProbePlan = 'default',
     [string[]]$ProbeAnchors,
     [switch]$SkipPreflight
 )
@@ -55,7 +57,7 @@ if ($Protocol -eq 'zoom_reversibility') {
 } else {
     Write-Host 'Response diagnostic; it does not confirm, apply, or cancel dye.'
 }
-$invokeArgs = @($capture, 'acquire', $out, '--strategy', 'response', '--response-protocol', $Protocol, '--probe-cycles', [string]$ProbeCycles, '--mechanism-experiment')
+$invokeArgs = @($capture, 'acquire', $out, '--strategy', 'response', '--response-protocol', $Protocol, '--probe-cycles', [string]$ProbeCycles, '--probe-plan', $ProbePlan, '--mechanism-experiment')
 if ($ProbeAnchors -and $ProbeAnchors.Count -gt 0) {
     $invokeArgs += '--probe-anchors'
     $invokeArgs += $ProbeAnchors

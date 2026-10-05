@@ -595,7 +595,7 @@ def wait_for_dye_board(g, stop, *, started=None, log=lambda *a,**k:None,
                 ready_at=ready_at,budget=budget)
 
 
-def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=False,entry_size=None,emit=None,row_stagger=0.,response_protocol='baseline',settling_probes=False,probe_cycles=3,probe_anchors=None,mechanism_experiment=False,dye_consumed=None):
+def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=False,entry_size=None,emit=None,row_stagger=0.,response_protocol='baseline',settling_probes=False,probe_cycles=3,probe_anchors=None,mechanism_experiment=False,dye_consumed=None,probe_plan='default'):
     if not np.isfinite(row_stagger) or not 0 <= row_stagger <= .1:
         raise ValueError('row_stagger must be between 0 and 0.1')
     if (response_protocol not in ('baseline','rotation_compare','zoom_reversibility') or
@@ -782,6 +782,7 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
                 except (AttributeError,TypeError,ValueError,OSError):g.response_probe_dpi=None
                 final_image,outcome=run_response_probe(
                     g,scene,final_image,snap,log,protocol=response_protocol,
+                    probe_plan=probe_plan,
                     probe_cycles=probe_cycles,probe_anchors=probe_anchors,
                     mechanism_recorder=mechanism_recorder,
                     dye_consumed=dye_consumed)
@@ -884,6 +885,7 @@ if __name__=='__main__':
     parser.add_argument('--entry',nargs=2,type=int)
     parser.add_argument('--strategy',choices=['legacy','grid','probe','response'],default='legacy')
     parser.add_argument('--response-protocol',choices=['baseline','rotation_compare','zoom_reversibility'],default='baseline')
+    parser.add_argument('--probe-plan',choices=['default','translation_shared'],default='default')
     parser.add_argument('--probe-cycles',type=int,default=3,
                         help='Number of paired one-notch zoom cycles per anchor')
     parser.add_argument('--probe-anchors',nargs='+',choices=['center','offset','edge'],
@@ -904,7 +906,8 @@ if __name__=='__main__':
         if args.mode=='preflight':
             if not preflight(args.folder)['passed']:raise SystemExit(1)
         else:acquire(args.folder,args.entry,args.strategy,row_stagger=args.row_stagger,
-                     response_protocol=args.response_protocol,settling_probes=args.settling_probes,
+                     response_protocol=args.response_protocol,probe_plan=args.probe_plan,
+                     settling_probes=args.settling_probes,
                      probe_cycles=args.probe_cycles,probe_anchors=args.probe_anchors,
                      mechanism_experiment=args.mechanism_experiment)
     finally:kernel.CloseHandle(mutex)

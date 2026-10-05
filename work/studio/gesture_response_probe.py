@@ -8,7 +8,7 @@ from dataclasses import dataclass
 import time
 import numpy as np
 from atlas_pose import homogeneous, marker_errors, pose_fields
-from input_gestures import rotation_gesture, wheel_gesture
+from input_gestures import drag_gesture, rotation_gesture, wheel_gesture
 
 
 @dataclass(frozen=True)
@@ -116,6 +116,37 @@ def rotation_comparison_plan(board):
                     result.append(ProbeAction(f'{name}_r{repeat}_a{angle:+g}_{variant}',
                         name,repeat,make(board,angle,anchor),variant))
     return tuple(result)
+
+
+def translation_shared_plan(board, cycles=1):
+    """Short, bounded plan for the remaining mechanism evidence.
+
+    It deliberately mixes small translations with a repeated shared pose and
+    one wheel pair so the same-session log can compare pose reuse costs without
+    spending the whole round on a full rotation matrix sweep.
+    """
+    l, t, r, b = map(int, board)
+    center = (round((l + r) / 2), round((t + b) / 2))
+    offset = (round(l + (r - l) * .22), round(t + (b - t) * .72))
+    actions = []
+    for repeat in range(max(1, int(cycles))):
+        for name, anchor in (('center', center), ('offset', offset)):
+            for dx, dy in ((8, 0), (-8, 0), (0, 8), (0, -8)):
+                actions.append(ProbeAction(
+                    f'{name}_r{repeat}_t{dx:+d}_{dy:+d}', name, repeat,
+                    # ``drag_gesture`` derives a safe in-board path from the
+                    # displacement.  The anchor label is retained as probe
+                    # metadata so the same response can be compared at the
+                    # two sampling locations; it is not a fourth gesture
+                    # argument.
+                    drag_gesture(board, dx, dy)))
+        actions.extend((
+            ProbeAction(f'center_r{repeat}_w-1', 'center', repeat,
+                        wheel_gesture(board, -1, center)),
+            ProbeAction(f'center_r{repeat}_w+1', 'center', repeat,
+                        wheel_gesture(board, 1, center)),
+        ))
+    return tuple(actions)
 
 
 def _probe_hex(image, scene, check=lambda: None):
@@ -351,7 +382,7 @@ def run_zoom_reversibility_probe(game, scene, reference, snap, log, *,
 def run_response_probe(game,scene,reference,snap,log,*,register=None,
                        clock=time.monotonic,protocol='baseline',probe_cycles=3,
                        probe_anchors=None, mechanism_recorder=None,
-                       dye_consumed=None):
+                       dye_consumed=None, probe_plan='default'):
     """Run a bounded plan; return the last frame and a structured outcome.
 
     snap(name, scene) preserves original frames. log(kind, **data) journals
@@ -375,7 +406,10 @@ def run_response_probe(game,scene,reference,snap,log,*,register=None,
             game, scene, reference, snap, log, register=register, clock=clock,
             cycles=probe_cycles, anchors=probe_anchors,
             mechanism_recorder=mechanism_recorder, dye_consumed=dye_consumed)
-    plan=(rotation_comparison_plan if protocol=='rotation_compare' else response_probe_plan)(scene.board)
+    if probe_plan == 'translation_shared':
+        plan = translation_shared_plan(scene.board, cycles=probe_cycles)
+    else:
+        plan=(rotation_comparison_plan if protocol=='rotation_compare' else response_probe_plan)(scene.board)
     local=np.asarray(scene.markers,float)-scene.board[:2]
     geometry=tuple(game.geometry())
     park=(int(geometry[2]*.5),int(geometry[3]*.15))
@@ -387,6 +421,7 @@ def run_response_probe(game,scene,reference,snap,log,*,register=None,
         board=list(scene.board),markers=[list(v) for v in scene.markers],
         geometry=list(geometry),dpi=getattr(game,'response_probe_dpi',None),
         reference='max_sampling',response_model_installed=False)
+    baseline_hex = None
     if record_probe_event is not None:
         baseline_hex = _probe_hex(reference, scene, check=game.check)
         current_hex = baseline_hex
