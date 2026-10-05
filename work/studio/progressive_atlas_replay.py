@@ -22,7 +22,8 @@ from periodic_atlas import PeriodicAtlas, progressive_translation_candidates, tr
 from replay_archive import refine, translation_error
 
 
-def anchor_first_indices(log, anchor_columns=(0, 4), anchor_rows=(0, 2, 4)):
+def anchor_first_indices(log, anchor_columns=(0, 4), anchor_rows=(0, 2, 4),
+                         max_step=1):
     """Return selected captures for two distributed anchor columns.
 
     All established holdouts remain validation-only. The original frame is
@@ -34,9 +35,17 @@ def anchor_first_indices(log, anchor_columns=(0, 4), anchor_rows=(0, 2, 4)):
     commands = [row for row in log if row.get('kind') == 'command']
     holdouts = set(sequence['holdout_indices'])
     selected = {0}
+    previous = 0
     for index, action in enumerate(commands, 1):
         if action.get('column') in anchor_columns and action.get('row') in anchor_rows:
-            selected.add(index)
+            # Keep every intermediate frame between anchors. A progressive
+            # route may omit colour-map frames, but registration still needs
+            # a bounded adjacent step; sparse jumps are not executable.
+            selected.update(range(previous + 1, index + 1))
+            previous = index
+    # The last anchor may be followed by a long return segment. Keep that
+    # adjacent tail as well so the staged replay has a valid current pose.
+    selected.update(range(previous + 1, len(commands) + 1))
     return sorted(selected - holdouts), sorted(holdouts), sorted(selected | holdouts)
 
 

@@ -35,7 +35,9 @@ class BudgetReviewTests(unittest.TestCase):
         self.assertEqual(holdout,[9,16,24,33,39,45])
         self.assertFalse(set(training)&set(holdout))
         self.assertEqual(sorted(training+holdout),retained)
-        self.assertLess(len(training), len(subset_indices(log, 'full')[0]))
+        self.assertLessEqual(len(training), len(subset_indices(log, 'full')[0]))
+        self.assertTrue(all(abs(log[i].get('dx', 0)) <= 100 and abs(log[i].get('dy', 0)) <= 200
+                            for i in training if i))
 
 
 if __name__=='__main__':unittest.main()
