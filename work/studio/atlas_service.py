@@ -11,7 +11,7 @@ import time
 import uuid
 from atlas_execution import reposition_budget
 from workflow_budget import earliest_deadline
-from candidate_ranking import candidate_rank,candidate_quality
+from candidate_ranking import candidate_rank,progressive_candidate_rank,candidate_quality
 from atlas_pose import relative_candidate, candidate_pose, homogeneous, pose_fields
 
 
@@ -24,6 +24,11 @@ class AtlasCallbacks:
     select: object=None
     prepare: object=None
     observe_current: object=None
+    # Optional experimental path: a callback may collect a few anchors,
+    # generate joint candidates, and perform local refinement.  It is never
+    # called unless ``progressive_search`` is explicitly enabled in context
+    # (or the builder marks the report as progressive).
+    progressive: object=None
 
 
 def quality_failure_message(gate):
@@ -225,11 +230,42 @@ class AtlasService:
         context=dict(context,selection_deadline=deadline)
         if batch is not None and deadline is not None:batch.deadline=deadline
         emit('atlas_ready',quality_gate=gate)
+        progressive = bool(context.get('progressive_search') or
+                           report.get('search_mode') == 'progressive')
+        # The staged path is deliberately opt-in.  A callback returns either
+        # a candidate list or a report fragment containing ``candidates``;
+        # malformed/failed staged searches fall back to the complete atlas
+        # result and are surfaced as diagnostics, never as a hard failure.
+        if progressive and callable(getattr(self.callbacks, 'progressive', None)):
+            complete_candidates=list(report.get('candidates',[]))
+            try:
+                staged=self.callbacks.progressive(owner,captured,report,rules,**context)
+                if isinstance(staged,dict):
+                    report.update(staged)
+                elif isinstance(staged,list):
+                    report['candidates']=staged
+                else:
+                    raise ValueError('progressive callback returned no candidate report')
+                if not report.get('candidates'):
+                    # An empty anchor/refinement result is an unavailable
+                    # staged search. Preserve the already-built full atlas so
+                    # the explicit experiment switch cannot turn a recoverable
+                    # search into a false no-candidate result.
+                    report['candidates']=complete_candidates
+                    raise ValueError('progressive callback returned no candidates')
+                report['search_mode']='progressive'
+            except Exception as exc:
+                if _is_safety_interrupt(exc):raise
+                report['candidates']=complete_candidates
+                emit('atlas_progressive_unavailable',detail=str(exc),
+                     message='渐进候选搜索未完成，回退完整颜色板候选。')
+                progressive=False
+        rank_fn=progressive_candidate_rank if progressive else candidate_rank
         rows=report.get('candidates',[])
         raw_rows=list(rows)
         raw_accepted=[row for row in raw_rows if row.get('accepted')]
         compromise_rows=[row for row in raw_rows if row not in raw_accepted]
-        best_compromise=min(compromise_rows,key=candidate_rank) if compromise_rows else None
+        best_compromise=min(compromise_rows,key=rank_fn) if compromise_rows else None
         emit('atlas_search_summary',raw_count=len(raw_rows),
              family_consistent_count=sum(row.get('family_consistent',False) for row in raw_rows),
              predicted_accepted_count=len(raw_accepted),
@@ -249,7 +285,7 @@ class AtlasService:
                  stable_route_count=stable_count,
                  search_diagnostics=report.get('search_diagnostics',{}))
             return self._observe_early_exit(owner,captured,rules,context,'no_executable_candidate')
-        rows=sorted(rows,key=candidate_rank)
+        rows=sorted(rows,key=rank_fn)
         batch_id=report.get('batch_id') or (batch.id if batch is not None else uuid.uuid4().hex)
         board=report.get('board')
         markers=(batch.context.markers if batch is not None else report.get('markers'))
@@ -334,7 +370,7 @@ class AtlasService:
         # logic as ordinary candidates, rather than executing inside a callback.
         recovery_rows=report.pop('recovery_candidates',[])
         if recovery_rows:
-            rows=sorted(rows+recovery_rows,key=candidate_rank)
+            rows=sorted(rows+recovery_rows,key=rank_fn)
             emit('atlas_candidates',batch_id=batch_id,candidates=rows,default_id=default['id'],
                  compromise_only=not any(row.get('accepted') for row in rows),
                  family_unavailable=all(row.get('family_consistent') is False for row in rows))

@@ -193,7 +193,8 @@ class UiLanguageTests(unittest.TestCase):
     def test_single_region_unrestored_best_is_separate_from_normal_compromise(self):
         from ui_progress import single_result_presentation
         title,body=single_result_presentation(dict(verified=True,accepted=False,
-            best_verified=True,best_current=False,outcome='compromise'))
+            best_verified=True,best_current=True,historical_best_unrestored=True,
+            outcome='compromise'))
         self.assertIn('妥协方案',title)
         self.assertIn('未能恢复',body)
 

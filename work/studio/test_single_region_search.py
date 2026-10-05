@@ -175,6 +175,10 @@ class VisibleCandidateTests(unittest.TestCase):
 
 
 class LiveSearchTests(unittest.TestCase):
+    def test_library_finish_reserve_remains_overridable(self):
+        self.assertEqual(QuickSearchLimits().finish_reserve_seconds, 1.)
+        self.assertEqual(QuickSearchLimits(finish_reserve_seconds=15.).finish_reserve_seconds, 15.)
+
     def test_initial_similarity_hit_is_double_verified_and_never_moves(self):
         io = FakeIO(color='#FEFEFE')
         result = run_single_region(io, scene(), rules(tolerance=4), game_deadline=100)
@@ -272,6 +276,7 @@ class LiveSearchTests(unittest.TestCase):
         self.assertEqual(result['outcome'], 'compromise')
         self.assertEqual(result['actual_colors'][0], '#777777')
         self.assertEqual(result['best_actual_colors'][0], '#888888')
+        self.assertTrue(result['historical_best_unrestored'])
 
     def test_missing_candidates_use_finite_two_axis_translation_only(self):
         io = FakeIO(color='#888888')

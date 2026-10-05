@@ -47,6 +47,9 @@ class QuickSearchLimits:
     verification_gap_seconds: float = .12
     observation_reserve_seconds: float = 2.5
     step_reserve_seconds: float = 1.8
+    # The live Windows entry point raises this to 15 seconds for a real
+    # 120-second round.  Keep the library default small for deterministic
+    # simulation/replay callers that provide their own deadline budget.
     finish_reserve_seconds: float = 1.
     landing_tolerance: float = .75
 
@@ -842,10 +845,15 @@ class _Search:
         # unverified read remains an unknown/failure state.
         accepted_result = bool(self.verified and accepted(self.colors, self.rules))
         outcome = ('matched' if accepted_result else 'compromise') if self.verified else 'unverified'
+        historical_best_unrestored = bool(self.best is not None and not self.at_best())
         return dict(actual_colors=self.colors.copy(), accepted=accepted_result,
                     outcome=outcome, verified=self.verified, current=self.current,
                     best_actual_colors=None if self.best is None else self.best['colors'].copy(),
                     best_verified=self.best is not None, best_current=self.at_best(),
+                    # This is deliberately separate from ``best_verified``:
+                    # the historical sample may be valid evidence yet not be
+                    # the colour currently visible in the game.
+                    historical_best_unrestored=historical_best_unrestored,
                     restored=self.restored, reason=self.reason, moves=self.moves,
                     explorations=self.explorations, candidate_trials=self.trials,
                     local_trials=self.local_trials,

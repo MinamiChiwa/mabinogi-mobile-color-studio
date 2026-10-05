@@ -574,7 +574,10 @@ def wait_for_dye_board(g, stop, *, started=None, log=lambda *a,**k:None,
             game_deadline=initial_game_deadline
         budget=WorkflowBudget(ready_at,game_deadline)
         g.until=budget.deadline
-        g.stage_until=budget.sampling_deadline
+        # Exploratory capture must stop before the non-negotiable finalization
+        # reserve.  ``until`` remains the game's hard deadline for the return
+        # and two-frame verification after the scan is complete.
+        g.stage_until=budget.exploration_deadline
         g.check()
         log('timer',seconds=timed_scene.seconds,source=timer_source,
             recognition_seconds=timer_recognition_seconds,attempts=attempt,
@@ -582,6 +585,8 @@ def wait_for_dye_board(g, stop, *, started=None, log=lambda *a,**k:None,
             workflow_deadline_elapsed_seconds=budget.workflow_deadline-started,
             effective_deadline_elapsed_seconds=budget.deadline-started,
             sampling_deadline_elapsed_seconds=budget.sampling_deadline-started,
+            exploration_deadline_elapsed_seconds=budget.exploration_deadline-started,
+            finish_reserve_seconds=budget.finish_reserve_seconds,
             workflow_seconds=60)
     else:
         game_deadline=initial_game_deadline
@@ -777,20 +782,34 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
                 marker_column_fill_moves=sum(a['supplemental_kind']=='marker_column_fill' for a in plan),
                 coverage_fill_moves=sum(a['supplemental_kind']=='coverage_fill' for a in plan),
                 supplemental_moves=sum(a['supplemental'] for a in plan))
+            completed_scan=True
             for index,action in enumerate(plan,1):
-                sample=settling.capture_step(g,scene,action,final_image)
-                final_image=snap('grid_%03d'%index,scene,command=action,sample=sample)
-                log('command',dx=action['dx'],dy=action['dy'],holdout=action['holdout'],
-                    row=action['row'],column=action['column'],
-                    supplemental=action['supplemental'],
-                    supplemental_kind=action['supplemental_kind'])
-            g.check()
+                try:
+                    sample=settling.capture_step(g,scene,action,final_image)
+                    final_image=snap('grid_%03d'%index,scene,command=action,sample=sample)
+                    log('command',dx=action['dx'],dy=action['dy'],holdout=action['holdout'],
+                        row=action['row'],column=action['column'],
+                        supplemental=action['supplemental'],
+                        supplemental_kind=action['supplemental_kind'])
+                except Interrupted as exc:
+                    # The exploration cutoff intentionally fires before the
+                    # hard game deadline. Keep the frames already captured,
+                    # release the current drag in finally, and continue with
+                    # processing/return while the hard deadline remains.
+                    completed_scan=False
+                    log('sampling_cutoff',completed_steps=index-1,
+                        planned_steps=len(plan),message=str(exc))
+                    break
+            if completed_scan:
+                g.check()
             processing_started=time.monotonic()
             prepared=worker.close()
             log('capture_processing',wait_seconds=time.monotonic()-processing_started,
                 alignment_seconds=worker.alignment.seconds,alignment_error=worker.error)
             log('scan_settling_summary',**settling.summary())
-            log('CAPTURE_COMPLETE',strategy='grid',message='No dye confirmation or cancel click sent. Inspect and cancel next.')
+            log('CAPTURE_COMPLETE',strategy='grid',
+                partial=not completed_scan,
+                message='No dye confirmation or cancel click sent. Inspect and cancel next.')
             # Only the completed sampling stage ends. The workflow's shared
             # deadline stays unchanged through building, default and choice.
             g.stage_until=float('inf')

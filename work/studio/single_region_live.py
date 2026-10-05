@@ -1,5 +1,6 @@
 """Windows IO for fast current-board search. Never applies a dye."""
 import time
+from dataclasses import replace
 from pathlib import Path
 import numpy as np
 
@@ -8,7 +9,7 @@ from execution_diagnostics import execution_diagnostics
 from live_atlas_capture import open_capture_game, wait_for_dye_board
 from result_history import describe_result
 from session_store import ACTIVE_MARKER
-from single_region_search import run_single_region
+from single_region_search import QuickSearchLimits, run_single_region
 from vision import configure_ocr, read_codes
 
 
@@ -158,8 +159,13 @@ def run_live_single_region(owner,rules,*,target=None,activate=False,**_context):
                                 emit=lambda _kind,**data:owner.event('single_progress',**data),
                                 progress_stage='observe')
         io=SingleRegionIO(owner,game,ready['scene'],folder,rules)
+        # Real rounds need an explicit tail for final positioning plus two
+        # consecutive HEX reads.  Keep this policy at the live boundary so
+        # deterministic/offline callers can continue to control their own
+        # synthetic deadline budget.
+        live_limits = replace(QuickSearchLimits(), finish_reserve_seconds=15.)
         result=run_single_region(io,ready['scene'],rules,game_deadline=ready['budget'].deadline,
-                                 search_started_at=ready['ready_at'])
+                                 search_started_at=ready['ready_at'], limits=live_limits)
         result=result_fields(result,rules)
         result['code_read_stats']=dict(io.code_read_stats)
         result['elapsed_seconds']=time.monotonic()-started

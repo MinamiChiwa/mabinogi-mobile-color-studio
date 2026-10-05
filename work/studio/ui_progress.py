@@ -31,7 +31,7 @@ def single_result_presentation(data):
         return ('单区域寻色已结束', '当前色码未完成复核，请以游戏内显示为准。')
     if outcome=='matched' or (outcome not in ('matched','compromise','unverified') and data.get('accepted')):
         return ('单区域目标已达标', '自动移动已结束，可继续在游戏内手动调整。')
-    if data.get('best_current') is False:
+    if data.get('historical_best_unrestored') or data.get('best_current') is False:
         return ('未命中目标 · 妥协方案',
                 '未找到满足目标的颜色。此前最佳实测结果未能恢复；下方显示当前已复核的妥协结果，请以游戏内当前颜色为准。')
     return ('未命中目标 · 妥协方案',

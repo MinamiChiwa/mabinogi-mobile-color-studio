@@ -109,6 +109,35 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual([e[0] for e in owner.events],
                          ['atlas_status','atlas_ready','atlas_search_summary','atlas_candidates','atlas_default_verified','atlas_selection_expired'])
 
+    def test_progressive_search_is_opt_in_and_uses_staged_candidates(self):
+        owner=Owner();callbacks=self.callbacks()
+        callbacks.progressive=lambda owner,captured,report,rules,**context:[
+            dict(id=10,dx=1,dy=0,accepted=True,maximum=2,average=1,total=3,
+                 exact_matches=0,action_cost=1,action_risk=1),
+            dict(id=11,dx=2,dy=0,accepted=True,maximum=2,average=1,total=3,
+                 exact_matches=1,action_cost=8,action_risk=1)]
+        result=AtlasService(callbacks).run(owner,[],progressive_search=True,
+                                           selection_deadline=time.monotonic()+30)
+        self.assertEqual(result['candidate_id'],11)
+        event=next(data for kind,data in owner.events if kind=='atlas_candidates')
+        self.assertEqual(event['candidates'][0]['exact_matches'],1)
+
+    def test_progressive_failure_falls_back_to_complete_candidates(self):
+        owner=Owner();callbacks=self.callbacks()
+        callbacks.progressive=lambda *a,**k:(_ for _ in ()).throw(RuntimeError('staged'))
+        result=AtlasService(callbacks).run(owner,[],progressive_search=True,
+                                           selection_deadline=time.monotonic()+30)
+        self.assertEqual(result['candidate_id'],0)
+        self.assertIn('atlas_progressive_unavailable',[kind for kind,_ in owner.events])
+
+    def test_empty_progressive_result_falls_back_to_complete_candidates(self):
+        owner=Owner();callbacks=self.callbacks()
+        callbacks.progressive=lambda *a,**k:[]
+        result=AtlasService(callbacks).run(owner,[],progressive_search=True,
+                                           selection_deadline=time.monotonic()+30)
+        self.assertEqual(result['candidate_id'],0)
+        self.assertIn('atlas_progressive_unavailable',[kind for kind,_ in owner.events])
+
     def test_feedback_best_not_restored_is_terminal_and_keeps_current_hex_separate(self):
         owner=Owner();base=self.callbacks()
         base.build=lambda *a,**k:{'quality_gate':{'passed':True},'candidates':[

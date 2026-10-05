@@ -31,6 +31,36 @@ ROUTE_REPLAN_TOLERANCE = 1.0
 ROUTE_REPLAN_HYSTERESIS = 0.25
 
 
+def _check_attempt_budget(stage_budget, gesture, *, return_seconds=0.,
+                          registration_seconds=.6, verification_seconds=1.0,
+                          safety_seconds=.25, emit=None, step=None, action=None):
+    """Reserve the complete post-input attempt before sending a gesture.
+
+    ``ExecutionStageBudget.for_attempt`` enables this gate. Directly
+    constructed legacy budgets still perform their historical stage check.
+    Costs deliberately include settling/registration, two-frame HEX
+    verification, the measured return route and a small safety margin.
+    """
+    if stage_budget is None:
+        return
+    record = gesture.record()
+    action_seconds = max(float(record.get('input_seconds', 0.)), .05) + .15
+    costs = dict(action_seconds=action_seconds,
+                 registration_seconds=float(registration_seconds),
+                 verification_seconds=float(verification_seconds),
+                 return_seconds=max(0., float(return_seconds)),
+                 safety_seconds=float(safety_seconds))
+    try:
+        stage_budget.check_attempt(**costs)
+    except StageBudgetExceeded:
+        if callable(emit):
+            emit('atlas_attempt_budget_blocked', dict(
+                step=step, action=action, costs=costs,
+                remaining=max(0., float(stage_budget.exploration_deadline) -
+                             float(stage_budget.clock()))))
+        raise
+
+
 def _route_needs_replan(errors, *, rotation_quantized=False, initial=True):
     if rotation_quantized:
         return True
@@ -590,6 +620,7 @@ def _feedback_refine(adapter, candidate, actual, before, codes, rules, markers,
             if not np.any(command): continue
             gesture = planned_gesture('drag', board, command)
             if not gesture.has_effect: continue
+            return_seconds = 1.5
             if callable(return_guard):
                 projected = homogeneous([[1., 0., float(command[0])],
                                          [0., 1., float(command[1])]]) @ current_actual
@@ -598,6 +629,10 @@ def _feedback_refine(adapter, candidate, actual, before, codes, rules, markers,
                     projected_pose=projected)
                 if not isinstance(reserve, dict) or not reserve.get('allowed', False):
                     reason = 'return_reserve'; break
+                return_seconds = float(reserve.get('return_needed') or 1.5)
+            _check_attempt_budget(stage_budget, gesture,
+                                  return_seconds=return_seconds, emit=emit,
+                                  step=probes + 1, action='drag')
             adapter.perform_gesture(gesture); input_sent = True
             adapter.pause(.12)
             after = adapter.capture()
@@ -671,11 +706,17 @@ def _feedback_refine(adapter, candidate, actual, before, codes, rules, markers,
             else:
                 gesture = planned_gesture('drag', board, delta)
                 if gesture.has_effect:
+                    return_seconds = 1.5
                     if callable(return_guard):
                         reserve = guarded_return(current_actual.copy(), 1.6,
                                                projected_pose=best_actual)
                         if not isinstance(reserve, dict) or not reserve.get('allowed', False):
                             raise CandidateExpired('return reserve reached')
+                        return_seconds = float(reserve.get('return_needed') or 1.5)
+                    _check_attempt_budget(stage_budget, gesture,
+                                          return_seconds=return_seconds,
+                                          emit=emit, step=probes + 1,
+                                          action='drag_restore')
                     adapter.perform_gesture(gesture); restore_input_sent = True; adapter.pause(.12)
                     after = adapter.capture()
                     registration = _measured_motion(adapter, current_frame, after, emit,
@@ -1084,6 +1125,7 @@ def execute_candidate(adapter,batch,batch_id,candidate_id,reference,rules,emit=l
                                      anchor=anchor,gesture=gesture.record()))
             if stage_budget is not None:stage_budget.check_input()
             return_guard=getattr(adapter,'return_guard',None)
+            return_seconds = 1.5
             if callable(return_guard):
                 # Protect the checkpoint before leaving the last measured
                 # pose. Include input, settling and the next measurement;
@@ -1121,6 +1163,10 @@ def execute_candidate(adapter,batch,batch_id,candidate_id,reference,rules,emit=l
                          upcoming_seconds=upcoming,budget=return_budget,
                          actual_pose=actual[:2].tolist(),input_sent=False))
                     raise RuntimeError('Return reserve reached before the next input')
+                return_seconds = float(return_budget.get('return_needed') or 1.5)
+            _check_attempt_budget(stage_budget, gesture,
+                                  return_seconds=return_seconds, emit=emit,
+                                  step=step + 1, action=kind)
             pose_current=False
             adapter.perform_gesture(gesture)
             adapter.pause(.15)

@@ -21,6 +21,26 @@ class BudgetTests(unittest.TestCase):
         budget=WorkflowBudget(10000,10120)
         self.assertEqual(budget.workflow_deadline,10060)
         self.assertEqual(budget.deadline,10120)
+        self.assertEqual(budget.exploration_deadline,10105)
+        self.assertEqual(budget.finish_deadline,10120)
+
+    def test_action_cost_estimate_must_fit_before_finish_reserve(self):
+        budget=WorkflowBudget(100.,220.)
+        self.assertEqual(budget.estimate_cost(action_seconds=1,
+                                               registration_seconds=2,
+                                               verification_seconds=3,
+                                               return_seconds=4),10.)
+        self.assertTrue(budget.can_start_exploration(now=200.,
+                                                     action_seconds=1,
+                                                     registration_seconds=1,
+                                                     verification_seconds=1,
+                                                     return_seconds=1))
+        self.assertFalse(budget.can_start_exploration(now=201.,
+                                                      action_seconds=1,
+                                                      registration_seconds=1,
+                                                      verification_seconds=1,
+                                                      return_seconds=1))
+        with self.assertRaises(ValueError):budget.estimate_cost(action_seconds=-1)
 
     def test_deadline_override_can_only_shorten(self):
         self.assertEqual(earliest_deadline(None,160,200),160)

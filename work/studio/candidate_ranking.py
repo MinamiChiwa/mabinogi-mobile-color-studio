@@ -87,3 +87,21 @@ def candidate_rank(row):
     """Use the same balanced color priority throughout search and execution."""
     return (*candidate_quality(row),_number(math.hypot(row.get('dx',0),row.get('dy',0))),
             int(row['id']))
+
+
+def progressive_candidate_rank(row):
+    """Rank candidates from the optional anchor/refinement search.
+
+    Progressive search deliberately uses a simpler, observable ordering:
+    minimise the worst enabled-region colour error first, then the aggregate
+    error, exact-hit count, and finally the cost/risk of executing the move.
+    Unknown action costs or risks sort last.  The legacy ``candidate_rank``
+    remains unchanged for the complete atlas route.
+    """
+    maximum = _number(row.get('maximum'))
+    average = _number(row.get('average'))
+    total = _number(row.get('total', average))
+    hits = _number(row.get('exact_matches', 0))
+    cost = _number(row.get('action_cost', math.hypot(row.get('dx', 0), row.get('dy', 0))))
+    risk = _number(row.get('action_risk', row.get('landing_maximum', 0)))
+    return (maximum, total, average, -hits, cost, risk, int(row.get('id', 0)))

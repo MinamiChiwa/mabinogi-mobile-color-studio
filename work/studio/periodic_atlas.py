@@ -377,3 +377,56 @@ def translation_candidates(atlas, markers, rules, current_translation=(0, 0),
         if len(result) >= limit:
             break
     return result
+
+
+def progressive_translation_candidates(atlas, markers, rules,
+                                       current_translation=(0, 0), *,
+                                       anchor_regions=(0, 1), anchor_limit=8,
+                                       refine_radius=3, limit=8,
+                                       landing_radius=1., cancelled=lambda: False,
+                                       diagnostics=None):
+    """Opt-in anchor/refinement search for multi-region experiments.
+
+    Two enabled anchor regions are sampled first to obtain a small set of
+    reachable translations.  The full three-region scorer is then evaluated
+    only in a bounded neighbourhood around each anchor, providing local
+   补点 without replacing the complete atlas route.  Empty/invalid stages
+    return an empty list and never claim a verified game result.
+    """
+    if len(anchor_regions) < 2 or any(int(i) not in range(3) for i in anchor_regions):
+        raise ValueError('At least two valid anchor regions are required')
+    if not np.isfinite(refine_radius) or refine_radius < 0 or anchor_limit < 1:
+        raise ValueError('Invalid progressive search bounds')
+    diag = diagnostics if diagnostics is not None else {}
+    diag.update(mode='anchor_refinement', anchor_regions=[int(i) for i in anchor_regions],
+                anchor_count=0, refinement_count=0, fallback=False)
+    anchor_rules=[dict(rule, enabled=(i in anchor_regions)) for i,rule in enumerate(rules)]
+    anchors=translation_candidates(atlas, markers, anchor_rules, current_translation,
+                                   limit=int(anchor_limit), landing_radius=landing_radius,
+                                   cancelled=cancelled)
+    diag['anchor_count']=len(anchors)
+    if not anchors:
+        diag['fallback']=True
+        return []
+    # Keep all independently reachable rows.  Two poses can produce the same
+    # sampled HEX while having different landing safety, action cost, or
+    # recovery routes; deduplicating by colour here would discard the precise
+    # and balanced branches that the execution layer must compare.
+    merged=[]
+    for anchor in anchors:
+        if cancelled(): raise InterruptedError('Calculation cancelled')
+        rows=translation_candidates(atlas, markers, rules,
+                                    (anchor.get('dx',0.),anchor.get('dy',0.)),
+                                    limit=int(limit), max_move=float(refine_radius),
+                                    landing_radius=landing_radius, cancelled=cancelled)
+        diag['refinement_count'] += len(rows)
+        for row in rows:
+            row=dict(row, search_space='anchor_refinement',
+                     anchor_id=anchor.get('id'),
+                     action_cost=float(np.hypot(row.get('dx',0.),row.get('dy',0.))),
+                     action_risk=float(row.get('landing_maximum') or row.get('maximum',np.inf)))
+            merged.append(row)
+    from candidate_ranking import progressive_candidate_rank
+    merged.sort(key=progressive_candidate_rank)
+    for index,row in enumerate(merged[:int(limit)]): row['id']=index
+    return merged[:int(limit)]

@@ -212,6 +212,9 @@ EN.update(RUNTIME_EN);TW.update(RUNTIME_TW)
 # intentionally keyed by the full sentence: translating only a shorter
 # substring would leave the remainder of a status message in Chinese.
 EN.update({
+    '候选选择未能完成，已保持自动方案。': 'Candidate selection could not be completed. The automatic combination was kept.',
+    '渐进候选搜索未完成，回退完整颜色板候选。': 'Progressive candidate search did not complete. Falling back to full-board candidates.',
+    '未选择其他方案，保持自动最佳方案。': 'No other combination was selected. The automatic best combination was kept.',
     '。尚未搜索目标组合，不能据此判断没有满足目标的方案。': '. The target combinations have not been searched, so this does not show that no match exists.',
     '请进入普通染色；教学结束后自动验证颜色板。F9停止。': 'Open regular dyeing; the board is verified automatically after the tutorial. F9 stops.',
     '游戏倒计时已截止，未发布候选。': 'The game countdown has expired. No candidates were published.',
@@ -222,6 +225,7 @@ EN.update({
     '倒计时复核暂时不可用，沿用首次识别结果': 'The countdown could not be rechecked temporarily. The first reading is being used.',
 })
 TW.update({
+    '渐进候选搜索未完成，回退完整颜色板候选。': '漸進候選搜尋未完成，改用完整色板候選。',
     '。尚未搜索目标组合，不能据此判断没有满足目标的方案。': '。尚未搜尋目標組合，無法據此判斷沒有符合目標的方案。',
     '请进入普通染色；教学结束后自动验证颜色板。F9停止。': '請進入普通染色；教學結束後會自動驗證顏色板。F9 停止。',
     '游戏倒计时已截止，未发布候选。': '遊戲倒數已結束，未發布候選方案。',
