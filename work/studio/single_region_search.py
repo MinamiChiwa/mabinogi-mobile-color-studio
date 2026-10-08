@@ -18,6 +18,7 @@ import numpy as np
 from atlas_masks import material_masks
 from input_gestures import drag_gesture
 from vision import accepted, error, lab, rgb
+from workflow_budget import WorkflowBudget
 
 
 @dataclass(frozen=True)
@@ -343,6 +344,7 @@ class _Search:
     def observe(self, image=None):
         started = self.io.clock()
         previous = None
+        frame_ids=[]
         self.verified = False
         for index in range(self.limits.max_observation_frames):
             if self.remaining() <= self.limits.finish_reserve_seconds:
@@ -350,6 +352,10 @@ class _Search:
             if image is None:
                 image = self.capture()
             self.image = image
+            frame_id=getattr(self.io,'frame_id',None)
+            if callable(frame_id):
+                name=frame_id(image)
+                if name is not None:frame_ids.append(name)
             self.colors = self.read(image)
             self.current = True
             if previous is not None and self.colors[self.region] is not None and self.colors == previous:
@@ -362,6 +368,9 @@ class _Search:
                     break
                 self.io.pause(self.limits.verification_gap_seconds)
         self.observation_seconds = max(self.observation_seconds, self.io.clock() - started)
+        evidence=getattr(self.io,'evidence',None)
+        if evidence is not None:
+            evidence.record_duration('verification',self.io.clock()-started)
         # The first real HEX reads reveal slow OCR before leaving the initial
         # best. Every later move can require the same observation cost, not
         # merely one final read at the end of the whole route.
@@ -387,7 +396,9 @@ class _Search:
             if self.matches_record(self.layer_best):
                 self.layer_best.update(pose=self.pose.copy(), epoch=self.epoch)
         self.emit('single_observation', actual_colors=self.colors.copy(), verified=self.verified,
-                  current=self.current, accepted=self.verified and accepted(self.colors, self.rules))
+                  current=self.current, accepted=self.verified and accepted(self.colors, self.rules),
+                  frame_ids=frame_ids[-2:],pose=None if self.pose is None else self.pose.tolist(),
+                  pose_epoch=self.epoch)
         return improved
 
     def steps(self, displacement):
@@ -436,7 +447,12 @@ class _Search:
                   failure_reserve_seconds=failure_reserve,
                   remaining_seconds=self.remaining(), search_remaining_seconds=self.search_remaining(),
                   finish_remaining_seconds=self.finish_remaining())
-        return (back <= self.limits.max_return_steps and self.search_remaining() >= action_needed and
+        tail_allowed=True
+        if getattr(self.io,'evidence',None) is not None:
+            tail_allowed=WorkflowBudget(self.started,self.deadline,self.limits.finish_reserve_seconds).allow_operation(
+                now=self.io.clock(),operation_seconds=outbound*self.step_seconds,
+                return_seconds=back*self.step_seconds,verification_seconds=self.observation_seconds)
+        return (tail_allowed and back <= self.limits.max_return_steps and self.search_remaining() >= action_needed and
                 self.finish_remaining() >= needed)
 
     def move(self, displacement, *, restoring=False):
@@ -457,7 +473,10 @@ class _Search:
         self.current = self.verified = False
         self.colors = [None] * 3
         try:
-            self.io.drag(self.scene.board, int(command[0]), int(command[1]))
+            prior_input_stage=getattr(self.io,'input_stage','input')
+            self.io.input_stage='return' if restoring else 'input'
+            try:self.io.drag(self.scene.board, int(command[0]), int(command[1]))
+            finally:self.io.input_stage=prior_input_stage
             self.moves += 1
             self.io.pause(self.limits.settle_seconds)
             after = self.capture()
@@ -616,7 +635,12 @@ class _Search:
                   search_remaining_seconds=self.search_remaining(),
                   finish_remaining_seconds=self.finish_remaining(),
                   failure_reserve_seconds=failure_reserve)
-        return (back_steps <= self.limits.max_return_steps and self.search_remaining() >= action_needed and
+        tail_allowed=True
+        if getattr(self.io,'evidence',None) is not None:
+            tail_allowed=WorkflowBudget(self.started,self.deadline,self.limits.finish_reserve_seconds).allow_operation(
+                now=self.io.clock(),operation_seconds=self.step_seconds,
+                return_seconds=back_steps*self.step_seconds,verification_seconds=self.observation_seconds)
+        return (tail_allowed and back_steps <= self.limits.max_return_steps and self.search_remaining() >= action_needed and
                 self.finish_remaining() >= needed)
 
     def zoom(self, steps):

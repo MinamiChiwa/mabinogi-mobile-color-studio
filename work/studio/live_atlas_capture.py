@@ -595,7 +595,7 @@ def wait_for_dye_board(g, stop, *, started=None, log=lambda *a,**k:None,
                 ready_at=ready_at,budget=budget)
 
 
-def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=False,entry_size=None,emit=None,row_stagger=0.,response_protocol='baseline',settling_probes=False,probe_cycles=3,probe_anchors=None,mechanism_experiment=False,dye_consumed=None,probe_plan='default'):
+def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=False,entry_size=None,emit=None,row_stagger=0.,response_protocol='baseline',settling_probes=False,probe_cycles=3,probe_anchors=None,mechanism_experiment=False,dye_consumed=None,probe_plan='default',evidence_rules=None):
     if not np.isfinite(row_stagger) or not 0 <= row_stagger <= .1:
         raise ValueError('row_stagger must be between 0 and 0.1')
     if (response_protocol not in ('baseline','rotation_compare','zoom_reversibility') or
@@ -616,7 +616,7 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
         mechanism_recorder=MechanismExperimentRecorder(started_at=started)
         if dye_consumed is not None:
             mechanism_recorder.set_consumption(dye_consumed)
-    input_started=False;worker=None
+    input_started=False;worker=None;evidence=None
     active_touched=started
     def keep_active(force=False):
         nonlocal active_touched
@@ -642,6 +642,7 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
             except (UnicodeError,OSError,ValueError):pass  # Optional console output.
             if emit:emit('atlas_status',message=data['message'])
         if emit:
+            if kind=='round_evidence':emit('round_evidence',**data['report'])
             if kind=='waiting':emit('atlas_progress',stage='waiting')
             elif kind=='ready':emit('atlas_progress',stage='zoom')
             elif kind=='timer':emit('atlas_progress',stage='zoom',remaining=data['seconds'])
@@ -683,6 +684,11 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
             capture_started=time.monotonic();im=g.capture();captured_at=time.monotonic()
         else:
             im=sample.image;capture_started=sample.capture_started;captured_at=sample.captured_at
+        if evidence is not None:
+            evidence.record_duration('capture',captured_at-capture_started)
+            if sample is not None:
+                evidence.record_duration('input',sample.timing['drag_seconds'])
+                evidence.record_duration('settling',sample.timing['baseline_start_seconds'])
         if worker is not None:
             record=log('frame',name=name,geometry=g.geometry(),captured_elapsed_seconds=captured_at-started,
                        capture_seconds=captured_at-capture_started,png_seconds=None,
@@ -699,6 +705,7 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
         log('frame',name=name,geometry=g.geometry(),captured_elapsed_seconds=captured_at-started,
             capture_seconds=captured_at-capture_started,png_seconds=time.monotonic()-captured_at,
             png_compression=1)
+        if evidence is not None:evidence.record_duration('storage',time.monotonic()-captured_at)
         return im
     try:
         # Check before telling the user that manual entry can begin. Legacy
@@ -713,6 +720,11 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
             verify_countdown=strategy in ("grid","probe","response"))
         scene=ready["scene"];im=ready["image"];game_deadline=ready["game_deadline"]
         ready_at=ready["ready_at"];budget=ready["budget"]
+        if evidence_rules is not None:
+            from search_evidence import RoundEvidence
+            from build_info import runtime_identity
+            evidence=RoundEvidence(folder.parent.name,runtime_identity().get('source_sha256'),
+                                   evidence_rules,game_deadline,ready_at=ready_at)
         if strategy in ("grid","probe","response"):
             # Probe the game's own zoom limit in short bursts.  Capturing and
             # recognizing every single notch made acquisition unnecessarily
@@ -730,22 +742,27 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
                 tick=time.monotonic()
                 g.wheel(scene.board,probe);g.pause(.035)
                 zoom_timing['input_wait_seconds']+=time.monotonic()-tick
+                if evidence is not None:evidence.record_duration('input',time.monotonic()-tick)
                 tick=time.monotonic()
                 candidate_im=g.capture()
                 zoom_timing['capture_seconds']+=time.monotonic()-tick
+                if evidence is not None:evidence.record_duration('capture',time.monotonic()-tick)
                 tick=time.monotonic()
                 try:candidate=recognize(candidate_im,with_ocr=False,previous=scene)
                 except (ValueError,RuntimeError):
                     zoom_timing['recognition_seconds']+=time.monotonic()-tick
+                    if evidence is not None:evidence.record_duration('recognition',time.monotonic()-tick)
                     zoom_stop_reason='recognition_failed'
                     g.wheel(scene.board,-probe);g.pause(.06);break
                 zoom_timing['recognition_seconds']+=time.monotonic()-tick
+                if evidence is not None:evidence.record_duration('recognition',time.monotonic()-tick)
                 if not sampling_frame_is_safe(candidate,candidate_im.shape):
                     zoom_stop_reason='unsafe_geometry'
                     g.wheel(scene.board,-probe);g.pause(.06);break
                 tick=time.monotonic()
                 motion=zoom_tracker.measure(last,candidate_im,scene)
                 zoom_timing['registration_seconds']+=time.monotonic()-tick
+                if evidence is not None:evidence.record_duration('registration',time.monotonic()-tick)
                 if motion is None:
                     zoom_stop_reason='registration_failed'
                     g.wheel(scene.board,-probe);g.pause(.06);break
@@ -765,14 +782,21 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
                 # this single frame is directly usable by later analysis.
                 calibration=[]
                 for ticks in (-1,1):
+                    tick=time.monotonic()
                     g.wheel(scene.board,ticks);g.pause(.035)
+                    if evidence is not None:evidence.record_duration('input',time.monotonic()-tick)
+                    tick=time.monotonic()
                     observed=g.capture()
+                    if evidence is not None:evidence.record_duration('capture',time.monotonic()-tick)
                     measurement_error=None
+                    tick=time.monotonic()
                     try:
                         motion=zoom_tracker.measure(im,observed,scene)
                     except Interrupted:raise
                     except Exception as exc:
                         motion=None;measurement_error=str(exc)
+                    finally:
+                        if evidence is not None:evidence.record_duration('registration',time.monotonic()-tick)
                     calibration.append(dict(steps=ticks,motion=motion,error=measurement_error,
                                             direction='down' if ticks<0 else 'up'))
                     im=observed
@@ -804,6 +828,7 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
                     worker=CaptureWorker(folder,worker_scene)
                     if hasattr(worker,'record_lock'):
                         worker.record_lock=records_lock
+                worker.evidence=evidence
             final_image=snap('max_sampling',scene)
             if strategy=='response':
                 from gesture_response_probe import run_response_probe
@@ -925,7 +950,8 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
                 workflow_deadline=budget.workflow_deadline,ready_at=ready_at,game=g,scene=session_scene,
                             image=final_image,geometry=tuple(g.geometry()),prepared=prepared,
                             alignment_error=getattr(worker,'error',None),
-                            alignment_frames=len(getattr(getattr(worker,'alignment',None),'images',()) or ()))
+                            alignment_frames=len(getattr(getattr(worker,'alignment',None),'images',()) or ()),
+                            evidence=evidence)
         g.until=time.monotonic()+90
         input_started=True
         for i in range(70):
@@ -952,6 +978,8 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
     finally:
         if input_started:g.send(4);g.send(16)
         if worker is not None:worker.close()
+        if evidence is not None:
+            log('round_evidence',report=evidence.report(time.monotonic()))
         if active_marker is not None:
             try:active_marker.unlink(missing_ok=True)
             except OSError:pass

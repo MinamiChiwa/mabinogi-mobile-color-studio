@@ -45,6 +45,11 @@ def _check_attempt_budget(stage_budget, gesture, *, return_seconds=0.,
         return
     record = gesture.record()
     action_seconds = max(float(record.get('input_seconds', 0.)), .05) + .15
+    evidence=getattr(stage_budget,'cost_evidence',None)
+    if evidence is not None:
+        action_seconds=evidence.estimate_seconds('input',floor=action_seconds)
+        registration_seconds=evidence.estimate_seconds('registration',floor=registration_seconds)
+        verification_seconds=evidence.estimate_seconds('verification',floor=verification_seconds)
     costs = dict(action_seconds=action_seconds,
                  registration_seconds=float(registration_seconds),
                  verification_seconds=float(verification_seconds),
@@ -1258,6 +1263,7 @@ def execute_candidate(adapter,batch,batch_id,candidate_id,reference,rules,emit=l
         adapter.check()
         if clock()>=batch.deadline:raise CandidateExpired('No time for HEX verification')
         emit('atlas_progress',dict(stage='verify'))
+        verification_started=time.perf_counter()
         if stage_budget is not None:stage_budget.check_observation()
         first=adapter.read_codes(before)
         if stage_budget is not None:stage_budget.check_observation()
@@ -1281,6 +1287,9 @@ def execute_candidate(adapter,batch,batch_id,candidate_id,reference,rules,emit=l
         if np.max(errors)>POSITION_TOLERANCE:raise CandidateExpired('Marker alignment changed during verification')
         adapter.check()
         if clock()>=batch.deadline:raise CandidateExpired('HEX verification exceeded the deadline')
+        evidence=getattr(adapter,'evidence',None)
+        if evidence is not None:
+            evidence.record_duration('verification',time.perf_counter()-verification_started)
         # The controller accepts a small alignment residual and may replan at
         # a measured detent. Neither case preserves the old predicted colours.
         # Resample at the final registered pose, independently of game HEX.

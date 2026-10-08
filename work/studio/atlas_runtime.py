@@ -187,6 +187,9 @@ def motion(a, b, scene, diagnostics=None, feature_cache=None):
                 region_rgb_rmse=region_rmse, same_material_samples=int(good_points.sum()))
 
 
+from search_evidence import timed
+
+
 class Adapter:
     def __init__(self, game, scene, session):
         self.g, self.scene, self.session = game, scene, session
@@ -199,6 +202,10 @@ class Adapter:
         self._code_cache = {}
         self._stage_budget = None
         self.code_read_stats = dict(calls=0,ocr_passes=0,ocr_cards=0,reused_cards=0,seconds=0.)
+        self.evidence=None
+        self._frame_count=0
+        self._frame_ids={}
+        self._recent_code_reads=[]
 
     def check(self):
         self.g.check()
@@ -223,11 +230,17 @@ class Adapter:
         return Context(self.session, tuple(self.g.geometry()), tuple(self.scene.board),
                        tuple(map(tuple, self.scene.markers)))
 
+    @timed('capture')
     def capture(self):
         self.check_observation()
         self.last_frame=self.g.capture()
+        self._frame_count+=1
+        self._frame_ids[id(self.last_frame)]=f'{self.session}-frame-{self._frame_count}'
+        while len(self._frame_ids)>4:
+            self._frame_ids.pop(next(iter(self._frame_ids)))
         return self.last_frame
 
+    @timed('registration')
     def motion(self, before, after):
         self.check_observation()
         self.last_motion_before, self.last_motion_after = before, after
@@ -251,10 +264,12 @@ class Adapter:
             self.last_motion_diagnostics['observation_deadline_reached']=True
         return measured
 
+    @timed('input')
     def drag(self, dx, dy):
         self.g.drag(self.scene.board, dx, dy)
         self.park()
 
+    @timed('input')
     def perform_gesture(self, gesture):
         self.check_positioning()
         scope=(self.g.input_scope(self._stage_budget.input_deadline,self.check_positioning,
@@ -264,10 +279,12 @@ class Adapter:
             self.g.perform_gesture(gesture)
             self.park()
 
+    @timed('input')
     def rotate(self, angle, anchor):
         self.g.rotate(self.scene.board, angle, anchor=anchor)
         self.park()
 
+    @timed('input')
     def wheel(self, steps, anchor):
         self.g.wheel(self.scene.board, steps, anchor=anchor)
         self.park()
@@ -281,6 +298,7 @@ class Adapter:
             raise StageBudgetExceeded('Observation wait would consume the return reserve')
         self.g.pause(seconds)
 
+    @timed('ocr')
     def read_codes(self, image):
         # Reuse only a successfully validated HEX for an identical FULL card,
         # including both text and swatch. Capturing the second frame, waiting,
@@ -321,7 +339,20 @@ class Adapter:
         self.code_read_stats['ocr_cards']+=sum(needed)
         self.code_read_stats['reused_cards']+=reused
         self.code_read_stats['seconds']+=time.perf_counter()-started
+        frame_id=getattr(self,'_frame_ids',{}).get(id(image))
+        if frame_id:
+            self._recent_code_reads=(self._recent_code_reads+[(frame_id,result.copy())])[-2:]
         return result
+
+    def confirmed_frame_ids(self,codes):
+        """Identify the actual last two matching reads, never synthetic frames."""
+        reads=getattr(self,'_recent_code_reads',())
+        enabled=getattr(self,'enabled',[True]*len(codes))
+        if len(reads)!=2 or reads[0][0]==reads[1][0]:return ()
+        if not all(all(not active or (value is not None and value==codes[i])
+                       for i,(active,value) in enumerate(zip(enabled,row)))
+                   for _,row in reads):return ()
+        return tuple(name for name,_ in reads)
 
     def release(self):
         try:self.g.send(4)

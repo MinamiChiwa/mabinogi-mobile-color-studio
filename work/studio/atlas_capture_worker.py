@@ -29,6 +29,7 @@ class CaptureWorker:
         self.pending=deque()
         self.closed=False
         self.close_timeout=False
+        self.evidence=None
 
     @property
     def error(self):
@@ -147,7 +148,10 @@ class CaptureWorker:
             record['storage_error']=str(exc)
         with self.record_lock:
             record['png_seconds']=time.perf_counter()-started
+        if self.evidence is not None:
+            self.evidence.record_duration('storage',record['png_seconds'])
         if self.error is None:
+            alignment_started=time.perf_counter()
             try:
                 self.alignment.append(name,crop,command)
                 if self.alignment.motions:
@@ -163,6 +167,9 @@ class CaptureWorker:
                 if isinstance(failure,dict):
                     with self.record_lock:
                         record['alignment_failure']=failure
+            finally:
+                if self.evidence is not None:
+                    self.evidence.record_duration('registration',time.perf_counter()-alignment_started)
         # Early frames are diagnostic board crops only: never append them to
         # the alignment chain or create training/holdout frame log entries.
         probe_started=time.perf_counter()

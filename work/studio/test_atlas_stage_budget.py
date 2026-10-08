@@ -84,6 +84,15 @@ class TimedAdapter(Adapter):
 
 
 class StageBudgetTests(unittest.TestCase):
+    def test_return_cost_is_reserved_once_and_can_increase_the_tail(self):
+        clock=Clock();clock.now=100.
+        budget=ExecutionStageBudget.for_attempt(120.,120.,clock=clock)
+        # 2.5s action/read + max(15s, 10s return + 3.5s final read + 2s margin).
+        self.assertTrue(budget.can_start_attempt(action_seconds=1.,registration_seconds=.5,
+            verification_seconds=1.,return_seconds=10.))
+        self.assertFalse(budget.can_start_attempt(action_seconds=1.,registration_seconds=.5,
+            verification_seconds=1.,return_seconds=20.))
+
     rules=[dict(enabled=True,exact=False,colors=['#112233'],tolerance=8)]*3
 
     def row(self,dx=20,dy=0):
@@ -189,7 +198,7 @@ class StageBudgetTests(unittest.TestCase):
         # 20s hard cutoff minus the default 15s finalization reserve.
         self.assertEqual(budget.input_deadline,5.)
         self.assertEqual(budget.exploration_deadline,5.)
-        self.assertFalse(budget.can_start_attempt(action_seconds=4.,
+        self.assertFalse(budget.can_start_attempt(action_seconds=4.5,
                                                    registration_seconds=.5,
                                                    verification_seconds=.25,
                                                    return_seconds=.5))

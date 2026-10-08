@@ -88,3 +88,23 @@ class WorkflowBudget:
                                      return_seconds=return_seconds,
                                      safety_seconds=safety_seconds)
         return now + projected < self.exploration_deadline
+
+    def allow_operation(self, *, now, operation_seconds, return_seconds,
+                        verification_seconds, positioning_seconds=0.):
+        """Price CPU or input work without borrowing the final return tail.
+
+        operation_seconds includes THIS operation's own reads/registration.
+        verification_seconds is the independent final two-frame check.
+        Unknown durations fail closed instead of becoming zero-cost work.
+        """
+        values=(now,operation_seconds,return_seconds,verification_seconds,positioning_seconds)
+        try:
+            valid=all(not isinstance(value,bool) and math.isfinite(float(value))
+                      and float(value)>=0 for value in values)
+        except (ValueError,TypeError):
+            valid=False
+        if not valid:
+            raise ValueError('Operation timing must be finite and nonnegative')
+        reserve=max(self.finish_reserve_seconds,
+                    float(return_seconds)+float(verification_seconds)+2.)
+        return float(now)+float(operation_seconds)+float(positioning_seconds)+reserve < self.game_deadline

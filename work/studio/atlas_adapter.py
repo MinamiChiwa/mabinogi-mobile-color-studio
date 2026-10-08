@@ -46,7 +46,7 @@ def build_from_capture(capture_dir, rules):
     runtime={}
     analyze_capture(source, target_rules=rules,check=game.check if game is not None else None,
                     atlas_resolution=1024,progress=artifact.get('progress'),runtime=runtime,
-                    prepared=artifact.get('prepared'))
+                    prepared=artifact.get('prepared'),search_check=artifact.get('search_check'))
     report_path=source/'analysis'/'report.json'
     if not report_path.is_file():raise RuntimeError('Atlas analysis did not produce report.json')
     report=json.loads(report_path.read_text(encoding='utf-8'))

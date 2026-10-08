@@ -83,7 +83,7 @@
 - `report(now: float) -> dict`：指标、样本数量、未知字段及最终剩余时间；颜色用既有评分，`verified` 仅来自两帧一致实读。
 - `WorkflowBudget.allow_operation(*, now, operation_seconds, return_seconds, verification_seconds, positioning_seconds=0.) -> bool`。额外定位成本用于搜索/绑定阶段，已有 API 向后兼容。
 
-- [ ] 写预算反例：过去只在动作前检查，搜索/绑定已耗尽定位时间；未知耗时不得自动按零计费。
+- [x] 写预算反例：过去只在动作前检查，搜索/绑定已耗尽定位时间；未知耗时不得自动按零计费。
 
 ```python
 def test_search_cannot_spend_the_final_return_and_double_read_budget(self):
@@ -94,12 +94,12 @@ def test_search_cannot_spend_the_final_return_and_double_read_budget(self):
         return_seconds=12., verification_seconds=4.))
 ```
 
-- [ ] 跑相关用例，先看到新预算接口缺失或旧生产调用未留预算的失败。
-- [ ] 实现校验与公式：reserve=`max(finish_reserve_seconds, return_seconds + verification_seconds + 2)`；required=`operation_seconds + positioning_seconds + reserve`；严格小于硬截止才允许。
-- [ ] 统一阶段计时；少于 20 个有效样本使用观测最大值/保守默认的较大者，之后使用受保守下限保护的 P95。读色分别标识本次验证与最终验证，避免重复计费。
-- [ ] 正式绑定默认启用预算保护；候选分批绑定，保留已绑定可执行候选，预算触发不清空它们。搜索原生调用不可严格抢占时以有界批次检查，输入守卫仍独立有效。
-- [ ] 完成配准耗时均值/P95、首次已定位结果与最终实测剩余时间的报告；未观测到的值保持 null。
-- [ ] 用历史日志重放 CPU 慢、OCR 慢、动作后返回变远三类情形；运行 production 和 all 后精确提交。
+- [x] 跑相关用例，先看到新预算接口缺失或旧生产调用未留预算的失败。
+- [x] 实现校验与公式：reserve=`max(finish_reserve_seconds, return_seconds + verification_seconds + 2)`；required=`operation_seconds + positioning_seconds + reserve`；严格小于硬截止才允许。
+- [x] 统一阶段计时；少于 20 个有效样本使用观测最大值/保守默认的较大者，之后使用受保守下限保护的 P95。读色分别标识本次验证与最终验证，避免重复计费。
+- [x] 正式绑定默认启用预算保护；候选分批绑定，保留已绑定可执行候选，预算触发不清空它们。搜索原生调用不可严格抢占时以有界批次检查，输入守卫仍独立有效。
+- [x] 完成配准耗时均值/P95、首次已定位结果与最终实测剩余时间的报告；未观测到的值保持 null。
+- [x] 用历史日志重放 CPU 慢、OCR 慢、动作后返回变远三类情形；运行 production 和 all 后精确提交。
 
 **完成门:** CPU、输入、配准和读色都遵守一个硬截止；下一探索不能吃掉定位/返程尾部。源码测试不等于实机性能达标。
 

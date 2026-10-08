@@ -148,6 +148,7 @@ class Runner:
         if strategy not in ('legacy','atlas'):
             raise ValueError('Unknown search strategy')
         if strategy=='atlas':
+            self.round_evidence=None
             single=mode=='search' and sum(bool(r.get('enabled')) for r in rules)==1
             if not single and self.atlas_runner is None:
                 raise RuntimeError('Atlas strategy is not connected to this Runner')
@@ -181,6 +182,10 @@ class Runner:
                            message='自动染色未能可靠完成，已停止自动移动并保留游戏当前画面。',
                            detail=traceback.format_exc())
             finally:
+                if self.round_evidence is not None:
+                    # Pure local metadata; this must not capture/read the game
+                    # after F9, focus loss or the hard countdown cutoff.
+                    self.event('round_evidence',**self.round_evidence.report(time.monotonic()))
                 # Atlas already retains screenshots. Preserve the much smaller
                 # event trail too, so a rejected map is not mistaken for an
                 # unsuccessful search, and F9 receipt can be diagnosed.

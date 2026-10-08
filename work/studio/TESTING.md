@@ -1,6 +1,6 @@
 # 测试范围与维护规则
 
-2026-10-08 完成第一次用途分组。所有既有测试保留；默认开发回归不再把实验诊断、旧搜索和缺少私有素材的检查计入生产验证。
+2026-10-08 完成第一次用途分组；2026-10-09 Task 1 增加 16 项预算与证据回归。所有既有测试保留；默认开发回归不再把实验诊断、旧搜索和缺少私有素材的检查计入生产验证。
 
 ## 运行入口
 
@@ -23,13 +23,13 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\run_tests.ps1 -Profile
 .venv\Scripts\python.exe -m pytest -q --test-profile=all
 ```
 
-pytest 的 `--test-profile` 同样支持 diagnostics、legacy、fixtures。不要把默认分组的通过数报告为全量通过数；未选择的测试是 deselected，不是 skipped。
+pytest.ini 将默认收集限制为 `tests` 和 `work/studio`，不递归收集 outputs 中的备份/旧包。pytest 的 `--test-profile` 同样支持 diagnostics、legacy、fixtures。不要把默认分组的通过数报告为全量通过数；未选择的测试是 deselected，不是 skipped。
 
 ## 分组含义
 
 | 分组 | 收集数量 | 用途 |
 | --- | ---: | --- |
-| production | 690 | 当前单区与多区搜索、输入安全、倒计时、返程、实测结果保护、OCR、UI 和测试分组保护 |
+| production | 706 | 当前单区与多区搜索、输入安全、倒计时、返程、实测结果保护、OCR、UI 和测试分组保护 |
 | diagnostics | 105 | 明确启用的机制探针、离线方法比较、回放及报告工具 |
 | legacy | 56 | 旧 Runner 搜索、自动套用和旧恢复策略；混合文件中的调色板、记录、吸管及共享几何仍留在 production |
 | fixtures | 19 | 依赖私有游戏截图、OCR 或历史运行归档的检查 |

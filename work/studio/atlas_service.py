@@ -194,13 +194,15 @@ class AtlasService:
                 if prepared is not None:
                     owner.event('atlas_status',message='正在恢复本轮已实测的最佳方案。')
                     attempted=True
-                    restored=self.callbacks.choice(owner,report,prepared[0],rules,**context)
+                    restored=self.callbacks.choice(owner,report,prepared[0],rules,
+                                                    **dict(context,recording_return=True))
                     result=(restored if isinstance(restored,dict) else
                             dict(verified=False,actual_pose=None,candidate_id=best['candidate_id']))
                     quality=_measured_quality(result)
                     if (quality is not None and quality<=_measured_quality(best) and
                             result.get('actual_pose') is not None and not result.get('recovered') and
                             result.get('positioning_complete') is not False):
+                        if report.get('evidence') is not None:report['evidence'].mark_return(True)
                         return dict(result,best_result_current=True,restored_best=True)
             except Exception as exc:
                 if _is_safety_interrupt(exc):raise
@@ -209,6 +211,7 @@ class AtlasService:
                     result=dict(verified=False,actual_pose=None,candidate_id=best['candidate_id'])
         result=dict(result,best_result=deepcopy(best),best_result_current=False,
                     restore_attempted=attempted,restore_detail=detail)
+        if attempted and report.get('evidence') is not None:report['evidence'].mark_return(False)
         owner.event('atlas_best_not_restored',**result)
         return result
 

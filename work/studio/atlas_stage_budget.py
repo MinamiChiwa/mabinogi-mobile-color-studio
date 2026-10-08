@@ -2,6 +2,7 @@
 from dataclasses import dataclass
 import math
 import time
+from workflow_budget import WorkflowBudget
 
 
 class StageBudgetExceeded(RuntimeError):
@@ -18,19 +19,21 @@ class ExecutionStageBudget:
     # Directly constructed budgets retain legacy stage semantics; production
     # attempt budgets created by ``for_attempt`` enable the full cost gate.
     enforce_attempt_costs: bool = False
+    final_verification_seconds: float = 3.5
+    cost_evidence: object = None
 
     def __post_init__(self):
         values=(self.input_deadline,self.observation_deadline,self.hard_deadline,
-                self.finish_reserve_seconds)
+                self.finish_reserve_seconds,self.final_verification_seconds)
         if (not all(math.isfinite(v) for v in values) or
                 not self.input_deadline <= self.observation_deadline <= self.hard_deadline):
             raise ValueError('Execution stage deadlines must be finite and ordered')
-        if self.finish_reserve_seconds < 0:
+        if self.finish_reserve_seconds < 0 or self.final_verification_seconds < 0:
             raise ValueError('Finish reserve must be non-negative')
 
     @classmethod
     def for_attempt(cls,deadline,hard_deadline,*,observation_seconds=3.5,
-                    finish_reserve_seconds=15.0,clock=time.monotonic):
+                    finish_reserve_seconds=15.0,clock=time.monotonic,cost_evidence=None):
         end=min(float(deadline),float(hard_deadline))
         # The input cutoff must leave enough wall-clock time for the final
         # return and two-frame verification.  A short trial deadline can still
@@ -43,7 +46,7 @@ class ExecutionStageBudget:
         if input_deadline > observation_deadline:
             input_deadline=observation_deadline
         return cls(input_deadline,observation_deadline,float(hard_deadline),clock,
-                   float(finish_reserve_seconds),True)
+                   float(finish_reserve_seconds),True,float(observation_seconds),cost_evidence)
 
     def check_input(self):
         if self.clock() >= self.input_deadline:
@@ -81,7 +84,15 @@ class ExecutionStageBudget:
                                      verification_seconds=verification_seconds,
                                      return_seconds=return_seconds,
                                      safety_seconds=safety_seconds)
-        return self.clock()+projected < self.exploration_deadline
+        now=self.clock()
+        operation=projected-float(return_seconds)
+        # Return is part of the protected tail. Adding it to the operation
+        # and also subtracting the fixed tail reserved it twice.
+        workflow=WorkflowBudget(0.,self.hard_deadline,self.finish_reserve_seconds)
+        return (now+operation < self.exploration_deadline and
+                workflow.allow_operation(now=now,operation_seconds=operation,
+                    return_seconds=return_seconds,
+                    verification_seconds=self.final_verification_seconds))
 
     def check_attempt(self, **costs):
         # Legacy stage budgets only gate the current stage boundary. Full
