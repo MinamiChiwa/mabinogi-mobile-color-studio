@@ -29,6 +29,7 @@ __pycache__/
 *.pyc
 .env
 .venv/
+/tests/fixtures/
 !/work/studio/periodic_atlas.py
 !/work/studio/replay_archive.py
 !/work/studio/live_atlas_capture.py

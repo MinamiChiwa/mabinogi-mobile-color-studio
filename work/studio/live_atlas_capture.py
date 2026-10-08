@@ -609,7 +609,7 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
     active_marker=folder/ACTIVE_MARKER
     try:active_marker.write_text('active',encoding='ascii')
     except OSError:active_marker=None
-    started=time.monotonic();records=[];game_deadline=None;session_scene=None;final_image=None
+    started=time.monotonic();records=[];records_lock=threading.RLock();game_deadline=None;session_scene=None;final_image=None
     mechanism_recorder=None
     if mechanism_experiment:
         from mechanism_experiment import MechanismExperimentRecorder
@@ -629,8 +629,13 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
         except OSError:pass
     def log(kind,**data):
         row=dict(elapsed_seconds=time.monotonic()-started,kind=kind,**data)
-        records.append(row)
-        (folder/'log.json').write_text(json.dumps(records,indent=2),encoding='utf-8')
+        # Worker callbacks update frame rows asynchronously. Serialize a
+        # snapshot while holding the same lock so a failed capture cannot
+        # race log.json serialization and leave the recovery record corrupt.
+        with records_lock:
+            records.append(row)
+            payload=json.dumps(records,indent=2)
+        (folder/'log.json').write_text(payload,encoding='utf-8')
         keep_active(force=True)
         if kind=='waiting':
             try:print(data['message'],flush=True)
@@ -643,6 +648,18 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
             elif kind=='grid_plan':emit('atlas_progress',stage='capture',current=0,total=39+data.get('supplemental_moves',0))
             elif kind=='frame' and data.get('name','').startswith('grid_'):
                 emit('atlas_progress',stage='capture',current=int(data['name'].split('_')[1]),total=48)
+            elif kind=='sampling_alignment_failed':
+                # The capture worker can fail between two foreground actions.
+                # Publish a terminal/recovery state immediately so the UI does
+                # not leave the user staring at the last N/48 frame while the
+                # read-only fallback is being prepared.
+                message='配准失败，已停止继续移动，正在读取当前游戏颜色。'
+                emit('atlas_status',message=message)
+                emit('atlas_progress',stage='recover',
+                     current=int(data.get('completed_steps',0)),
+                     total=int(data.get('planned_steps',0)) or None,
+                     message=message,
+                     reason=data.get('detail'))
         return row
     def persist_mechanism(status, *, final_hexes=None,
                           return_success=None, **extra):
@@ -773,8 +790,20 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
             # cursor sprite cannot be stitched into the periodic atlas.
             g.move_to((int(g.initial[2]*.5),int(g.initial[3]*.15)));g.pause(.16)
             if strategy=='grid':
-                worker=CaptureWorker(folder,dict(board=list(scene.board),
-                                     markers=[list(p) for p in scene.markers]))
+                worker_scene=dict(board=list(scene.board),
+                                  markers=[list(p) for p in scene.markers])
+                try:
+                    worker=CaptureWorker(folder,worker_scene,
+                                         record_lock=records_lock)
+                except TypeError as exc:
+                    # Keep lightweight test/integration workers that implement
+                    # the pre-lock constructor usable. The production worker
+                    # always accepts and uses the shared lock.
+                    if 'record_lock' not in str(exc):
+                        raise
+                    worker=CaptureWorker(folder,worker_scene)
+                    if hasattr(worker,'record_lock'):
+                        worker.record_lock=records_lock
             final_image=snap('max_sampling',scene)
             if strategy=='response':
                 from gesture_response_probe import run_response_probe
@@ -812,14 +841,53 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
                 coverage_fill_moves=sum(a['supplemental_kind']=='coverage_fill' for a in plan),
                 supplemental_moves=sum(a['supplemental'] for a in plan))
             completed_scan=True
+            # Validate the stationary reference before issuing the first drag.
+            # A failure in max_sampling must be a zero-input recovery, rather
+            # than one extra movement before the per-step barrier observes it.
+            if worker is not None and hasattr(worker,'wait_latest'):
+                worker.wait_latest(g.check)
+                if getattr(worker,'error',None):
+                    completed_scan=False
+                    log('sampling_alignment_failed',completed_steps=0,
+                        planned_steps=len(plan),detail=str(worker.error))
             for index,action in enumerate(plan,1):
+                if not completed_scan:
+                    break
+                # Registration runs in the background.  Once it reports a
+                # mismatch, the current pose is no longer a trustworthy
+                # atlas checkpoint; do not send the next drag.  The frames
+                # already captured are retained for the read-only recovery
+                # path below.
+                alignment_error=getattr(worker,'error',None)
+                if alignment_error:
+                    completed_scan=False
+                    log('sampling_alignment_failed',completed_steps=index-1,
+                        planned_steps=len(plan),detail=str(alignment_error))
+                    break
                 try:
                     sample=settling.capture_step(g,scene,action,final_image)
                     final_image=snap('grid_%03d'%index,scene,command=action,sample=sample)
+                    # Do not send the next drag until the background worker
+                    # has checked this frame.  Without this barrier a late
+                    # registration mismatch could be discovered only after
+                    # all 48 drags had already been sent, then replayed in a
+                    # second serial alignment pass that looked like a hang.
+                    if worker is not None and hasattr(worker,'wait_latest'):
+                        worker.wait_latest(g.check)
                     log('command',dx=action['dx'],dy=action['dy'],holdout=action['holdout'],
                         row=action['row'],column=action['column'],
                         supplemental=action['supplemental'],
                         supplemental_kind=action['supplemental_kind'])
+                    # ``snap`` submits the frame asynchronously, so inspect
+                    # the worker after recording the command as well.  This
+                    # prevents a failed frame from being followed by another
+                    # movement while preserving an accurate action log.
+                    alignment_error=getattr(worker,'error',None)
+                    if alignment_error:
+                        completed_scan=False
+                        log('sampling_alignment_failed',completed_steps=index,
+                            planned_steps=len(plan),detail=str(alignment_error))
+                        break
                 except Interrupted as exc:
                     # The exploration cutoff intentionally fires before the
                     # hard game deadline. Keep the frames already captured,
@@ -833,8 +901,19 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
                 g.check()
             processing_started=time.monotonic()
             prepared=worker.close()
+            # The worker may discover the mismatch after the last foreground
+            # action. Emit the terminal state here as well, otherwise the UI
+            # remains at the last N/48 frame until the whole close path ends.
+            if worker.error and not any(row.get('kind') == 'sampling_alignment_failed'
+                                        for row in records):
+                completed_steps=sum(1 for row in records
+                                    if row.get('kind') == 'frame' and
+                                       str(row.get('name','')).startswith('grid_'))
+                log('sampling_alignment_failed',completed_steps=completed_steps,
+                    planned_steps=len(plan),detail=str(worker.error))
             log('capture_processing',wait_seconds=time.monotonic()-processing_started,
-                alignment_seconds=worker.alignment.seconds,alignment_error=worker.error)
+                alignment_seconds=worker.alignment.seconds,alignment_error=worker.error,
+                close_timeout=getattr(worker,'close_timeout',False))
             log('scan_settling_summary',**settling.summary())
             log('CAPTURE_COMPLETE',strategy='grid',
                 partial=not completed_scan,
@@ -843,8 +922,10 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
             # deadline stays unchanged through building, default and choice.
             g.stage_until=float('inf')
             return dict(folder=folder,deadline=budget.deadline,game_deadline=game_deadline,
-                        workflow_deadline=budget.workflow_deadline,ready_at=ready_at,game=g,scene=session_scene,
-                            image=final_image,geometry=tuple(g.geometry()),prepared=prepared)
+                workflow_deadline=budget.workflow_deadline,ready_at=ready_at,game=g,scene=session_scene,
+                            image=final_image,geometry=tuple(g.geometry()),prepared=prepared,
+                            alignment_error=getattr(worker,'error',None),
+                            alignment_frames=len(getattr(getattr(worker,'alignment',None),'images',()) or ()))
         g.until=time.monotonic()+90
         input_started=True
         for i in range(70):

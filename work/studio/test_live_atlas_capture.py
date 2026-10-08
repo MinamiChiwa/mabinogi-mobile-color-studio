@@ -410,6 +410,18 @@ class CaptureGuardTests(unittest.TestCase):
             def move_to(self,point):calls.append(('move_to',point))
             def send(self,flag):calls.append(('send',flag))
 
+        # The zero-texture fixture is for pacing and input guards. Keep this
+        # test independent from the background alignment worker, which must
+        # (correctly) stop a real scan when registration has no evidence.
+        class InlineWorker:
+            def __init__(self,folder,scene):
+                self.error=None
+                self.alignment=SimpleNamespace(seconds=0.)
+            def submit(self,name,image,board,record,command,check,probes=()):
+                record['png_seconds']=0.
+            def close(self):
+                return self.alignment
+
         def monotonic():
             clock[0]+=.001
             return clock[0]
@@ -417,6 +429,7 @@ class CaptureGuardTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             folder=Path(tmp)/'capture'
             with patch('live_atlas_capture.CaptureGame',FakeGame), \
+                 patch('live_atlas_capture.CaptureWorker',InlineWorker), \
                  patch('live_atlas_capture.time.monotonic',side_effect=monotonic), \
                  patch('live_atlas_capture.recognize',return_value=scene) as recognize, \
                  patch('live_atlas_capture.measure_board_motion',return_value={'scale':1.02}), \

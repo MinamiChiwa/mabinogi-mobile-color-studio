@@ -203,6 +203,11 @@ class BoundRouteTests(unittest.TestCase):
     def test_live_callback_rebinds_and_rescores_in_capture_coordinates(self):
         from atlas_live_adapter import default_current
         from test_atlas_service import Owner
+        # This callback exercises the production transform route after the
+        # response certificate has been established.  Without the certificate
+        # the live adapter must suppress the route and use translation-only
+        # recovery instead (covered by the publication-gate tests below).
+        self.atlas.response_profile_verified=True
         row=self.bind();perform=self.game.perform_gesture
         def drift_once(gesture):
             perform(gesture)
@@ -223,6 +228,7 @@ class BoundRouteTests(unittest.TestCase):
     def test_live_rebind_keeps_supported_route_across_a_family_boundary(self):
         from atlas_live_adapter import default_current
         from test_atlas_service import Owner
+        self.atlas.response_profile_verified=True
         row=self.bind();perform=self.game.perform_gesture
         self.assertTrue(row['family_consistent'])
         def drift_once(gesture):
@@ -563,6 +569,33 @@ class BoundRouteTests(unittest.TestCase):
         self.assertEqual(built['candidates'][0]['dx'],7)
         np.testing.assert_array_equal(search.call_args.args[2],np.eye(3))
         self.assertEqual(built['candidates'][0]['execution_budget']['actions']['rotate'],0)
+
+    def test_live_builder_suppresses_unverified_transform_and_uses_translation_fallback(self):
+        from atlas_live_adapter import build_current
+        deadline=time.monotonic()+1000
+        game=SimpleNamespace(until=deadline,check=lambda:None,geometry=lambda:self.game.ctx.geometry)
+        capture=dict(game=game,deadline=deadline,
+            scene=SimpleNamespace(board=self.game.ctx.board,markers=self.game.ctx.markers),
+            image='reference')
+        # The first candidate would require a rotation and wheel response.
+        # Its forecast is valid geometrically but the game response profile is
+        # intentionally unverified, so publication must fall back to a
+        # measured-pose translation candidate.
+        transform=dict(self.row,id=0,angle=24,scale=1.01**-4,dx=85,dy=-45)
+        fallback=dict(self.row,id=1,angle=0,scale=1,dx=7,dy=0)
+        report=dict(quality_gate={'passed':True},candidates=[transform],
+                    runtime=dict(atlas=self.atlas,capture_offset=[0,0]))
+        with patch('atlas_live_adapter.build_from_capture',return_value=report), \
+             patch('atlas_live_adapter.reachable_candidates',return_value=[fallback]):
+            built=build_current(capture,self.rules)
+        diagnostics=built['search_diagnostics']
+        self.assertTrue(diagnostics['transform_routes_suppressed'])
+        self.assertEqual(diagnostics['transform_routes_suppressed_count'],1)
+        self.assertTrue(built['candidates'])
+        for row in built['candidates']:
+            actions=(row.get('execution_budget') or {}).get('actions') or {}
+            self.assertEqual(int(actions.get('rotate',0)),0)
+            self.assertEqual(int(actions.get('wheel',0)),0)
 
     def test_live_builder_uses_cross_family_after_searching_executable_same_family_rows(self):
         from atlas_live_adapter import build_current

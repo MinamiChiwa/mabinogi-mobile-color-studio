@@ -47,8 +47,10 @@ Windows 10/11，Python 3.12。原始碼位於 `work/studio`。
 ```powershell
 python -m pip install -r requirements-build.txt
 python work/studio/app.py
-python -m unittest discover -s work/studio -p "test_*.py"
+python run_tests.py
 ```
+
+預設執行目前生產迴歸；完整原始碼檢查使用 `python run_tests.py --profile all`。實驗診斷、舊流程與私有素材測試分組執行，詳見 [測試範圍](work/studio/TESTING.md)。
 
 原始碼執行與構建還需要安裝 Tesseract OCR（含 `eng.traineddata`）。預設位置為 `C:/Program Files/Tesseract-OCR`；構建時可設定 `TESSERACT_HOME`。
 

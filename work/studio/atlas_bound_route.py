@@ -156,6 +156,13 @@ def bind_candidate(candidate, atlas, capture_offset, board, markers, rules,
     # game responds differently.  Treating the missing profile as a hard
     # publication failure made valid sessions report zero candidates.
     response_profile_verified = bool(getattr(atlas,'response_profile_verified',False))
+    # ``game_response_verified`` is the execution gate consumed by the live
+    # service.  Keep it false until the transform response profile has been
+    # established by real game observations; translation-only routes do not
+    # need this certificate.  Previously every bound route was stamped false
+    # unconditionally, which made the field diagnostic rather than useful as
+    # a safety gate once a profile was eventually validated.
+    row['planned_route']['game_response_verified'] = response_profile_verified
     stability=assess_route_stability(bound_motion(row,board,markers)['gestures'],
                                      board=board,markers=markers,
                                      response_profile_verified=response_profile_verified)

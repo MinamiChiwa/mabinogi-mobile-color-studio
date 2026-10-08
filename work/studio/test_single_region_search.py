@@ -209,6 +209,25 @@ class LiveSearchTests(unittest.TestCase):
         self.assertEqual(result['actual_colors'][0], '#888888')
         self.assertEqual(len(io.reads), 3)
 
+    def test_exact_miss_keeps_searching_and_returns_measured_compromise(self):
+        """An exact target miss is a usable near-colour outcome, not a stop."""
+        io = FakeIO(color='#888888')
+        with patch('single_region_search.visible_candidates', return_value=[]):
+            result = run_single_region(
+                io, scene(), rules('#FFFFFF', exact=True), game_deadline=100,
+                limits=QuickSearchLimits(max_explorations=2, max_zoom_levels=0))
+        # The search still spends its bounded exploration allowance instead
+        # of treating the absent #FFFFFF sample as an unrecoverable failure.
+        self.assertEqual(result['explorations'], 2)
+        self.assertTrue(result['verified'])
+        self.assertFalse(result['accepted'])
+        self.assertTrue(result['compromise'])
+        self.assertTrue(result['exact_target_missed'])
+        self.assertEqual(result['outcome'], 'compromise')
+        self.assertTrue(result['best_current'])
+        self.assertEqual(result['actual_colors'][0], '#888888')
+        self.assertEqual(result['best_actual_colors'][0], '#888888')
+
     def test_measured_target_hit_finishes_without_followup_exploration(self):
         image = np.full((300, 300, 3), 80, np.uint8)
         image[175:196, 75:96] = 255

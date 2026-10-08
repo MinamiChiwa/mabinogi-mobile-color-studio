@@ -27,7 +27,7 @@ class BudgetReviewTests(unittest.TestCase):
         self.assertGreater(result['rows'][2]['maximum_translation_model_residual'],.035)
         self.assertFalse(result['return_validated'])
 
-    def test_anchor_progressive_schedule_retains_holdouts_and_two_columns(self):
+    def test_anchor_replay_retains_complete_contiguous_route_without_claiming_capture_savings(self):
         log=[dict(kind='frame',name='max_sampling')]
         for i,action in enumerate(grid_scan_plan((0,0,500,500)),1):
             log.extend([dict(kind='frame',name=f'grid_{i:03d}'),dict(kind='command',**action)])
@@ -35,9 +35,13 @@ class BudgetReviewTests(unittest.TestCase):
         self.assertEqual(holdout,[9,16,24,33,39,45])
         self.assertFalse(set(training)&set(holdout))
         self.assertEqual(sorted(training+holdout),retained)
-        self.assertLessEqual(len(training), len(subset_indices(log, 'full')[0]))
-        self.assertTrue(all(abs(log[i].get('dx', 0)) <= 100 and abs(log[i].get('dy', 0)) <= 200
-                            for i in training if i))
+        # Current replay needs every intermediate registration frame and the
+        # return tail. It is a full-route reference, not a shorter live scan.
+        self.assertEqual(retained, list(range(49)))
+        self.assertEqual(training, subset_indices(log, 'full')[0])
+        commands = [row for row in log if row['kind'] == 'command']
+        self.assertTrue(all(abs(row['dx']) <= 100 and abs(row['dy']) <= 200
+                            for row in commands))
 
 
 if __name__=='__main__':unittest.main()

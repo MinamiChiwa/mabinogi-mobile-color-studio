@@ -47,8 +47,10 @@ Windows 10/11，Python 3.12。源码位于 `work/studio`。
 ```powershell
 python -m pip install -r requirements-build.txt
 python work/studio/app.py
-python -m unittest discover -s work/studio -p "test_*.py"
+python run_tests.py
 ```
+
+默认运行当前生产回归；完整源码检查使用 `python run_tests.py --profile all`。实验诊断、旧流程和私有素材测试分别运行，详见 [测试范围](work/studio/TESTING.md)。
 
 源码运行与构建还需要安装 Tesseract OCR（含 `eng.traineddata`）。默认位置为 `C:/Program Files/Tesseract-OCR`；构建时可设置 `TESSERACT_HOME`。
 

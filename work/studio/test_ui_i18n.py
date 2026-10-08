@@ -168,6 +168,22 @@ class UiLanguageTests(unittest.TestCase):
             self.assertEqual(str(i18n.tr(body)),'Rechecking the countdown reading')
         finally:i18n.set_language(original)
 
+    def test_alignment_failure_progress_is_a_visible_recovery_stage(self):
+        from ui_progress import progress_text
+        title,body=progress_text({'stage':'recover','current':45,'total':48,
+                                  'message':'配准失败，已停止继续移动，正在读取当前游戏颜色。'})
+        self.assertEqual(title,'停止采集并读取当前颜色  45/48')
+        self.assertIn('配准失败',body)
+        original=i18n.language
+        try:
+            i18n.set_language('English')
+            self.assertEqual(str(i18n.tr(title)),'Stopping capture and reading the current colors  45/48')
+            self.assertIn('Alignment failed',str(i18n.tr(body)))
+            i18n.set_language('繁體中文')
+            self.assertIn('停止採集',str(i18n.tr(title)))
+            self.assertIn('對齊失敗',str(i18n.tr(body)))
+        finally:i18n.set_language(original)
+
     def test_single_region_compromise_is_explicit_and_translated(self):
         from ui_progress import single_result_presentation
         result=dict(verified=True,accepted=False,best_verified=True,best_current=True,

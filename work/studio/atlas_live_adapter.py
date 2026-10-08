@@ -26,6 +26,38 @@ from execution_diagnostics import execution_diagnostics
 from platform_win import Interrupted
 
 
+def _automatic_route_allowed(row, budget=None):
+    """Return whether a bound route may be sent by the automatic path.
+
+    A forecast can be geometrically valid while the game input response is
+    still unknown.  Translation has a directly measured response in the
+    current workflow, but rotation and wheel routes need the explicit live
+    response certificate.  Keep unverified transform rows in diagnostics and
+    suppress them before constructing the executable batch.
+    """
+    budget = budget or row.get('execution_budget') or {}
+    actions = budget.get('actions') or {}
+    transforms = int(actions.get('rotate', 0) or 0) or int(actions.get('wheel', 0) or 0)
+    stability = row.get('route_stability') or {}
+    # A few offline callers provide already-bound diagnostic rows without the
+    # production stability schema. Preserve those fixtures and low-level
+    # simulations; only rows carrying the schema are subject to publication
+    # gates.
+    if 'passed' not in stability:
+        return True
+    if not bool(stability.get('passed', False)):
+        return False
+    if not transforms:
+        # Translation routes are measured directly by the current game pose.
+        # They can therefore remain executable even when their colour sample
+        # is a labelled compromise (the service reports that status).
+        return bool(stability.get('samples_complete', True))
+    route = row.get('planned_route') or {}
+    return bool(stability.get('response_profile_verified') and
+                route.get('game_response_verified') and
+                stability.get('landing_safe', row.get('landing_safe', False)))
+
+
 def _candidate_is_no_worse(replacement, current, *, maximum_slack=1.0):
     """Reject a measured-pose fallback that materially worsens the target.
 
@@ -115,21 +147,47 @@ def build_current(capture, rules, **_context):
             binding_seconds=time.perf_counter()-candidate_started,
             budget={k:v for k,v in budget.items() if k!='input_route'}))
         if ready is not None:prepared.append(ready)
+    # A missing game response profile is an evidence gap, not a reason to
+    # spend a dye on a guessed rotation/zoom endpoint.  Keep these rows in
+    # route_diagnostics for the experiment report, but only translations may
+    # enter the automatic executable batch until the profile is verified.
+    suppressed_rows=[]
+    unverified_transform_rows=[]
+    unstable_landing_rows=[]
+    unstable_route_rows=[]
+    for row in prepared:
+        if _automatic_route_allowed(row):
+            continue
+        actions=(row.get('execution_budget') or {}).get('actions') or {}
+        transforms=int(actions.get('rotate',0) or 0) or int(actions.get('wheel',0) or 0)
+        stability=row.get('route_stability') or {}
+        if not stability.get('passed',False):
+            reason='unstable_route';unstable_route_rows.append(row)
+        elif transforms and not stability.get('response_profile_verified',False):
+            reason='unverified_transform_response';unverified_transform_rows.append(row)
+        elif transforms and not stability.get('landing_safe',row.get('landing_safe',False)):
+            reason='unstable_landing';unstable_landing_rows.append(row)
+        else:
+            reason='unstable_route';unstable_route_rows.append(row)
+        row.setdefault('route_stability',{})['automatic_execution_allowed']=False
+        row['automatic_execution_blocked_reason']=reason
+        suppressed_rows.append(row)
+    prepared=[row for row in prepared if _automatic_route_allowed(row)]
     def _stable_translation(row):
         actions=(row.get('execution_budget') or {}).get('actions') or {}
         stability=row.get('route_stability') or {}
         return (int(actions.get('rotate',0))==0 and int(actions.get('wheel',0))==0
-                and bool(row.get('family_consistent'))
-                and bool(stability.get('quality_preferred')))
+                and ('passed' not in stability or bool(stability.get('passed')))
+                and (bool(row.get('family_consistent')) or 'family_consistent' not in row)
+                and (bool(stability.get('quality_preferred')) or 'quality_preferred' not in stability))
 
     # Translation alternatives are useful fallback routes. Their existence
     # does not invalidate separately bound rotate/zoom endpoints: compare
     # every supported endpoint using the same color and landing-risk score.
     safe_translations=[row for row in prepared if _stable_translation(row)]
-    needs_translation_fallback=(not any(row.get('family_consistent') for row in prepared)
-        or any(row.get('family_consistent') and row.get('route_stability')
-               and not row['route_stability'].get('quality_preferred',False)
-               for row in prepared))
+    has_route_metadata=any('execution_budget' in row for row in prepared)
+    needs_translation_fallback=(not prepared or bool(suppressed_rows) or
+                                (has_route_metadata and not safe_translations))
     if needs_translation_fallback and binding_stop_reason is None and time.monotonic()<deadline:
         # No transform route survived. Retain the already captured pose and
         # search its atlas for integer translations instead of publishing an
@@ -150,13 +208,33 @@ def build_current(capture, rules, **_context):
                 require_stable=True,allow_color_compromise=True)
             route_diagnostics.append(dict(candidate_id=first_id+index,fallback=True,
                 budget={k:v for k,v in budget.items() if k!='input_route'}))
-            if ready is not None:prepared.append(ready)
+            if ready is not None:
+                if _automatic_route_allowed(ready):
+                    prepared.append(ready)
+                else:
+                    suppressed_rows.append(ready)
+                    reason='unstable_route'
+                    stability=ready.get('route_stability') or {}
+                    actions=(ready.get('execution_budget') or {}).get('actions') or {}
+                    transforms=int(actions.get('rotate',0) or 0) or int(actions.get('wheel',0) or 0)
+                    if transforms and not stability.get('response_profile_verified',False):
+                        unverified_transform_rows.append(ready);reason='unverified_transform_response'
+                    elif transforms and not stability.get('landing_safe',ready.get('landing_safe',False)):
+                        unstable_landing_rows.append(ready);reason='unstable_landing'
+                    else:
+                        unstable_route_rows.append(ready)
+                    ready.setdefault('route_stability',{})['automatic_execution_allowed']=False
+                    ready['automatic_execution_blocked_reason']=reason
         safe_translations=[row for row in prepared if _stable_translation(row)]
     # Keep supported endpoints available to the shared quality/risk ordering.
     # A boolean family boundary must not discard a more balanced or reliable
     # endpoint before its actual bound route is compared.
     same_family_rows=[row for row in prepared if row.get('family_consistent')]
-    rows=select_color_candidates(prepared,rules,8)
+    # Keep a bounded route representative for the best family-consistent
+    # colour tuples as well as the balanced default.  The previous plain
+    # de-duplication ran after binding and could discard every same-family
+    # option, leaving only cross-family compromises for a multi-region run.
+    rows=select_color_candidates(prepared,rules,8,preserve_routes=True)
     report['candidates']=rows
     report['search_diagnostics']=dict(report.get('search_diagnostics') or {},route_binding=route_diagnostics,
         binding_budget_guard_enabled=budget_guard_enabled,
@@ -167,7 +245,11 @@ def build_current(capture, rules, **_context):
             minimum_attempt_seconds=minimum_attempt_seconds,
             estimated_next_binding_seconds=binding_seconds_per_candidate),
         stability_required=True,stable_route_count=len(rows),
-        transform_routes_suppressed=False,
+        transform_routes_suppressed=bool(unverified_transform_rows or unstable_landing_rows),
+        transform_routes_suppressed_count=len(unverified_transform_rows),
+        suppressed_unverified_transform_count=len(unverified_transform_rows),
+        suppressed_unstable_landing_count=len(unstable_landing_rows),
+        suppressed_unstable_route_count=len(unstable_route_rows),
         stable_translation_count=len(safe_translations),
         rejected_unstable_route_count=sum(d.get('budget',{}).get('reason') in
                                           ('unstable_landing','unstable_route')
@@ -299,6 +381,11 @@ def _execute_recorded(owner,report,candidate,rules,batch,reference,reservation='
             # Color-family boundaries do not invalidate a supported route.
             # Optional trials still require a reliable return to the observed
             # checkpoint; compare their rescored quality in the service.
+            # Rebinding is still an automatic input path.  Do not let a
+            # measured-pose correction reintroduce an unverified transform
+            # after the initial publication filter removed those routes.
+            if ready is not None and not _automatic_route_allowed(ready, _budget):
+                ready=None
             protected=(_protected_route(ready,_budget) if ready is not None else False)
             if current.get('user_selected_route') and ready is not None:
                 stability=ready.get('route_stability') or {}
@@ -330,6 +417,8 @@ def _execute_recorded(owner,report,candidate,rules,batch,reference,reservation='
                         batch.deadline,reference_pose=actual@reference,check=route_check,
                         require_stable=True,allow_color_compromise=True)
                 except (ValueError,TypeError,KeyError):
+                    ready=None
+                if ready is not None and not _automatic_route_allowed(ready, _budget):
                     ready=None
                 if ready is not None:
                     # A measured-pose fallback may already be at the candidate

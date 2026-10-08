@@ -70,6 +70,23 @@ def _protected_route(row,budget):
             (not transforms or stability.get('response_profile_verified',False)))
 
 
+def _enabled_region_count(rules):
+    """Return the number of enabled regions participating in this search."""
+    try:
+        return sum(1 for rule in rules if isinstance(rule,dict) and rule.get('enabled'))
+    except TypeError:
+        return 0
+
+
+def _has_exact_region(rules):
+    """Whether at least one enabled region uses byte-exact matching."""
+    try:
+        return any(isinstance(rule,dict) and rule.get('enabled') and rule.get('exact')
+                   for rule in rules)
+    except TypeError:
+        return False
+
+
 class AtlasService:
     def __init__(self, callbacks):
         self.callbacks=callbacks
@@ -216,6 +233,17 @@ class AtlasService:
             return self._observe_early_exit(owner,captured,rules,context,'atlas_build_failed')
         gate=report.get('quality_gate',{})
         if not gate.get('passed',False):
+            if report.get('alignment_error'):
+                # Capture already stopped at the first bad frame.  Surface
+                # that fact directly instead of presenting a generic atlas
+                # quality failure while the UI appears frozen at N/48.
+                emit('atlas_recovery_unavailable',
+                     message='颜色板采集在第 %s 步对齐失败，已停止自动移动并读取当前游戏色码。' %
+                             (report.get('alignment_frames') or '?'),
+                     detail=str(report.get('alignment_error')),
+                     reason='atlas_capture_alignment_failed')
+                return self._observe_early_exit(owner,captured,rules,context,
+                                                'atlas_capture_alignment_failed')
             emit('atlas_invalidated',reason='atlas_quality_failed',search_performed=False,
                  message=quality_failure_message(gate),quality_gate=gate)
             return self._observe_early_exit(owner,captured,rules,context,'atlas_quality_failed')
@@ -274,6 +302,27 @@ class AtlasService:
              best_compromise_average=best_compromise.get('average') if best_compromise else None,
              search_diagnostics=report.get('search_diagnostics',{}))
         compromise_only=not bool(raw_accepted)
+        # Exact mode is a preference for ranking and acceptance, not a reason
+        # to abandon a usable round.  In particular, a multi-region exact
+        # target may have no jointly exact sample even though the atlas has a
+        # safe, measured near match.  Keep that candidate in the normal route
+        # and verification pipeline so the player gets the closest measured
+        # result instead of paying for a dye with no positioned result.  The
+        # compromise_only flag below is carried through the candidate event,
+        # result payload, and UI; no dye confirmation is sent automatically.
+        compromise_fallback = compromise_only and _enabled_region_count(rules) >= 2
+        strict_exact_fallback = _has_exact_region(rules)
+        if compromise_fallback:
+            search_diagnostics=report.get('search_diagnostics',{})
+            family_count=sum(bool(row.get('family_consistent')) for row in raw_rows)
+            emit('atlas_status',
+                 message=('未找到所有启用区域共同精准命中，正在定位综合色差最小的妥协方案；不会自动确认染色。'
+                          if strict_exact_fallback else
+                          '未找到所有启用区域共同达标方案，正在定位综合色差最小的妥协方案；不会自动确认染色。'),
+                 reason='no_joint_candidate',candidate_count=len(raw_rows),
+                 family_consistent_count=family_count,
+                 strict_exact=strict_exact_fallback,
+                 exact_target_availability=search_diagnostics.get('exact_target_availability',{}))
         if not rows:
             diagnostics=report.get('search_diagnostics',{})
             stable_count=diagnostics.get('stable_route_count',0)
@@ -309,9 +358,17 @@ class AtlasService:
         family_unavailable=all(row.get('family_consistent') is False for row in rows)
         emit('atlas_candidates',batch_id=batch_id,candidates=rows,default_id=default['id'],
              compromise_only=compromise_only,
+             compromise_fallback=compromise_fallback,
+             strict_exact=strict_exact_fallback,
              family_unavailable=family_unavailable,
-             message=('本轮可执行方案均有区域偏离目标色系，以下按综合色差与落点稳定性排序。'
+             message=('本轮可执行方案均有区域偏离目标色系，以下按综合色差与落点稳定性排序；不会自动确认染色。'
+                      if family_unavailable and compromise_fallback else
+                      '本轮可执行方案均有区域偏离目标色系，以下按综合色差与落点稳定性排序。'
                       if family_unavailable else
+                      ('未找到所有启用区域共同精准命中，正在定位综合色差最小的妥协方案；不会自动确认染色。'
+                       if strict_exact_fallback else
+                       '未找到所有启用区域共同达标方案，正在定位综合色差最小的妥协方案；不会自动确认染色。')
+                      if compromise_fallback else
                       '未找到满足所设目标的组合，正在定位最接近的妥协方案。'
                       if compromise_only else None))
         try:
@@ -426,7 +483,7 @@ class AtlasService:
                     verified=False,actual_pose=None,detail='choice callback returned no result'),
                     best_result,checkpoint_target(),rules,context)
             result=dict(trial, predicted_accepted=trial.get('predicted_accepted',bool(default.get('accepted'))),
-                        compromise=not bool(trial.get('accepted')),
+                        compromise=compromise_only or not bool(trial.get('accepted')),
                         candidate_id=default['id'])
             quality=_measured_quality(result)
             if quality is not None and quality<best_quality:
@@ -461,7 +518,7 @@ class AtlasService:
         # A compromise deliberately exceeds a configured target. Keep the
         # highest-ranked affordable proposal and enable choices instead of
         # walking through successively worse predictions.
-        result=dict(result,compromise=not bool(result.get('accepted')),
+        result=dict(result,compromise=compromise_only or not bool(result.get('accepted')),
                     best_result=deepcopy(best_result),best_result_current=True)
         emit('atlas_default_verified',**result)
         try:
@@ -558,7 +615,7 @@ class AtlasService:
                 choice.get('recovered') or choice.get('positioning_complete') is False):
             return incomplete_choice(dict(choice,candidate_id=candidate['id']))
         choice=dict(choice, predicted_accepted=choice.get('predicted_accepted',bool(candidate.get('accepted'))),
-                    compromise=not bool(choice.get('accepted')),
+                    compromise=compromise_only or not bool(choice.get('accepted')),
                     candidate_id=candidate['id'])
         emit('atlas_verified',**choice)
         return choice

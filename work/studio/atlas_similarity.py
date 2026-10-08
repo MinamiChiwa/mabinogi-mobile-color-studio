@@ -29,6 +29,25 @@ def select_color_candidates(rows, rules, limit, *, preserve_routes=False):
         # The live builder applies the normal colour de-duplication again after
         # binding and rescoring, so this only widens the pre-bind evidence pool.
         best_colors=select_color_candidates(rows,rules,limit)
+        # The balanced top-N list can contain only cross-family compromises
+        # when the joint target is difficult.  Keep a bounded set of the best
+        # family-consistent colour tuples as well, otherwise route binding
+        # permanently discards evidence that all regions can at least remain
+        # in their intended colour families.  This is especially important
+        # for the diagnostic/explicit-choice path; the service still refuses
+        # blind automatic movement when no candidate is accepted.
+        selected_colors={tuple(row.get('colors',())) for row in best_colors}
+        family_rows=sorted((row for row in rows if row.get('family_consistent')),
+                           key=lambda row:(float(row.get('family_maximum',np.inf)),
+                                           float(row.get('family_average',np.inf)),
+                                           candidate_rank(row)))
+        family_limit=max(1,int(limit))
+        for row in family_rows:
+            colors=tuple(row.get('colors',()))
+            if colors in selected_colors:continue
+            best_colors.append(row);selected_colors.add(colors)
+            if len(selected_colors)>=len(set(tuple(r.get('colors',())) for r in best_colors[:limit]))+family_limit:
+                break
         by_color={tuple(row['colors']):[] for row in best_colors}
         for row in sorted(rows,key=candidate_rank):
             colors=tuple(row.get('colors',()))
@@ -61,6 +80,7 @@ def select_color_candidates(rows, rules, limit, *, preserve_routes=False):
     selected=ranked[:limit]
     exact=[i for i,r in enumerate(rules) if r.get('enabled') and r.get('exact')]
     if len(selected)<2 or not exact:return selected
+
     all_exact=any(all(row['colors'][i] is not None and
         row['colors'][i].upper() in [c.upper() for c in rules[i]['colors']]
         for i in exact) for row in ranked)
@@ -90,6 +110,32 @@ def _distances(values, rule):
         exact |= (values==target).all(axis=1)
     passed=exact if rule.get('exact') else distances<=float(rule['tolerance'])
     return distances,passed
+
+
+def _exact_target_availability(atlas, region, rule):
+    """Summarize strict RGB availability for an exact target.
+
+    An exact rule is intentionally byte-for-byte.  A dense atlas can still
+    have a very close colour without containing the requested RGB triplet;
+    exposing that distinction in diagnostics prevents a strict no-match from
+    being mistaken for a candidate-ranking or route-binding failure.
+    """
+    colors, valid, _ = atlas.maps(region=region)
+    values = colors[valid]
+    targets = np.asarray([rgb(value) for value in rule.get('colors', [])],
+                         dtype=np.uint8)
+    result = dict(targets=[str(value).upper() for value in rule.get('colors', [])],
+                  valid_pixels=int(len(values)), exact_pixels=0,
+                  nearest_color=None, nearest_delta_e76=None)
+    if not len(values) or not len(targets):
+        return result
+    exact = np.any(np.all(values[:, None, :] == targets[None, :, :], axis=2), axis=1)
+    distances, _ = _distances(values, rule)
+    nearest = int(np.argmin(distances))
+    result.update(exact_pixels=int(exact.sum()),
+                  nearest_color='#%02X%02X%02X' % tuple(int(v) for v in values[nearest]),
+                  nearest_delta_e76=float(distances[nearest]))
+    return result
 
 
 def _seeds(atlas, region, rule, limit, source_radius, include_compromises=False):
@@ -196,9 +242,13 @@ def similarity_candidates(atlas, markers, rules, current_translation, board_shap
     diag['scale_levels']=None if levels is None else levels.tolist()
     diag['include_compromises']=bool(include_compromises)
     diag['exact_fallback_pool']=0
+    diag['exact_target_availability']={}
     points={}; source_risk={}
     for region in enabled:
         if cancelled():raise InterruptedError('Calculation cancelled')
+        if rules[region].get('exact'):
+            diag['exact_target_availability'][str(region+1)] = _exact_target_availability(
+                atlas, region, rules[region])
         points[region],source_risk[region],hits=_seeds(atlas,region,rules[region],seed_limit,
                                                      landing_radius/bounds[0],include_compromises)
         diag['hit_counts'][str(region+1)]=hits

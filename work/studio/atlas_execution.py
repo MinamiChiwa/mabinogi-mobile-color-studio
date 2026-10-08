@@ -561,7 +561,7 @@ def _refresh_prediction(adapter,candidate,actual,rules,emit):
 
 def _feedback_refine(adapter, candidate, actual, before, codes, rules, markers,
                      board, deadline, emit, clock=time.monotonic,
-                     stage_budget=None, return_guard=None, max_probes=2):
+                     stage_budget=None, return_guard=None, max_probes=8):
     """Probe a tiny measured translation neighbourhood around a verified pose.
 
     The game HEX is authoritative here. Every probe is an integer drag followed
@@ -592,12 +592,13 @@ def _feedback_refine(adapter, candidate, actual, before, codes, rules, markers,
     current_actual = actual.copy(); current_frame = before; current_codes = list(codes)
     origin_actual = actual.copy()
     best_actual = current_actual.copy(); best_frame = current_frame; best_codes = current_codes[:]
-    # Axis probes keep the physical walk within one pixel of the starting pose.
-    # The default is deliberately two probes: a first miss ends the feedback
-    # search immediately, while a second probe is spent only after measurable
-    # improvement and sufficient remaining budget.
+    # Probe the complete one-pixel neighbourhood around the measured landing
+    # point.  A single miss is not evidence that the other three axes (or the
+    # diagonals) cannot improve the joint result.  The hard probe limit,
+    # countdown deadline, return guard and stage budget still bound the work;
+    # when time is tight the loop exits before emitting another input.
     offsets = neighborhood_offsets(NeighborhoodLimits(steps=(1.0,), radius=1.5,
-                                                     include_diagonals=False))
+                                                     include_diagonals=True))
     max_probes=max(0,min(int(max_probes),len(offsets)))
     probes = 0; reason = 'neighborhood_exhausted'
     for offset in offsets:
@@ -679,8 +680,11 @@ def _feedback_refine(adapter, candidate, actual, before, codes, rules, markers,
                 best_actual = current_actual.copy(); best_frame = current_frame; best_codes = current_codes[:]
                 if bool(sample.get('accepted')):
                     reason = 'target_exact'; break
-            elif probes == 1:
-                reason = 'no_improvement'; break
+            # Keep checking the remaining neighbours after a miss.  The
+            # retained global best is restored once the bounded neighbourhood
+            # is exhausted (or the countdown guard stops further probes).
+            elif probes >= max_probes:
+                reason = 'probe_limit'; break
         except (UnstableHexRead, SearchDeadlineExceeded, StageBudgetExceeded) as exc:
             reason = str(exc); break
         except Exception as exc:

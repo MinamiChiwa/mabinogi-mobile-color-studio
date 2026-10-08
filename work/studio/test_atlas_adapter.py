@@ -24,5 +24,18 @@ class AdapterTests(unittest.TestCase):
                 build_from_capture(folder,[])
                 self.assertEqual(analyze.call_args.kwargs['atlas_resolution'],1024)
 
+    def test_capture_alignment_failure_skips_serial_replay(self):
+        with tempfile.TemporaryDirectory() as folder, patch('atlas_adapter.analyze_capture') as analyze:
+            progress=[]
+            result=build_from_capture(dict(folder=folder,
+                                           alignment_error='motion mismatch',
+                                           alignment_frames=45,
+                                           progress=lambda **data: progress.append(data)), [])
+            self.assertFalse(result['quality_gate']['passed'])
+            self.assertEqual(result['alignment_error'],'motion mismatch')
+            self.assertEqual(result['alignment_frames'],45)
+            analyze.assert_not_called()
+            self.assertEqual(progress[0]['stage'],'validate')
+
 
 if __name__=='__main__':unittest.main()

@@ -21,7 +21,7 @@ class RegistrationMethodTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             ecc_translation(image, image, self.scene(), np.zeros((120, 120), np.uint8))
 
-    def test_ecc_translation_returns_finite_matrix_on_textured_input(self):
+    def test_ecc_recovers_known_one_pixel_translation_within_point_zero_five_pixels(self):
         scene = self.scene()
         image = np.zeros((120, 120, 3), np.uint8)
         yy, xx = np.mgrid[:120, :120]
@@ -30,7 +30,9 @@ class RegistrationMethodTests(unittest.TestCase):
         image[..., 2] = ((xx * 13 + yy * 2) % 251).astype(np.uint8)
         shifted = np.roll(image, 1, axis=1)
         result = ecc_translation(image, shifted, scene, np.ones((120, 120), np.uint8) * 255)
-        self.assertTrue(np.isfinite(result['matrix']).all())
+        # A finite identity or wrong-direction matrix used to pass this case.
+        # Validate the independent known warp, not only a successful API call.
+        np.testing.assert_allclose(result['matrix'], [[1, 0, 1], [0, 1, 0]], atol=.05)
         self.assertTrue(np.isfinite(result['score']))
 
     def test_closure_requires_both_matrices(self):

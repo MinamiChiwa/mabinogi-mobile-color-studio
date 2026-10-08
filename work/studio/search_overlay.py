@@ -247,8 +247,13 @@ class SearchOverlay(ct.CTkToplevel):
         if not rows:
             ct.CTkLabel(self.candidate_container,text='有效覆盖不足，暂无可计算方案。').pack(padx=8,pady=12)
         if data.get('compromise_only'):
+            notice=(('本轮没有共同精准命中；以下候选按综合色差排序，实测后保留近似结果，不会自动确认染色。'
+                     if data.get('strict_exact',True) else
+                     '本轮没有共同达标方案；以下候选按综合色差排序，实测后保留近似结果，不会自动确认染色。')
+                    if data.get('compromise_fallback') else
+                    '本轮没有预测达标方案；以下结果仅供参考，实际复核未达标时会停止。')
             ct.CTkLabel(self.candidate_container,
-                        text=tr('本轮没有预测达标方案；以下结果仅供参考，实际复核未达标时会停止。'),
+                        text=tr(notice),
                         font=SMALL_FONT,text_color='#F2C879',wraplength=520,
                         anchor='w',justify='left').pack(fill='x',padx=6,pady=(0,5))
         for row in rows:
@@ -379,7 +384,9 @@ class SearchOverlay(ct.CTkToplevel):
             self.show_candidates(updated)
         elif kind=='atlas_invalidated':
             self.clear_candidates();self.phase='invalidated'
-            title='大图重建校验未通过' if data.get('reason')=='atlas_quality_failed' else '当前搜索未得到可执行方案'
+            title=('未找到共同方案' if data.get('reason')=='no_joint_candidate' else
+                   '大图重建校验未通过' if data.get('reason')=='atlas_quality_failed' else
+                   '当前搜索未得到可执行方案')
             self.render(title,data['message'])
         elif kind=='atlas_default_unavailable':
             self.clear_candidates();self.phase='unavailable';self.render('剩余时间不足',data.get('message','无法安全定位并复核自动最佳方案。'))
@@ -419,7 +426,17 @@ class SearchOverlay(ct.CTkToplevel):
         elif kind=='atlas_best_not_restored':
             self.show_unrestored_best(data)
         elif kind=='atlas_status':
-            self.render('自动染色',data.get('message',''))
+            message=data.get('message','')
+            # Capture alignment errors are published before the read-only
+            # recovery result. Treat this status as a terminal capture stage
+            # so the last N/48 progress value cannot look stalled.
+            if message=='配准失败，已停止继续移动，正在读取当前游戏颜色。':
+                self.phase='computing'
+                recovery=dict(stage='recover',message=message)
+                self.update_activity(recovery)
+                self.render(*progress_text(recovery))
+            else:
+                self.render('自动染色',message)
         elif kind=='atlas_recovery_unavailable':
             self.clear_candidates();self.phase='verified'
             self.render('已保留当前画面',data.get('message','当前动作未能可靠复核，已停止自动移动。'))

@@ -5,6 +5,10 @@ STAGES={
     'export':'保存颜色板','validate':'检查拼图质量','search':'搜索目标颜色',
     'similarity':'计算旋转与缩放','ready':'准备候选方案','position':'移动到目标位置','verify':'复核游戏色码',
     'observe':'读取当前游戏色码','restore':'恢复已测最佳颜色',
+    # This is a terminal capture state, rather than normal image processing.
+    # Keeping it as a distinct stage prevents a failed background alignment
+    # from looking like a stalled N/48 progress bar.
+    'recover':'停止采集并读取当前颜色',
 }
 
 
@@ -14,6 +18,7 @@ def progress_text(data):
     body=data.get('message') or (
         '等待手动进入染色倒计时；F9 可停止。' if data.get('stage')=='waiting' else
         '图像处理中，鼠标暂时不动是正常现象。' if data.get('stage') in ('align','period','stitch','export','validate','search','similarity','ready') else
+        '配准失败，已停止继续移动，正在读取当前游戏颜色。' if data.get('stage')=='recover' else
         '根据图像实测位移校正；F9随时停止。')
     return title,body
 

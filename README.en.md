@@ -47,8 +47,10 @@ Windows 10/11 and Python 3.12. Sources are in `work/studio`.
 ```powershell
 python -m pip install -r requirements-build.txt
 python work/studio/app.py
-python -m unittest discover -s work/studio -p "test_*.py"
+python run_tests.py
 ```
+
+The default profile covers current production behavior. Use `python run_tests.py --profile all` for the complete suite; diagnostics, legacy paths and private fixtures have separate profiles. See [test scopes](work/studio/TESTING.md).
 
 Install Tesseract OCR with `eng.traineddata` to run from source or build. Default location: `C:/Program Files/Tesseract-OCR`. Set `TESSERACT_HOME` for a different build location.
 

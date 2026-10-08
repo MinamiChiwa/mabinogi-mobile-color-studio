@@ -67,6 +67,10 @@ class SimilarityTests(unittest.TestCase):
         self.assertTrue(rows)
         self.assertFalse(any(r['accepted'] for r in rows))
         self.assertGreater(diagnostics['exact_fallback_pool'],0)
+        availability=diagnostics['exact_target_availability']['3']
+        self.assertEqual(availability['exact_pixels'],0)
+        self.assertEqual(availability['nearest_color'],'#0000FF')
+        self.assertLess(availability['nearest_delta_e76'],1.)
         self.assertAlmostEqual(rows[0]['exact_maximum'],
                                min(row['exact_maximum'] for row in rows))
 

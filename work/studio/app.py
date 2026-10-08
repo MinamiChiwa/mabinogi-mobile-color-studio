@@ -622,8 +622,21 @@ class App(ct.CTk):
                         self.history=read_history(DATA/'history.json');self.display_best(row)
                     except OSError:self.set_detail(tr('本轮结果未能保存，请检查程序文件夹是否可写。'))
             elif k=='atlas_status':
-                self.status.configure(text=tr('自动染色'))
-                self.set_detail(tr(d.get('message','')))
+                message=d.get('message','')
+                if message=='配准失败，已停止继续移动，正在读取当前游戏颜色。':
+                    self.status.configure(text=tr('停止采集并读取当前颜色'))
+                else:
+                    self.status.configure(text=tr('自动染色'))
+                self.set_detail(tr(message))
+            elif k=='atlas_recovery':
+                colors=d.get('actual_colors') or [None]*3
+                for card,color in zip(self.cards,colors):
+                    card.current.configure(text='当前颜色  '+(color or '读取失败'))
+                self.status.configure(text=tr('已保留当前画面'))
+                self.set_detail(tr(d.get('message','当前动作未能可靠复核，已停止自动移动。')))
+            elif k=='atlas_recovery_unavailable':
+                self.status.configure(text=tr('已保留当前画面'))
+                self.set_detail(tr(d.get('message','当前动作未能可靠复核，已停止自动移动。')))
             elif k=='atlas_ready':self.status.configure(text=tr('本局颜色板质量门槛通过，正在准备自动最佳方案。'))
             elif k in ('atlas_default_verified','atlas_verified'):
                 colors=d.get('actual_colors',d.get('colors',[]))

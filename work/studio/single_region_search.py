@@ -845,9 +845,19 @@ class _Search:
         # unverified read remains an unknown/failure state.
         accepted_result = bool(self.verified and accepted(self.colors, self.rules))
         outcome = ('matched' if accepted_result else 'compromise') if self.verified else 'unverified'
+        # ``outcome`` is used by the current UI, while callers that persist
+        # or relay the result should not have to infer compromise status from
+        # a pair of fields.  In particular, Exact mode intentionally keeps
+        # searching after a miss and returns the best *measured* colour when
+        # no exact HEX was observed.  Expose that fact explicitly so a
+        # near-colour can never be mistaken for an exact hit or for an
+        # unexplained early stop.
+        compromise = bool(self.verified and not accepted_result)
         historical_best_unrestored = bool(self.best is not None and not self.at_best())
         return dict(actual_colors=self.colors.copy(), accepted=accepted_result,
-                    outcome=outcome, verified=self.verified, current=self.current,
+                    outcome=outcome, compromise=compromise,
+                    exact_target_missed=bool(self.exact and compromise),
+                    verified=self.verified, current=self.current,
                     best_actual_colors=None if self.best is None else self.best['colors'].copy(),
                     best_verified=self.best is not None, best_current=self.at_best(),
                     # This is deliberately separate from ``best_verified``:
