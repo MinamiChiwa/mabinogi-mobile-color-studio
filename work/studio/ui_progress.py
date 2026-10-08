@@ -41,3 +41,16 @@ def single_result_presentation(data):
                 '未找到满足目标的颜色。此前最佳实测结果未能恢复；下方显示当前已复核的妥协结果，请以游戏内当前颜色为准。')
     return ('未命中目标 · 妥协方案',
             '未找到满足目标的颜色；下方显示本轮已实测确认的妥协结果。这是寻色未命中后的正常结束状态，并非程序故障。请查看色差，并在游戏内手动确认是否采用。')
+
+
+def atlas_result_presentation(data):
+    if data.get('historical_best_unrestored'):
+        return ('此前最佳实测结果未能恢复',
+                '当前色码与历史最佳分别显示；历史色码不是游戏当前结果，请以当前实测为准。')
+    if not data.get('verified'):
+        return ('当前颜色未完成复核','未能读取当前色码，请以游戏内显示为准。')
+    if data.get('recovered') or data.get('positioning_complete') is False:
+        return ('只读当前颜色','已双帧读取当前颜色；未定位候选，也未确认恢复历史最佳。')
+    if data.get('accepted'):
+        return ('游戏色码已复核','全部目标达标，请在游戏内手动确认是否套用。')
+    return ('未命中目标 · 已定位妥协方案','当前显示已定位并双帧复核的近似结果，请查看各区色差并在游戏内手动决定是否采用。')

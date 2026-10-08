@@ -222,4 +222,23 @@ class UiLanguageTests(unittest.TestCase):
         self.assertIn('未完成复核',body)
 
 
+class ResultStatePresentationTests(unittest.TestCase):
+    def test_located_compromise_read_only_and_history_are_distinct_in_three_languages(self):
+        from ui_progress import atlas_result_presentation
+        states=[dict(verified=True,accepted=False,positioning_complete=True),
+                dict(verified=True,accepted=False,positioning_complete=False,recovered=True),
+                dict(verified=True,historical_best_unrestored=True,positioning_complete=False)]
+        titles=[atlas_result_presentation(data)[0] for data in states]
+        self.assertEqual(titles,['未命中目标 · 已定位妥协方案','只读当前颜色','此前最佳实测结果未能恢复'])
+        previous=i18n.language
+        try:
+            for language in ('简体中文','繁體中文','English'):
+                i18n.set_language(language)
+                for data in states:
+                    title,body=atlas_result_presentation(data)
+                    rendered=str(i18n.tr(title))+str(i18n.tr(body))
+                    if language=='English':self.assertFalse(any('\u4e00'<=c<='\u9fff' for c in rendered))
+        finally:i18n.set_language(previous)
+
+
 if __name__=='__main__':unittest.main()

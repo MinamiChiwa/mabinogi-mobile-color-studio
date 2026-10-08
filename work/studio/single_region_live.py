@@ -17,8 +17,14 @@ from build_info import runtime_identity
 
 def result_fields(result, rules):
     measured=describe_result(result.get('actual_colors') or [None]*3,rules)
-    return dict(result,actual_deltas=[row['delta'] for row in measured['regions']],
+    result=dict(result,actual_deltas=[row['delta'] for row in measured['regions']],
                 maximum=measured['maximum'],average=measured['average'])
+    for name in ('baseline_result','best_observed_result'):
+        if isinstance(result.get(name),dict):
+            historical=describe_result(result[name].get('actual_colors') or [None]*3,rules)
+            result[name]=dict(result[name],actual_deltas=[row['delta'] for row in historical['regions']],
+                              maximum=historical['maximum'],average=historical['average'])
+    return result
 
 
 class SingleRegionIO:

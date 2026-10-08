@@ -19,6 +19,86 @@ from window_target import WindowUnavailable, MultipleWindows
 
 
 class CaptureGuardTests(unittest.TestCase):
+    def test_formal_grid_saves_baseline_skips_unverified_zoom_and_keeps_return_budget(self):
+        from workflow_budget import WorkflowBudget
+        now=[0.];commands=[]
+        image=np.zeros((300,300,3),np.uint8)
+        scene=SimpleNamespace(board=(0,0,300,300),markers=[(50,150),(150,150),(250,150)],
+                              cards=[(0,0,5,5)]*3,seconds=120)
+        def capture():now[0]+=.02;return image.copy()
+        def drag(board,dx,dy):
+            self.assertTrue((folder/'baseline_second.png').is_file())
+            commands.append((dx,dy));now[0]+=1.
+        game=SimpleNamespace(initial=(0,0,300,300),hwnd=1,until=120.,stage_until=105.,
+            capture=capture,check=lambda:None,pause=lambda seconds:now.__setitem__(0,now[0]+seconds),
+            move_to=MagicMock(),geometry=lambda:(0,0,300,300),send=MagicMock(),
+            drag=drag,wheel=MagicMock(),click=MagicMock())
+        class Worker:
+            error=None
+            def __init__(self,*a,**k):
+                self.alignment=SimpleNamespace(images=[],offsets=[],seconds=0.)
+            def submit(self,name,im,board,record,command,check,**kw):
+                offset=self.alignment.offsets[-1].copy() if self.alignment.offsets else np.zeros(2)
+                if command:offset+=np.array([command['dx'],command['dy']])
+                self.alignment.offsets.append(offset);self.alignment.images.append(im)
+            def wait_latest(self,*a):return True
+            def close(self):return self.alignment
+        rules=[dict(enabled=True,exact=True,colors=['#FFFFFF'],tolerance=0)]*3
+        with tempfile.TemporaryDirectory() as tmp:
+            folder=Path(tmp)/'capture'
+            with patch('live_atlas_capture.open_capture_game',return_value=game), \
+                 patch('live_atlas_capture.wait_for_dye_board',return_value=dict(scene=scene,image=image,
+                       game_deadline=120.,ready_at=0.,budget=WorkflowBudget(0.,120.))), \
+                 patch('live_atlas_capture.configure_ocr'),patch('live_atlas_capture.CaptureWorker',Worker), \
+                 patch('live_atlas_capture.time.monotonic',side_effect=lambda:now[0]), \
+                 patch('atlas_runtime.read_codes',return_value=['#FFFEFE']*3), \
+                 patch('atlas_runtime.motion',return_value=dict(matrix=[[1,0,0],[0,1,0]])):
+                artifact=acquire(folder,strategy='grid',stop=threading.Event(),evidence_rules=rules)
+        game.wheel.assert_not_called();game.click.assert_not_called()
+        self.assertTrue(artifact['baseline_result']['verified'])
+        self.assertTrue(artifact['checkpoint_budget_stop'])
+        self.assertTrue(artifact['checkpoint_pose_reliable'])
+        self.assertGreater(len(commands),0);self.assertLess(len(commands),48)
+        self.assertGreater(120.-now[0],15.)
+
+    def test_entry_baseline_has_two_reads_and_no_board_input(self):
+        from live_atlas_capture import capture_baseline
+        from workflow_budget import WorkflowBudget
+        image=np.zeros((300,300,3),np.uint8)
+        scene=SimpleNamespace(board=(0,0,300,300),markers=[(50,150),(150,150),(250,150)],
+                              cards=[(0,0,5,5)]*3)
+        game=SimpleNamespace(capture=lambda:image.copy(),check=lambda:None,
+                             pause=lambda seconds:None,drag=MagicMock(),wheel=MagicMock(),click=MagicMock())
+        rules=[dict(enabled=True,exact=True,colors=['#FFFFFF'],tolerance=0)]*3
+        with tempfile.TemporaryDirectory() as folder, \
+             patch('atlas_runtime.read_codes',return_value=['#FFFEFE']*3), \
+             patch('atlas_runtime.motion',return_value=dict(matrix=[[1,0,0],[0,1,0]])):
+            baseline,frame=capture_baseline(game,scene,rules,
+                WorkflowBudget(time.monotonic(),time.monotonic()+120),Path(folder),None)
+        self.assertTrue(baseline['verified']);self.assertTrue(baseline['pose_reliable'])
+        self.assertEqual(len(set(baseline['frame_ids'])),2)
+        self.assertEqual(baseline['actual_colors'],['#FFFEFE']*3)
+        self.assertFalse(baseline['accepted'])
+        game.drag.assert_not_called();game.wheel.assert_not_called();game.click.assert_not_called()
+
+    def test_baseline_registration_failure_is_read_only_and_has_no_pose(self):
+        from live_atlas_capture import capture_baseline
+        from workflow_budget import WorkflowBudget
+        image=np.zeros((300,300,3),np.uint8)
+        scene=SimpleNamespace(board=(0,0,300,300),markers=[(50,150),(150,150),(250,150)],
+                              cards=[(0,0,5,5)]*3)
+        game=SimpleNamespace(capture=lambda:image.copy(),check=lambda:None,pause=lambda seconds:None,
+                             drag=MagicMock(),wheel=MagicMock())
+        rules=[dict(enabled=True,exact=True,colors=['#FFFFFF'],tolerance=0)]*3
+        with tempfile.TemporaryDirectory() as folder, \
+             patch('atlas_runtime.read_codes',return_value=['#FFFEFE']*3), \
+             patch('atlas_runtime.motion',return_value=None):
+            baseline,frame=capture_baseline(game,scene,rules,
+                WorkflowBudget(time.monotonic(),time.monotonic()+120),Path(folder),None)
+        self.assertTrue(baseline['verified']);self.assertFalse(baseline['pose_reliable'])
+        self.assertIsNone(baseline['actual_pose'])
+        game.drag.assert_not_called();game.wheel.assert_not_called()
+
     def test_countdown_observation_rejects_short_ocr_conflict(self):
         """A clipped recheck must not turn a full 119-second timer into 41."""
         anchor=SimpleNamespace(seconds=119)

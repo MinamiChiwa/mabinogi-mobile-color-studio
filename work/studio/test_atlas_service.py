@@ -15,6 +15,67 @@ class Owner:
 
 
 class ServiceTests(unittest.TestCase):
+    def test_normal_capture_budget_finishes_baseline_without_building_new_targets(self):
+        owner=Owner();base=self.callbacks();calls=[]
+        baseline=dict(candidate_id=-1,actual_colors=['#FFFEFE']*3,actual_deltas=[.44]*3,
+            verified=True,accepted=False,maximum=.44,average=.44,actual_pose=np.eye(3)[:2].tolist())
+        base.acquire=lambda *a,**k:dict(baseline_result=baseline,checkpoint_budget_stop=True)
+        base.build=lambda *a,**k:(_ for _ in ()).throw(AssertionError('No new build'))
+        base.finish_checkpoint=lambda *a,**k:(calls.append('return') or dict(baseline,
+            restored_best=True,positioning_complete=True,best_result_current=True))
+        result=AtlasService(base).run(owner,[])
+        self.assertEqual(calls,['return'])
+        self.assertTrue(result['best_result_current'])
+        self.assertEqual(owner.events[-1][0],'atlas_checkpoint_verified')
+
+    def test_f9_during_baseline_finish_never_reads_or_retries(self):
+        base=self.callbacks();calls=[]
+        base.acquire=lambda *a,**k:dict(checkpoint_budget_stop=True)
+        base.finish_checkpoint=lambda *a,**k:(_ for _ in ()).throw(InterruptedError('F9'))
+        base.observe_current=lambda *a,**k:calls.append('read')
+        with self.assertRaises(InterruptedError):AtlasService(base).run(Owner(),[])
+        self.assertEqual(calls,[])
+
+    def test_baseline_better_than_default_is_restored_without_more_search(self):
+        owner=Owner();calls=[];base=self.callbacks()
+        baseline=dict(candidate_id=-1,id=-1,actual_colors=['#FFFEFE']*3,
+            actual_deltas=[.44]*3,maximum=.44,average=.44,verified=True,accepted=False,
+            actual_pose=[[1,0,-10],[0,1,0]],pose_reliable=True,measured_checkpoint=True,entry_checkpoint=True)
+        report=base.build(None,[])
+        report['candidates']=report['candidates'][:1]
+        report['baseline_result']=baseline;report['checkpoint_pose_reliable']=True
+        report['current_pose']=np.eye(3)
+        base.acquire=lambda *a,**k:dict(baseline_result=baseline)
+        base.build=lambda *a,**k:report
+        def default(*args,**kwargs):
+            self.assertTrue(callable(kwargs.get('return_guard')))
+            calls.append('default')
+            return dict(candidate_id=0,verified=True,accepted=False,maximum=50.,average=50.,
+                actual_colors=['#777777']*3,actual_pose=np.eye(3)[:2].tolist(),pose_reliable=True)
+        base.default=default
+        base.choice=lambda *a,**k:(calls.append('restore') or dict(baseline,positioning_complete=True))
+        result=AtlasService(base).run(owner,[],selection_deadline=time.monotonic()+120)
+        self.assertEqual(result['actual_colors'],baseline['actual_colors'])
+        self.assertTrue(result['best_result_current'])
+        self.assertEqual(calls,['default','restore'])
+        self.assertEqual(result['baseline_result']['actual_colors'],baseline['actual_colors'])
+        self.assertEqual(owner.events[-1][0],'atlas_checkpoint_verified')
+
+    def test_quality_failure_keeps_baseline_as_history_and_sends_no_return(self):
+        base=self.callbacks(False);calls=[];owner=Owner()
+        baseline=dict(candidate_id=-1,actual_colors=['#FFFEFE']*3,actual_deltas=[.44]*3,
+            maximum=.44,average=.44,verified=True,accepted=False,actual_pose=np.eye(3)[:2].tolist())
+        base.acquire=lambda *a,**k:dict(baseline_result=baseline)
+        base.choice=lambda *a,**k:calls.append('unsafe-return')
+        base.observe_current=lambda *a,**k:dict(verified=True,actual_colors=['#777777']*3,
+            actual_deltas=[50.]*3,maximum=50.,average=50.)
+        result=AtlasService(base).run(owner,[])
+        self.assertEqual(calls,[])
+        self.assertEqual(result['actual_colors'],['#777777']*3)
+        self.assertEqual(result['best_observed_result']['actual_colors'],baseline['actual_colors'])
+        self.assertTrue(result['historical_best_unrestored'])
+        self.assertFalse(result['positioning_complete'])
+
     def verified(self,owner,report,candidate,rules,**kwargs):
         pose=candidate_pose(candidate,report['board'])@homogeneous(report.get('current_pose',np.eye(3)))
         report['current_pose']=pose

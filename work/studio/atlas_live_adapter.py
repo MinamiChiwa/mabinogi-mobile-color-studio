@@ -21,7 +21,7 @@ from analyze_live_atlas import budgeted_candidate_search
 from atlas_pose import homogeneous,candidate_pose,pose_fields
 from atlas_replan import reachable_candidates, bind_nearby_zoom_detents
 from atlas_pose_scoring import rescore_candidate
-from atlas_bound_route import bind_candidate
+from atlas_bound_route import bind_candidate, bound_motion
 from candidate_ranking import candidate_rank,candidate_quality
 from atlas_similarity import select_color_candidates
 from atlas_stage_budget import ExecutionStageBudget
@@ -127,6 +127,13 @@ def build_current(capture, rules, **_context):
     game.check()
     if time.monotonic()>=deadline:raise RuntimeError('Workflow deadline expired during build')
     report['selection_deadline']=deadline
+    if capture.get('baseline_result'):
+        baseline=dict(capture['baseline_result'])
+        offset=capture.get('checkpoint_offset')
+        if capture.get('checkpoint_pose_reliable') and offset is not None:
+            baseline.update(actual_pose=homogeneous([[1,0,-offset[0]],[0,1,-offset[1]]])[:2].tolist(),
+                            entry_checkpoint=True)
+            report['baseline_result']=baseline
     artifact=capture
     rows=report.get('candidates',[])
     if not report.get('quality_gate',{}).get('passed'):return report
@@ -309,7 +316,8 @@ def build_current(capture, rules, **_context):
     report.update(batch=batch,batch_id=batch.id,board=tuple(scene.board),
                   markers=tuple(map(tuple,scene.markers)),
                   selection_deadline=deadline,adapter=adapter,
-                  reference=artifact['image'],rules=rules,
+                  reference=artifact['image'],pose_reference=artifact['image'],
+                  actual_pose=np.eye(3)[:2].tolist(),rules=rules,
                   capture_folder=Path(artifact['folder']) if artifact.get('folder') else None)
     return report
 
@@ -406,11 +414,12 @@ def _execute_recorded(owner,report,candidate,rules,batch,reference,reservation='
     evidence=report.get('evidence')
     stage_budget=ExecutionStageBudget.for_attempt(batch.deadline,
         report.get('selection_deadline',batch.deadline),clock=time.monotonic,
+        finish_reserve_seconds=0. if recording_return else 15.,
         observation_seconds=evidence.estimate_seconds('verification') if isinstance(evidence,RoundEvidence) else 3.5,
         cost_evidence=evidence if isinstance(evidence,RoundEvidence) else None)
     route_check=getattr(adapter,'check_positioning',adapter.check)
     runtime=report.get('runtime',{})
-    if runtime.get('atlas') is not None:
+    if runtime.get('atlas') is not None and not candidate.get('entry_checkpoint'):
         def rebind(actual,current,active_rules):
             route_check()
             from atlas_pose import relative_candidate
@@ -556,7 +565,7 @@ def _execute_recorded(owner,report,candidate,rules,batch,reference,reservation='
 
 def default_current(owner, report, candidate, rules, **_context):
     result=_execute_recorded(owner,report,candidate,rules,report['batch'],report['reference'],
-                             reservation='default')
+                             reservation='default',return_guard=_context.get('return_guard'))
     report['pose_reference']=report['adapter'].verified_frame
     report['actual_pose']=result['actual_pose']
     _record_round_result(owner,report,result)
@@ -614,13 +623,73 @@ def prepare_choice(owner,report,candidate,rules,**context):
     adapter=report['adapter'];adapter.check()
     deadline=earliest_deadline(report['selection_deadline'],context.get('selection_deadline'))
     runtime=report.get('runtime',{})
-    if runtime.get('atlas') is None:return None,dict(allowed=False,reason='atlas_unavailable')
     source=context.get('reference_pose',report.get('actual_pose'))
+    if candidate.get('entry_checkpoint'):
+        row,budget=bind_entry_checkpoint(candidate,report,rules,deadline)
+        if row is not None:row['prepared_reference_pose']=homogeneous(source)[:2].tolist()
+        return row,budget
+    if runtime.get('atlas') is None:return None,dict(allowed=False,reason='atlas_unavailable')
     row,budget=bind_candidate(candidate,runtime['atlas'],runtime['capture_offset'],
         adapter.context().board,adapter.context().markers,rules,time.monotonic(),deadline,
         reference_pose=source,check=adapter.check,require_stable=True,allow_color_compromise=True)
     if row is not None:row['prepared_reference_pose']=homogeneous(source)[:2].tolist()
     return row,budget
+
+
+def bind_entry_checkpoint(candidate,report,rules,deadline):
+    """Return only to this round's measured entry, with translation and HEX checks."""
+    baseline=report.get('baseline_result') or {}
+    invalid=dict(allowed=False,reason='entry_checkpoint_unavailable')
+    if (not baseline.get('verified') or not baseline.get('pose_reliable') or
+            candidate.get('candidate_id')!=-1 or
+            candidate.get('actual_colors')!=baseline.get('actual_colors') or
+            len(set(baseline.get('frame_ids') or ()))<2):return None,invalid
+    pose=candidate_pose(candidate,report['board'])
+    if not np.allclose(pose[:2,:2],np.eye(2),atol=1e-6):return None,invalid
+    evidence=report.get('evidence')
+    verification=evidence.estimate_seconds('verification') if isinstance(evidence,RoundEvidence) else 3.5
+    row=dict(candidate,id=-1,entry_checkpoint=True,restore_checkpoint=True,
+             protect_observed_result=True,colors=baseline['actual_colors'],
+             deltas=baseline['actual_deltas'],verified=False,predicted=True)
+    budget=reposition_budget(row,time.monotonic(),deadline,report['board'],
+                             markers=report['markers'],verify_seconds=verification)
+    if not budget.get('allowed'):return None,budget
+    row.update(**pose_fields(budget['planned_pose'],report['board']))
+    row['planned_route']=dict(schema=1,board=list(report['board']),markers=list(report['markers']),
+        inputs=budget['input_route'],endpoint=budget['planned_pose'],
+        response_model='measured_entry_translation',game_response_verified=False)
+    route=bound_motion(row,report['board'],report['markers'])
+    row['route_stability']=dict(passed=all(g.kind=='drag' for g in route['gestures']),
+        samples_complete=True,response_profile_verified=False,
+        support_source='entry_double_frame_hex',actions=budget.get('actions',{}))
+    row['execution_budget']={key:value for key,value in budget.items() if key!='input_route'}
+    return row,budget
+
+
+def finish_checkpoint(owner,captured,rules,**context):
+    """Normal budget completion only; failed acquisition never authorizes a return."""
+    if not captured.get('checkpoint_pose_reliable') or captured.get('alignment_error'):return None
+    offset=captured.get('checkpoint_offset');baseline=captured.get('baseline_result')
+    if offset is None or not baseline:return None
+    game=captured['game'];game.check();scene=captured['scene']
+    deadline=earliest_deadline(captured['deadline'],context.get('selection_deadline'))
+    baseline=dict(baseline,entry_checkpoint=True,
+        actual_pose=homogeneous([[1,0,-offset[0]],[0,1,-offset[1]]])[:2].tolist())
+    adapter=Adapter(game,scene,'entry-return');adapter.evidence=captured.get('evidence')
+    adapter.recovery_enabled=True
+    report=dict(adapter=adapter,board=scene.board,markers=scene.markers,baseline_result=baseline,
+        actual_pose=np.eye(3)[:2].tolist(),pose_reference=captured['image'],selection_deadline=deadline,
+        reference=captured['image'],evidence=adapter.evidence,runtime={},
+        capture_folder=captured.get('folder'))
+    row,budget=bind_entry_checkpoint(dict(baseline,**pose_fields(baseline['actual_pose'],scene.board)),
+                                     report,rules,deadline)
+    if row is None:return None
+    row['prepared_reference_pose']=report['actual_pose']
+    result=choice_current(owner,report,row,rules,recording_return=True)
+    same=(result.get('verified') and result.get('actual_colors')==baseline.get('actual_colors')
+          and result.get('positioning_complete') is not False and not result.get('recovered'))
+    if isinstance(adapter.evidence,RoundEvidence):adapter.evidence.mark_return(bool(same))
+    return dict(result,baseline_result=baseline,restored_best=bool(same),best_result_current=bool(same))
 
 
 def choice_current(owner, report, candidate, rules, **_context):
@@ -672,4 +741,4 @@ def callbacks(capture_dir, entry=None, strategy='grid', entry_size=None):
             owner,rules,capture_dir,entry,strategy=strategy,
             entry_size=entry_size,**ctx),
         build=build_current,default=default_current,choice=choice_current,prepare=prepare_choice,
-        observe_current=observe_current)
+        observe_current=observe_current,finish_checkpoint=finish_checkpoint)

@@ -595,6 +595,57 @@ def wait_for_dye_board(g, stop, *, started=None, log=lambda *a,**k:None,
                 ready_at=ready_at,budget=budget)
 
 
+def capture_baseline(game,scene,rules,budget,folder,evidence):
+    """Read and register the stationary entry before any board-changing input."""
+    from atlas_runtime import Adapter
+    from atlas_stage_budget import ExecutionStageBudget
+    from atlas_execution import verify_result
+    from atlas_pose import homogeneous,marker_errors
+    from hex_feedback_search import stable_hex_read
+    adapter=Adapter(game,scene,'entry-baseline');adapter.evidence=evidence
+    adapter.enabled=[bool(rule.get('enabled')) for rule in rules]
+    deadline=min(budget.exploration_deadline,time.monotonic()+10.)
+    result=dict(candidate_id=-1,id=-1,verified=False,accepted=False,
+        actual_colors=[None]*3,actual_deltas=[None]*3,maximum=None,average=None,
+        actual_pose=None,pose_reliable=False,positioning_complete=False,measured_checkpoint=True)
+    frame=None;started=time.perf_counter()
+    try:
+        with adapter.execution_scope(ExecutionStageBudget(deadline,deadline,budget.deadline,clock=time.monotonic)):
+            stable=stable_hex_read(adapter,rules,pause=.15,deadline=deadline,check=game.check,clock=time.monotonic)
+            frame=stable['second_frame']
+            result.update(verify_result(dict(id=-1,colors=[None]*3,deltas=[None]*3),stable['codes'],rules))
+            result['verified']=True
+            motion=adapter.motion(stable['first_frame'],frame)
+            if motion is not None:
+                local=np.asarray(scene.markers)-np.asarray(scene.board[:2])
+                residual=marker_errors(np.eye(3),homogeneous(motion['matrix']),local)
+                result['baseline_marker_errors']=residual.tolist()
+                if np.max(residual)<=.25:
+                    result.update(actual_pose=np.eye(3)[:2].tolist(),pose_reliable=True,
+                                  pose_epoch=0,frame_ids=list(adapter.confirmed_frame_ids(stable['codes'])))
+            game.check()
+    except Exception as exc:
+        if exc.__class__.__name__ in ('Interrupted','InterruptedError'):raise
+        game.check()
+        result['baseline_detail']=str(exc)
+        frame=getattr(adapter,'last_frame',None)
+    result.update(candidate_id=-1,id=-1,positioning_complete=False,measured_checkpoint=True,
+                  compromise=bool(result['verified'] and not result['accepted']))
+    if result.get('verified'):
+        result.setdefault('frame_ids',list(adapter.confirmed_frame_ids(result['actual_colors'])))
+    if evidence is not None:
+        evidence.record_duration('verification',time.perf_counter()-started)
+        evidence.record_observation(result['actual_colors'],result.get('frame_ids',()),
+            result['actual_pose'],0,result['verified'],time.monotonic(),positioned=False)
+    # Persist already captured frames; no further game access is used here.
+    for label,image in (('baseline_first',locals().get('stable',{}).get('first_frame')),
+                        ('baseline_second',frame)):
+        if image is not None:
+            tick=time.perf_counter();Image.fromarray(image).save(folder/(label+'.png'),compress_level=1)
+            if evidence is not None:evidence.record_duration('storage',time.perf_counter()-tick)
+    return result,frame
+
+
 def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=False,entry_size=None,emit=None,row_stagger=0.,response_protocol='baseline',settling_probes=False,probe_cycles=3,probe_anchors=None,mechanism_experiment=False,dye_consumed=None,probe_plan='default',evidence_rules=None):
     if not np.isfinite(row_stagger) or not 0 <= row_stagger <= .1:
         raise ValueError('row_stagger must be between 0 and 0.1')
@@ -616,7 +667,7 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
         mechanism_recorder=MechanismExperimentRecorder(started_at=started)
         if dye_consumed is not None:
             mechanism_recorder.set_consumption(dye_consumed)
-    input_started=False;worker=None;evidence=None
+    input_started=False;worker=None;evidence=None;baseline_result=None;checkpoint_budget_stop=False
     active_touched=started
     def keep_active(force=False):
         nonlocal active_touched
@@ -725,14 +776,29 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
             from build_info import runtime_identity
             evidence=RoundEvidence(folder.parent.name,runtime_identity().get('source_sha256'),
                                    evidence_rules,game_deadline,ready_at=ready_at)
+            if emit:emit('atlas_progress',stage='observe')
+            g.move_to((-20,-20))
+            baseline_result,baseline_frame=capture_baseline(g,scene,evidence_rules,budget,folder,evidence)
+            log('baseline',**baseline_result)
+            if emit:emit('atlas_baseline',**baseline_result)
+            if baseline_frame is not None:im=baseline_frame
+            if not baseline_result.get('pose_reliable') or baseline_result.get('accepted'):
+                g.stage_until=float('inf')
+                return dict(folder=folder,deadline=budget.deadline,game_deadline=game_deadline,
+                    ready_at=ready_at,game=g,scene=scene,image=im,evidence=evidence,
+                    baseline_result=baseline_result,baseline_matched=bool(baseline_result.get('accepted')
+                    and baseline_result.get('pose_reliable')),baseline_unavailable=not baseline_result.get('pose_reliable'))
         if strategy in ("grid","probe","response"):
             # Probe the game's own zoom limit in short bursts.  Capturing and
             # recognizing every single notch made acquisition unnecessarily
             # slow.  A burst is committed only when its final frame is safe;
             # if it crosses the native limit, the whole burst is reverted and
             # the previous safe frame remains the sampling reference.
-            zoomed=0;previous_scale=1.0;last=im;remaining=48
-            zoom_stop_reason='step_limit'
+            # Entry scaling has no verified inverse/return model yet. Live
+            # search keeps its measured checkpoint at the entry scale; opt-in
+            # diagnostic protocols retain their existing calibration inputs.
+            zoomed=0;previous_scale=1.0;last=im;remaining=0 if evidence_rules is not None else 48
+            zoom_stop_reason='checkpoint_return_unverified' if evidence_rules is not None else 'step_limit'
             zoom_tracker=ZoomMotionTracker()
             zoom_timing=dict(input_wait_seconds=0.,capture_seconds=0.,
                              recognition_seconds=0.,registration_seconds=0.)
@@ -830,6 +896,25 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
                         worker.record_lock=records_lock
                 worker.evidence=evidence
             final_image=snap('max_sampling',scene)
+            if baseline_result is not None:
+                from atlas_runtime import motion as measure_entry_motion
+                from atlas_pose import homogeneous,marker_errors
+                tick=time.perf_counter()
+                registration=measure_entry_motion(im,final_image,scene)
+                evidence.record_duration('registration',time.perf_counter()-tick)
+                points=np.asarray(scene.markers)-np.asarray(scene.board[:2])
+                reliable=registration is not None and np.max(marker_errors(np.eye(3),
+                    homogeneous(registration['matrix']),points))<=.25
+                if not reliable:
+                    # A hand movement after entry would break the checkpoint
+                    # epoch before the first scan input. Stop, do not invent
+                    # a zero offset from the new reference frame.
+                    if worker is not None:worker.close()
+                    g.stage_until=float('inf')
+                    return dict(folder=folder,deadline=budget.deadline,game_deadline=game_deadline,
+                        ready_at=ready_at,game=g,scene=scene,image=final_image,evidence=evidence,
+                        baseline_result=baseline_result,baseline_unavailable=True,
+                        alignment_error='Entry reference changed before acquisition')
             if strategy=='response':
                 from gesture_response_probe import run_response_probe
                 try:g.response_probe_dpi=int(u.GetDpiForWindow(g.hwnd)) or None
@@ -889,6 +974,28 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
                     log('sampling_alignment_failed',completed_steps=index-1,
                         planned_steps=len(plan),detail=str(alignment_error))
                     break
+                if baseline_result is not None:
+                    # Reserve a return from the prospective next measured
+                    # pose, before a fixed route is allowed to leave baseline.
+                    offsets=getattr(getattr(worker,'alignment',None),'offsets',())
+                    if not offsets:
+                        completed_scan=False
+                        log('sampling_alignment_failed',completed_steps=index-1,
+                            planned_steps=len(plan),detail='No measured checkpoint offset')
+                        break
+                    prospective=np.asarray(offsets[-1])+[action['dx'],action['dy']]
+                    cap=np.asarray([scene.board[2]-scene.board[0],scene.board[3]-scene.board[1]])*.16
+                    steps=int(np.ceil(np.max(np.abs(prospective)/cap)))
+                    step_cost=(evidence.estimate_seconds('input')+evidence.estimate_seconds('capture')+
+                               evidence.estimate_seconds('registration')+evidence.estimate_seconds('verification'))
+                    if steps>10 or not budget.allow_operation(now=time.monotonic(),operation_seconds=step_cost,
+                        return_seconds=steps*step_cost,verification_seconds=evidence.estimate_seconds('verification')):
+                        completed_scan=False
+                        log('sampling_cutoff',completed_steps=index-1,planned_steps=len(plan),
+                            message='Reserved return to the measured entry checkpoint',
+                            reason='checkpoint_return_steps' if steps>10 else 'checkpoint_return_budget')
+                        checkpoint_budget_stop=True
+                        break
                 try:
                     sample=settling.capture_step(g,scene,action,final_image)
                     final_image=snap('grid_%03d'%index,scene,command=action,sample=sample)
@@ -918,7 +1025,13 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
                     # hard game deadline. Keep the frames already captured,
                     # release the current drag in finally, and continue with
                     # processing/return while the hard deadline remains.
+                    now=time.monotonic()
+                    if stop.is_set() or now>=g.until or now<getattr(g,'stage_until',float('inf')):
+                        raise
+                    g.stage_until=float('inf')
+                    g.check()  # Recheck focus/geometry before calling this a soft cutoff.
                     completed_scan=False
+                    checkpoint_budget_stop=baseline_result is not None
                     log('sampling_cutoff',completed_steps=index-1,
                         planned_steps=len(plan),message=str(exc))
                     break
@@ -951,7 +1064,10 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
                             image=final_image,geometry=tuple(g.geometry()),prepared=prepared,
                             alignment_error=getattr(worker,'error',None),
                             alignment_frames=len(getattr(getattr(worker,'alignment',None),'images',()) or ()),
-                            evidence=evidence)
+                            evidence=evidence,baseline_result=baseline_result,
+                            checkpoint_budget_stop=checkpoint_budget_stop,
+                            checkpoint_pose_reliable=baseline_result is not None and not worker.error,
+                            checkpoint_offset=(getattr(getattr(worker,'alignment',None),'offsets',[None])[-1]))
         g.until=time.monotonic()+90
         input_started=True
         for i in range(70):

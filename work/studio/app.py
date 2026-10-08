@@ -632,16 +632,19 @@ class App(ct.CTk):
                 colors=d.get('actual_colors') or [None]*3
                 for card,color in zip(self.cards,colors):
                     card.current.configure(text='当前颜色  '+(color or '读取失败'))
-                self.status.configure(text=tr('已保留当前画面'))
-                self.set_detail(tr(d.get('message','当前动作未能可靠复核，已停止自动移动。')))
+                from ui_progress import atlas_result_presentation
+                title,detail=atlas_result_presentation(d)
+                self.status.configure(text=tr(title));self.set_detail(tr(detail))
             elif k=='atlas_recovery_unavailable':
                 self.status.configure(text=tr('已保留当前画面'))
                 self.set_detail(tr(d.get('message','当前动作未能可靠复核，已停止自动移动。')))
             elif k=='atlas_ready':self.status.configure(text=tr('本局颜色板质量门槛通过，正在准备自动最佳方案。'))
-            elif k in ('atlas_default_verified','atlas_verified'):
+            elif k in ('atlas_default_verified','atlas_verified','atlas_checkpoint_verified'):
                 colors=d.get('actual_colors',d.get('colors',[]))
                 for card,color in zip(self.cards,colors):card.current.configure(text='当前颜色  '+(color or '读取失败'))
-                self.status.configure(text='当前结果已达到所设目标，请在游戏内手动确认。' if d.get('accepted') else '当前结果未达到全部目标；请先查看妥协方案，再在游戏内手动确认是否套用。')
+                from ui_progress import atlas_result_presentation
+                title,detail=atlas_result_presentation(d)
+                self.status.configure(text=tr(title));self.set_detail(tr(detail))
             elif k=='atlas_best_not_restored':
                 for card,color in zip(self.cards,d.get('actual_colors') or [None]*3):
                     card.current.configure(text='当前颜色  '+(color or '读取失败'))

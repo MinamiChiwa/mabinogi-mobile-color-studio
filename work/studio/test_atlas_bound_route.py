@@ -33,6 +33,31 @@ class IntegerGame(SimilarityGame):
 
 
 class BoundRouteTests(unittest.TestCase):
+    def test_measured_entry_return_executes_translation_and_stops_after_double_hex(self):
+        from atlas_live_adapter import bind_entry_checkpoint,_execute_recorded
+        target=(-40.,0.)
+        baseline=dict(candidate_id=-1,verified=True,pose_reliable=True,frame_ids=['entry-a','entry-b'],
+            actual_colors=['#FFFEFE']*3,actual_deltas=[.44]*3,maximum=.44,average=.44,accepted=False)
+        owner=SimpleNamespace(event=lambda *a,**k:None)
+        report=dict(baseline_result=baseline,board=self.game.ctx.board,markers=self.game.ctx.markers,
+                    adapter=self.game,runtime={},selection_deadline=time.monotonic()+120)
+        rules=[dict(enabled=True,exact=True,colors=['#FFFFFF'],tolerance=0)]*3
+        row,budget=bind_entry_checkpoint(dict(baseline,entry_checkpoint=True,dx=target[0],dy=target[1]),
+                                         report,rules,report['selection_deadline'])
+        self.assertIsNotNone(row)
+        def codes(frame):
+            self.game.reads+=1
+            return ['#FFFEFE' if np.allclose(frame[:2,2],target) else '#777777']*3
+        self.game.read_codes=codes
+        batch=CandidateBatch([row],self.game.ctx,report['selection_deadline'])
+        with patch('atlas_execution._feedback_refine',side_effect=AssertionError('No new target during return')):
+            result=_execute_recorded(owner,report,row,rules,batch,self.game.capture(),recording_return=True)
+        self.assertTrue(result['verified']);self.assertFalse(result['accepted'])
+        self.assertEqual(result['actual_colors'],baseline['actual_colors'])
+        self.assertEqual(self.game.actions,['drag'])
+        self.assertEqual(self.game.reads,2)
+        self.assertEqual(self.game.releases,1)
+
     def setUp(self):
         self.game=IntegerGame();self.atlas=ConstantAtlas()
         self.rules=[dict(enabled=True,exact=False,colors=['#112233'],tolerance=8)]*3

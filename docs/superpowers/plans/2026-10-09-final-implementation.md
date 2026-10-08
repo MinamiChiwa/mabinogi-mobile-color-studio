@@ -109,7 +109,7 @@ def test_search_cannot_spend_the_final_return_and_double_read_budget(self):
 
 **Interfaces:** 使用 Task 1 的观察字段；复用 `_measured_quality()` / `candidate_quality()` 判断真实结果，保留 `best_result_current`、`historical_best_unrestored`、`positioning_complete`，增加 `baseline_result` 与 `best_observed_result`。旧调用方仍可读取原结果字段。
 
-- [ ] 写真实颜色反例：先观察近白，后到深色，预算结束应返回近白；验证失败时不能把保存近白显示为当前色。复用现有 FakeIO，避免再建一套同源几何模拟。
+- [x] 写真实颜色反例：先观察近白，后到深色，预算结束应返回近白；验证失败时不能把保存近白显示为当前色。复用现有 FakeIO，避免再建一套同源几何模拟。
 
 ```python
 def test_exact_miss_restores_measured_near_white_after_a_worse_trial(self):
@@ -123,11 +123,11 @@ def test_exact_miss_restores_measured_near_white_after_a_worse_trial(self):
     self.assertTrue(result['compromise'])
 ```
 
-- [ ] 先运行上述反例及多区故障/停止用例，分清已满足的行为与真正缺失的路径。
-- [ ] 在进入可操作画板后、首个输入前记录双帧基线及姿态参考；后续校准也必须有离开/返回基线的预算。
-- [ ] 正常探索预算结束只执行有证据的最佳定位与复核；故障或安全中断执行既有停止语义，不盲目返回。
-- [ ] UI 区分“已定位妥协”“只读当前颜色”“此前最佳未恢复”，展示各区真实 ΔE；同色但不同位置只在实测证据相符时更新检查点。
-- [ ] 扩展三语回归，运行 production 和 all，精确提交。
+- [x] 先运行上述反例及多区故障/停止用例，分清已满足的行为与真正缺失的路径。
+- [x] 在进入可操作画板后、首个输入前记录双帧基线及姿态参考；后续校准也必须有离开/返回基线的预算。
+- [x] 正常探索预算结束只执行有证据的最佳定位与复核；故障或安全中断执行既有停止语义，不盲目返回。
+- [x] UI 区分“已定位妥协”“只读当前颜色”“此前最佳未恢复”，展示各区真实 ΔE；同色但不同位置只在实测证据相符时更新检查点。
+- [x] 扩展三语回归，运行 production 和 all，精确提交。
 
 **完成门:** 精准未命中不是失败条件；未知姿态不是继续找色的理由。只读 fallback 不能被呈现为最接近候选已到达。
 

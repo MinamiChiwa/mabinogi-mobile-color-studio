@@ -121,16 +121,18 @@ class SearchOverlayAtlasTests(unittest.TestCase):
             for language in ('简体中文','繁體中文','English'):
                 i18n.set_language(language)
                 overlay=SearchOverlay.__new__(SearchOverlay)
-                overlay.show_recovery=Mock();overlay.render=Mock();overlay.results=Mock()
+                overlay.render=Mock();overlay.results=Mock();overlay.clear_candidates=Mock()
+                overlay.copy=Mock();overlay.activity=Mock();overlay.collapse=Mock();overlay.resize_surface=Mock()
                 data=dict(actual_colors=['#513B43',None,None],actual_deltas=[51,None,None],
                           best_result=dict(actual_colors=['#F2F2F2',None,None],actual_deltas=[17,None,None]))
                 with patch('search_overlay.ct.CTkLabel') as label:
                     overlay.show_unrestored_best(data)
-                overlay.show_recovery.assert_called_once_with(data)
                 texts=[str(i18n.tr(c.kwargs.get('text',''))) for c in label.call_args_list]
                 self.assertIn(str(i18n.tr('先前最佳实测（未恢复）')),texts)
                 if language=='English':self.assertIn('not restored',' '.join(texts))
                 self.assertIn('#F2F2F2',' '.join(texts))
+                self.assertIn('#513B43',' '.join(texts))
+                self.assertEqual(overlay.render.call_args.args[0],'此前最佳实测结果未能恢复')
                 self.assertNotIn('None',' '.join(texts))
         finally:i18n.set_language(original)
 

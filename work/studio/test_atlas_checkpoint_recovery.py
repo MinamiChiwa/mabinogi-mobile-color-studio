@@ -345,5 +345,24 @@ class CheckpointRecoveryTests(unittest.TestCase):
         self.assertFalse(result['verified'])
 
 
+class BaselineFailureTests(unittest.TestCase):
+    def test_worse_return_hex_is_current_and_entry_white_remains_historical(self):
+        from atlas_service import AtlasService,AtlasCallbacks
+        owner=service_fixtures.Owner()
+        baseline=dict(candidate_id=-1,id=-1,actual_colors=['#FFFEFE']*3,actual_deltas=[.44]*3,
+            verified=True,accepted=False,maximum=.44,average=.44,actual_pose=[[1,0,-10],[0,1,0]])
+        captured=dict(baseline_result=baseline,checkpoint_budget_stop=True)
+        current=dict(candidate_id=-1,actual_colors=['#777777']*3,actual_deltas=[50.]*3,
+            verified=True,accepted=False,maximum=50.,average=50.,actual_pose=np.eye(3)[:2].tolist(),
+            positioning_complete=True,best_result_current=False)
+        callbacks=AtlasCallbacks(lambda *a,**k:captured,lambda *a,**k:None,None,None,
+            finish_checkpoint=lambda *a,**k:current)
+        result=AtlasService(callbacks).run(owner,[])
+        self.assertEqual(result['actual_colors'],['#777777']*3)
+        self.assertEqual(result['best_observed_result']['actual_colors'],['#FFFEFE']*3)
+        self.assertTrue(result['historical_best_unrestored'])
+        self.assertEqual(owner.events[-1][0],'atlas_best_not_restored')
+
+
 if __name__=='__main__':
     unittest.main()

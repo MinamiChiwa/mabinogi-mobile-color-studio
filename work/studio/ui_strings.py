@@ -1,5 +1,13 @@
 """Reviewed wording for the desktop interface."""
 EN={
+'未命中目标 · 已定位妥协方案':'Target not reached · Positioned compromise',
+'只读当前颜色':'Read-only current colors',
+'此前最佳实测结果未能恢复':'Previously measured best could not be restored',
+'当前颜色未完成复核':'Current colors are unverified',
+'当前色码与历史最佳分别显示；历史色码不是游戏当前结果，请以当前实测为准。':'Current colors and the historical best are shown separately. Historical HEX is not the current game result; refer to the current measurement.',
+'已双帧读取当前颜色；未定位候选，也未确认恢复历史最佳。':'Current colors were read in two frames. No candidate was positioned and recovery of the historical best was not confirmed.',
+'当前显示已定位并双帧复核的近似结果，请查看各区色差并在游戏内手动决定是否采用。':'This near match was positioned and verified in two frames. Review each region’s color difference and decide manually in the game.',
+'最佳结果返程未能完成，已停止自动移动。':'Return to the best result could not be completed. Automatic movement stopped.',
 '当前方案 · 游戏实测':'Current combination · Measured in game',
 '已测试方案 · 游戏实测':'Tested combination · Measured in game',
 '候选方案 · 预测颜色':'Candidate · Predicted colors',
@@ -99,6 +107,14 @@ EN={
 ' 秒':' s',
 }
 TW={
+'未命中目标 · 已定位妥协方案':'未命中目標・已定位折衷方案',
+'只读当前颜色':'唯讀目前顏色',
+'此前最佳实测结果未能恢复':'先前最佳實測結果未能恢復',
+'当前颜色未完成复核':'目前顏色未完成複核',
+'当前色码与历史最佳分别显示；历史色码不是游戏当前结果，请以当前实测为准。':'目前色碼與歷史最佳分別顯示；歷史色碼不是遊戲目前結果，請以目前實測為準。',
+'已双帧读取当前颜色；未定位候选，也未确认恢复历史最佳。':'已雙幀讀取目前顏色；未定位候選，也未確認恢復歷史最佳。',
+'当前显示已定位并双帧复核的近似结果，请查看各区色差并在游戏内手动决定是否采用。':'目前顯示已定位並雙幀複核的近似結果，請查看各區色差並在遊戲內手動決定是否採用。',
+'最佳结果返程未能完成，已停止自动移动。':'最佳結果返程未能完成，已停止自動移動。',
 '当前方案 · 游戏实测':'目前方案 · 遊戲實測',
 '已测试方案 · 游戏实测':'已測試方案 · 遊戲實測',
 '候选方案 · 预测颜色':'候選方案 · 預測顏色',

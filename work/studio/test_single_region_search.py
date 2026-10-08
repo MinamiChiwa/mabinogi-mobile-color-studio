@@ -175,6 +175,24 @@ class VisibleCandidateTests(unittest.TestCase):
 
 
 class LiveSearchTests(unittest.TestCase):
+    def test_no_stable_entry_read_sends_no_exploration_input(self):
+        io=FakeIO();io.read=lambda *a,**k:[None]*3
+        with patch('single_region_search.visible_candidates') as scan:
+            result=run_single_region(io,scene(),rules('#FFFFFF',exact=True),game_deadline=100)
+        self.assertFalse(result['verified']);self.assertEqual(io.commands,[])
+        self.assertEqual(result['reason'],'baseline_unverified');scan.assert_not_called()
+
+    def test_exact_miss_restores_entry_near_white_and_keeps_baseline_separate(self):
+        io=FakeIO(color=lambda offset:'#FFFEFE' if not offset.any() else '#777777')
+        with patch('single_region_search.visible_candidates',
+                   return_value=[dict(source=np.array([85.,180.]))]):
+            result=run_single_region(io,scene(),rules('#FFFFFF',exact=True),game_deadline=100,
+                limits=QuickSearchLimits(max_candidate_trials=1,max_explorations=0))
+        self.assertEqual(result['actual_colors'][0],'#FFFEFE')
+        self.assertTrue(result['best_current']);self.assertTrue(result['compromise'])
+        self.assertEqual(result['baseline_result']['actual_colors'][0],'#FFFEFE')
+        self.assertEqual(result['best_observed_result']['actual_colors'][0],'#FFFEFE')
+
     def test_library_finish_reserve_remains_overridable(self):
         self.assertEqual(QuickSearchLimits().finish_reserve_seconds, 1.)
         self.assertEqual(QuickSearchLimits(finish_reserve_seconds=15.).finish_reserve_seconds, 15.)

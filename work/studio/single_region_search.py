@@ -10,6 +10,7 @@ Screenshot colors select proposals; only consecutive game HEX reads verify a
 result. Integer wheel inputs are measured; reverse notches are not an undo.
 """
 from dataclasses import dataclass
+from copy import deepcopy
 import math
 
 import cv2
@@ -229,6 +230,7 @@ class _Search:
         self.verified = False
         self.current = False
         self.best = None
+        self.baseline=None
         self.layer_best = None
         self.restore_target = 'global_best'
         self.restore_fallback_used = False
@@ -399,6 +401,10 @@ class _Search:
                   current=self.current, accepted=self.verified and accepted(self.colors, self.rules),
                   frame_ids=frame_ids[-2:],pose=None if self.pose is None else self.pose.tolist(),
                   pose_epoch=self.epoch)
+        if self.baseline is None and self.moves==0 and self.verified:
+            self.baseline=dict(actual_colors=self.colors.copy(),verified=True,
+                accepted=bool(accepted(self.colors,self.rules)),
+                actual_pose=None if self.pose is None else self.pose.tolist(),pose_epoch=self.epoch)
         return improved
 
     def steps(self, displacement):
@@ -879,6 +885,12 @@ class _Search:
         compromise = bool(self.verified and not accepted_result)
         historical_best_unrestored = bool(self.best is not None and not self.at_best())
         return dict(actual_colors=self.colors.copy(), accepted=accepted_result,
+                    baseline_result=deepcopy(self.baseline),
+                    best_observed_result=None if self.best is None else dict(
+                        actual_colors=self.best['colors'].copy(),verified=True,
+                        accepted=bool(accepted(self.best['colors'],self.rules)),
+                        actual_pose=None if self.best['pose'] is None else self.best['pose'].tolist(),
+                        pose_epoch=self.best['epoch']),
                     outcome=outcome, compromise=compromise,
                     exact_target_missed=bool(self.exact and compromise),
                     verified=self.verified, current=self.current,
@@ -906,6 +918,9 @@ class _Search:
     def run(self):
         self.emit('single_progress', stage='observe', moves=0)
         self.observe()
+        if not self.verified:
+            self.reason='baseline_unverified'
+            return self.result()
         if self.verified and accepted(self.colors, self.rules):
             self.reason = 'matched'
             return self.result()

@@ -4,7 +4,7 @@ from ctypes import wintypes as W
 import customtkinter as ct
 import time
 from ui_settings import read_settings,save_settings
-from ui_progress import progress_text,single_result_presentation
+from ui_progress import progress_text,single_result_presentation,atlas_result_presentation
 from ui_performance import DeliberateSlider
 from i18n import tr,on_language
 from display_geometry import work_area,clamp_position
@@ -301,8 +301,7 @@ class SearchOverlay(ct.CTkToplevel):
     def show_verification(self,data):
         self.clear_candidates();self.phase='verified'
         self.results.grid(row=4,column=0,padx=2,pady=(0,10),sticky='ew');self._has_results=True;self._collapsed=False;self.copy.grid();self.activity.grid();self.collapse.configure(text='收起');self.resize_surface()
-        self.render('游戏色码已复核','部分区域与目标色系不符。' if data.get('family_consistent') is False else
-                    '全部目标达标，请在游戏内手动确认是否套用。' if data['accepted'] else '本轮候选实测未达标；当前颜色如下，尚不能判断色板无解。')
+        self.render(*atlas_result_presentation(data))
         for i in range(3):
             if data['actual_deltas'][i] is None:continue
             predicted=data.get('predicted_colors',[None]*3)[i]
@@ -324,9 +323,7 @@ class SearchOverlay(ct.CTkToplevel):
         self.results.grid(row=4,column=0,padx=2,pady=(0,10),sticky='ew');self._has_results=True;self._collapsed=False;self.copy.grid();self.activity.grid();self.collapse.configure(text='收起');self.resize_surface()
         actual=data.get('actual_colors') or [None]*3
         deltas=data.get('actual_deltas') or [None]*3
-        self.render('已停止自动移动',
-                    '本次调整未完成，已读取当前游戏颜色。' if data.get('verified') and any(actual)
-                    else '未能读取当前色码，请以游戏内显示为准。')
+        self.render(*atlas_result_presentation(dict(data,positioning_complete=False)))
         for i,(color,delta) in enumerate(zip(actual,deltas)):
             if color is None and delta is None:continue
             text=f"区域 {i+1}\n实测 {color or '—'}"+(f" · ΔE {delta:.2f}" if delta is not None else '')
@@ -334,11 +331,13 @@ class SearchOverlay(ct.CTkToplevel):
         maximum=data.get('maximum');average=data.get('average')
         if maximum is not None and average is not None:
             ct.CTkLabel(self.results,text=tr(f"最大 {maximum:.2f} / 平均 {average:.2f}")).pack(pady=8)
+        if data.get('historical_best_unrestored'):self.show_historical_colors(data)
 
     def show_unrestored_best(self,data):
-        self.show_recovery(data)
-        self.render('已停止自动移动','未能恢复先前最佳结果，请以游戏当前颜色为准。')
-        best=data.get('best_result') or {}
+        self.show_recovery(dict(data,historical_best_unrestored=True))
+
+    def show_historical_colors(self,data):
+        best=data.get('best_observed_result') or data.get('best_result') or {}
         ct.CTkLabel(self.results,text=tr('先前最佳实测（未恢复）'),anchor='w').pack(fill='x',padx=8,pady=8)
         for i,(color,delta) in enumerate(zip(best.get('actual_colors') or [],best.get('actual_deltas') or [])):
             if color is None or delta is None:continue
@@ -357,6 +356,7 @@ class SearchOverlay(ct.CTkToplevel):
             text=f"区域 {i+1}\n"+tr('当前颜色  ')+(color or tr('读取失败'))
             if delta is not None:text+=f" · ΔE {delta:.2f}"
             ct.CTkLabel(self.results,text=tr(text),justify='left',anchor='w').pack(fill='x',padx=8,pady=8)
+        if data.get('historical_best_unrestored'):self.show_historical_colors(data)
     def handle(self,kind,data):
         if getattr(self,'_dismissed',False):return
         if kind in ('atlas_progress','single_progress'):
@@ -370,7 +370,7 @@ class SearchOverlay(ct.CTkToplevel):
         if kind=='atlas_command':
             self.phase='positioning';self.update_activity({'stage':'position'})
             self.render('移动到目标位置',f"步骤 {data.get('step',1)} · 根据图像实测位移校正；F9随时停止。");return
-        if kind in ('atlas_default_verified','atlas_verified','atlas_recovery','atlas_best_not_restored','atlas_recovery_unavailable','atlas_invalidated','atlas_default_unavailable','error','interrupted','finished') and hasattr(self,'activity'):
+        if kind in ('atlas_default_verified','atlas_verified','atlas_checkpoint_verified','atlas_recovery','atlas_best_not_restored','atlas_recovery_unavailable','atlas_invalidated','atlas_default_unavailable','error','interrupted','finished') and hasattr(self,'activity'):
             self.activity.stop();self.activity.set(1)
         if kind=='interrupted' and self.phase in ('choosing','positioning','verified'):
             self.batch_id=None
@@ -401,12 +401,7 @@ class SearchOverlay(ct.CTkToplevel):
                 self.show_candidates(update_candidate_display(self._candidate_data,data['candidate_id'],result=data,current=True))
             self.default_candidate_id=data.get('candidate_id',self.default_candidate_id)
             self.phase='choosing'
-            if data.get('family_consistent') is False:
-                self.render('存在色系偏离','部分区域与目标色系不符。')
-            elif data.get('compromise') or not data.get('accepted',True):
-                self.render('已到达最接近方案','这是当前可测量的妥协方案；可选择其他方案，实际染色须在游戏内手动确认。')
-            else:
-                self.render('已到达自动最佳方案','可选择其他方案；剩余时间不足时将保持当前自动方案。')
+            self.render(*atlas_result_presentation(data))
             self.show_default_verification(data)
             for candidate_id,button in self.candidate_rows.items():
                 button.configure(text='自动方案（当前）' if candidate_id==self.default_candidate_id else '选择此方案',
@@ -419,7 +414,7 @@ class SearchOverlay(ct.CTkToplevel):
             self.batch_id=None
             for button in self.candidate_rows.values():button.configure(state='disabled')
             self.phase='verified';self.render('未选择其他方案','已保持自动最佳方案。')
-        elif kind=='atlas_verified':
+        elif kind in ('atlas_verified','atlas_checkpoint_verified'):
             self.show_verification(data)
         elif kind=='atlas_recovery':
             self.show_recovery(data)

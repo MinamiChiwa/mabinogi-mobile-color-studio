@@ -1303,7 +1303,7 @@ def execute_candidate(adapter,batch,batch_id,candidate_id,reference,rules,emit=l
         # measured sample. Exact candidates stop here to avoid needless dye
         # motion; misses receive the explicit compromise metadata below.
         initial_verified=verify_result(candidate,second,rules)
-        if not initial_verified.get('accepted'):
+        if not initial_verified.get('accepted') and not candidate.get('restore_checkpoint'):
             feedback_used=True
             actual, verified_frame, second, feedback_best, feedback_restored, feedback_reason = _feedback_refine(
                 adapter, candidate, actual, verified_frame, second, rules, markers,
