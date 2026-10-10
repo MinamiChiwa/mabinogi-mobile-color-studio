@@ -117,6 +117,8 @@ TW={
 
 # Current product copy. Historical keys above only translate archived events.
 EN.update({
+'无法读取游戏进程（权限被拒绝）':'Cannot read the game process (access denied)',
+'请让工具与游戏使用相同权限级别；若游戏以管理员运行，请右键工具选择「以管理员身份运行」后重开。先在游戏普通界面重试，确认权限检查通过后再开始新一局染色。':'Run the tool and game at the same privilege level. If the game runs as administrator, right-click the tool and choose Run as administrator. Retry on an ordinary game screen first; start a dye round only after the access check passes.',
 '启用需要染色的区域，输入 HEX 色码、点击选色或使用屏幕吸管。替代颜色同样视为可接受的目标。工具自动识别双区域或三区域色板；本局不存在的区域不参与匹配，保存的设置仍会保留。':'Enable the regions to match. Enter HEX codes, choose colors, or use the eyedropper. Alternatives are also accepted targets. The tool detects two- or three-region boards automatically; absent regions are excluded without changing saved settings.',
 '本局不可用':'Unavailable this round',
 '当前颜色  本局不可用':'Current color · Unavailable this round',
@@ -176,6 +178,8 @@ EN.update({
 '此方案名称已存在，请使用其他名称。':'That preset name already exists. Choose a different name.',
 })
 TW.update({
+'无法读取游戏进程（权限被拒绝）':'無法讀取遊戲程序（權限被拒絕）',
+'请让工具与游戏使用相同权限级别；若游戏以管理员运行，请右键工具选择「以管理员身份运行」后重开。先在游戏普通界面重试，确认权限检查通过后再开始新一局染色。':'請讓工具與遊戲使用相同權限層級；若遊戲以管理員執行，請右鍵工具選擇「以系統管理員身分執行」後重開。先在遊戲普通畫面重試，確認權限檢查通過後再開始新一局染色。',
 '启用需要染色的区域，输入 HEX 色码、点击选色或使用屏幕吸管。替代颜色同样视为可接受的目标。工具自动识别双区域或三区域色板；本局不存在的区域不参与匹配，保存的设置仍会保留。':'啟用需要染色的區域，輸入 HEX 色碼、點擊選色或使用螢幕吸管。替代顏色同樣視為可接受的目標。工具自動辨識雙區域或三區域色板；本局不存在的區域不參與比對，已儲存的設定仍會保留。',
 '本局不可用':'本局無法使用',
 '当前颜色  本局不可用':'目前顏色 · 本局無法使用',

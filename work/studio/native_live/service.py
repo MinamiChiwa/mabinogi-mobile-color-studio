@@ -16,6 +16,7 @@ from .dye_hex_glyphs import prepare_hex_assets
 from .same_session_dye_planner import normalize_target_rules
 from .controller import run_goal_loop
 from dye_regions import session_region_count,bind_region_rules
+from process_access import ProcessReadDenied
 
 
 def _prepare(pid,folder,check,hwnd=None):
@@ -49,14 +50,21 @@ def _prepare(pid,folder,check,hwnd=None):
             pixel_mapping_diagnostics=diagnostic.get('pixel_mapping_diagnostics',{}))
     except BaseException as exc:
         diagnostic['error']=type(exc).__name__+': '+str(exc)
+        if isinstance(exc,ProcessReadDenied):
+            diagnostic.update(stage='process_access',process_access=exc.diagnostic)
         failed=getattr(backend,'last_window_diagnostic',None)
         if isinstance(failed,dict):diagnostic['window_context']=failed
-        save()
+        try:save()
+        except Exception as write_error:
+            if not isinstance(exc,ProcessReadDenied):raise
+            exc.diagnostic['preparation_write_error']=dict(error_type=type(write_error).__name__,
+                win_error=getattr(write_error,'winerror',None),errno=getattr(write_error,'errno',None))
         if backend is not None:backend.close()
         raise
 
 
 def unavailable_reason(error):
+    if isinstance(error,ProcessReadDenied):return 'process_access'
     message=str(error)
     if any(s in message for s in ('UnityPlayer module','GameAssembly module','supported game modules')):
         return 'module_resolution'
@@ -76,6 +84,7 @@ def preflight(pid,folder,*,check=lambda:None,hwnd=None):
         result.update(record,stop_reason='preflight_complete',pid=pid)
     except (ValueError,OSError,RuntimeError) as exc:
         result.update(stop_reason='unavailable',error=str(exc),unavailable_reason=unavailable_reason(exc),pid=pid)
+        if isinstance(exc,ProcessReadDenied):result['process_access']=exc.diagnostic
     finally:
         if backend is not None:backend.close()
     (folder/'native-preflight.json').write_text(json.dumps(result,indent=2),encoding='utf-8')
@@ -143,6 +152,7 @@ def run_native_search(owner,rules,*,mode='search',target=None,activate=False,**u
     except (ValueError,OSError,RuntimeError) as exc:
         result.update(stop_reason='no_available_regions' if result.get('stop_reason')=='no_available_regions' else 'unavailable',error=type(exc).__name__+': '+str(exc),
             unavailable_reason=unavailable_reason(exc))
+        if isinstance(exc,ProcessReadDenied):result['process_access']=exc.diagnostic
     except Exception as exc:result.update(stop_reason='internal_error',error=type(exc).__name__+': '+str(exc),
                                          error_traceback=traceback.format_exc())
     finally:

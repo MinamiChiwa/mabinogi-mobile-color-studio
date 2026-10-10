@@ -12,6 +12,8 @@ Final release regression:536 tests,535 passed,1 optional private OCR fixture ski
 
 Final quick including its three desktop smoke contracts:502 tests,501 passed,1 skipped,zero failures/errors;43.319s execution,46.261s total. The added two-region count/model contracts remain in quick; expensive recorded search matrices remain release/research only.
 
+Remote 0.4.0 process-access follow-up:15 supplied sessions entered native validation, then Windows rejected `OpenProcess(0x410)` with error5 before any input. This is a game-process read denial, not an app-launch crash. The same read-only access request is retained; failure records now include elevation/integrity diagnostics or explicit unknowns, while the UI explains same-privilege launch and ordinary-screen preflight. No automatic privilege change occurs. Twenty-two focused contracts and a real self-process token/query check passed; a wider48-check diagnostic/service/reader/language set passed. Remote access restoration remains unverified. See `docs/research/remote-process-access-2026-10-11.md`.
+
 ## Release 0.4.0 (2026-10-11)
 
 Policy: `native-priority-similar-fine-scale-v15`. Current UI settings autosave; named presets support independent editing/loading/deletion and retain unique three-region priorities. Both native and fallback visual paths prefer all enabled targets, then ordered satisfaction and Delta-E. Exact HEX rules, disabled regions and alternatives retain their original acceptance semantics.

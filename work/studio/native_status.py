@@ -28,6 +28,8 @@ def result_text(data):
     if reason=='already_active_palette':return ('无法绑定当前染色板','请确认只打开了一个染色板；关闭重叠窗口后重试。')
     if reason=='unavailable':
         category=data.get('unavailable_reason')
+        if category=='process_access':
+            return ('无法读取游戏进程（权限被拒绝）','请让工具与游戏使用相同权限级别；若游戏以管理员运行，请右键工具选择「以管理员身份运行」后重开。先在游戏普通界面重试，确认权限检查通过后再开始新一局染色。')
         if category=='module_resolution':
             return ('未能定位游戏模块','已记录目标进程及实际安装路径，请查看诊断记录。')
         if category=='game_build':

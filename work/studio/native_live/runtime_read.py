@@ -2,6 +2,7 @@
 import ctypes,struct,json
 from ctypes import wintypes
 from pathlib import Path
+from process_access import ProcessReadDenied
 K=ctypes.WinDLL('kernel32',use_last_error=True);P=ctypes.WinDLL('psapi',use_last_error=True)
 K.OpenProcess.argtypes=[wintypes.DWORD,wintypes.BOOL,wintypes.DWORD];K.OpenProcess.restype=wintypes.HANDLE
 K.ReadProcessMemory.argtypes=[wintypes.HANDLE,ctypes.c_void_p,ctypes.c_void_p,ctypes.c_size_t,ctypes.POINTER(ctypes.c_size_t)];K.ReadProcessMemory.restype=wintypes.BOOL
@@ -14,7 +15,10 @@ P.GetModuleFileNameExW.argtypes=[wintypes.HANDLE,ctypes.c_void_p,wintypes.LPWSTR
 class Reader:
  def __init__(self,pid):
   self.pid=pid;self.h=K.OpenProcess(0x410,False,pid)
-  if not self.h:raise OSError(ctypes.get_last_error(),'OpenProcess read-only failed')
+  if not self.h:
+   error=ctypes.get_last_error()
+   if error==5:raise ProcessReadDenied(pid,error,read_access=0x410)
+   raise OSError(error,'OpenProcess read-only failed')
   modules=(ctypes.c_void_p*2048)();needed=wintypes.DWORD()
   if not P.EnumProcessModulesEx(self.h,modules,ctypes.sizeof(modules),ctypes.byref(needed),3):raise OSError(ctypes.get_last_error(),'EnumProcessModules failed')
   self.base=None;self.module_files={}

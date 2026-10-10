@@ -40,6 +40,8 @@ When leather, wood or another material’s base palette lacks pure black or whit
 
 Preflight checks the current build, modules, physical client area and game coordinates. A passing preflight does not prove live dye accuracy. Several display/scaling configurations were tested; universal size, mixed-DPI or game-version support is not claimed. Stop and restart after changing the game window during a run.
 
+If process access is denied, run the tool and game at the same privilege level. When the game runs as administrator, right-click the tool and choose Run as administrator. Retry preflight on an ordinary game screen without starting a new dye round. The tool never elevates itself automatically.
+
 Report problems at [GitHub Issues](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/issues) with the session log. Extra dye items are not needed just to report a problem. The game’s current HEX values determine the final result.
 
 ## Development and tests
