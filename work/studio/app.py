@@ -378,7 +378,7 @@ class App(ct.CTk):
         self.detail.grid(row=1,column=0,padx=18,pady=(0,8),sticky='ew');self.detail.grid_remove()
         self.candidates_button=ct.CTkButton(status,text='查看本轮候选',width=150,height=30,font=SMALL_FONT,
             fg_color='#28364A',command=self.show_native_candidate_results)
-        self.candidates_button.grid(row=2,column=0,padx=18,pady=(0,8),sticky='w');self.candidates_button.grid_remove()
+        self._native_candidates_available=False
         label=ct.CTkLabel(intro,text='适用于港澳台服瑪奇Mobile。游戏中使用本工具可能存在风险，建议谨慎使用。',font=SMALL_FONT,text_color=MUTED,wraplength=320,justify='left',anchor='w');label.pack(fill='x',pady=(0,8));self.intro_labels.append(label)
         self.footer=ct.CTkLabel(self.page,text='F9 随时停止并释放鼠标  ·  切换窗口停止寻色  ·  不自动开启下一瓶染色剂',font=SMALL_FONT,text_color=MUTED,wraplength=340,justify='right');self.footer.grid(row=5,column=0,padx=BODY_SIDE_PADDING,pady=(0,8),sticky='e')
         self._layout_columns=None;self._layout_content_width=None;self._layout_width=None;self._pending_layout_width=None;self._resize_layout_job=None;self._topbars_compact=None
@@ -695,7 +695,7 @@ class App(ct.CTk):
         target=self.selected_window
         self.active_rules=rules
         self._native_candidate_batch=None;self._native_candidate_closed=False
-        self.candidates_button.grid_remove()
+        self.set_native_candidate_results_available(False)
         self.active_mode=mode
         self.busy=True;self.start.configure(state='disabled');self.status.configure(text='正在识别游戏界面…')
         session_root=DATA/'sessions'
@@ -714,10 +714,24 @@ class App(ct.CTk):
                          kwargs={'strategy':runtime_strategy},daemon=True).start()
     def select_candidate(self,batch_id,candidate_id):
         if self.runner:self.runner.choose_candidate(batch_id,candidate_id)
+    def set_native_candidate_results_available(self,available):
+        self._native_candidates_available=bool(available)
+        button=getattr(self,'candidates_button',None)
+        if button is None:return
+        if self._native_candidates_available:
+            button.grid(row=2,column=0,padx=18,pady=(0,8),sticky='w')
+        else:
+            # CTk replays its last grid() on scaling. grid_forget() also clears
+            # that record, so an unavailable result cannot reappear after DPI
+            # or density changes; showing supplies the complete layout again.
+            button.grid_forget()
     def show_native_candidate_results(self):
-        if not self.busy and self.overlay is not None:self.overlay.reopen_native_candidates()
+        if not self.busy and getattr(self,'_native_candidates_available',False) and self.overlay is not None:
+            self.overlay.reopen_native_candidates()
     def stop(self):
         if self.runner:self.runner.stop.set()
+        self._native_candidate_closed=True
+        self.set_native_candidate_results_available(False)
         self.status.configure(text='正在停止并释放鼠标…' if self.busy else '已停止自动染色，可重新开始。')
         if self.overlay is not None:self.overlay.dismiss()
     def finish_run(self):
@@ -726,7 +740,7 @@ class App(ct.CTk):
         if stopped:
             self.status.configure(text='已停止自动染色，可重新开始。')
             if self.overlay is not None:self.overlay.dismiss()
-            if getattr(self,'candidates_button',None) is not None:self.candidates_button.grid_remove()
+            self.set_native_candidate_results_available(False)
     def hotkey_loop(self):
         keys=[(1,0x77),(2,0x78)]
         if not getattr(sys,'frozen',False):keys.append((5,0x75))
@@ -795,7 +809,7 @@ class App(ct.CTk):
             if measured.get('verified'):
                 for card,color in zip(self.cards,measured.get('actual_colors') or []):
                     card.current.configure(text=tr('当前颜色  ')+(color or tr('读取失败')))
-            if getattr(self,'candidates_button',None) is not None:self.candidates_button.grid()
+            self.set_native_candidate_results_available(bool(d.get('candidates')))
         elif k in ('native_candidate_selected','native_candidate_closed'):
             if d.get('batch_id')!=getattr(self,'_native_candidate_batch',None):return
             status=d.get('status')

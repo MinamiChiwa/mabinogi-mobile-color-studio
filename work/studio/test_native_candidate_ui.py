@@ -4,6 +4,7 @@ import sys
 import threading
 import types
 import unittest
+from unittest.mock import patch
 
 import app
 import i18n
@@ -64,6 +65,46 @@ class NativeCandidateUITests(unittest.TestCase):
                 result.append(str(child.cget('text')))
             result.extend(self.labels(child))
         return result
+
+    def test_no_candidate_button_stays_hidden_after_initial_scaling_and_reflow(self):
+        self.assertFalse(self.ui.candidates_button.winfo_ismapped())
+        for scaling in (1.25, 1.5, 1.):
+            app.ct.set_widget_scaling(scaling)
+            app.ct.set_window_scaling(scaling)
+            self.ui.reflow(900)
+            self.helper.pump(.03)
+            self.assertFalse(self.ui.candidates_button.winfo_ismapped(),
+                             f'No-candidate button reappeared at scaling {scaling}')
+        data = candidates()
+        data['candidates'] = []
+        data['observations'] = {}
+        data['current_candidate_id'] = None
+        self.emit('native_candidates', data)
+        self.assertFalse(self.ui.candidates_button.winfo_ismapped())
+
+    def test_stop_hides_candidate_button_immediately_and_scaling_cannot_restore_it(self):
+        self.emit('native_candidate_ready', candidates())
+        self.assertTrue(self.ui.candidates_button.winfo_ismapped())
+        self.ui.stop()
+        self.helper.pump(.02)
+        self.assertFalse(self.ui.candidates_button.winfo_ismapped())
+        app.ct.set_widget_scaling(1.25)
+        self.ui.reflow(900)
+        self.helper.pump(.02)
+        self.assertFalse(self.ui.candidates_button.winfo_ismapped())
+
+    def test_new_run_clears_previous_candidate_button_before_worker_start(self):
+        self.emit('native_candidate_ready', candidates())
+        self.emit('native_candidate_closed', dict(batch_id='native-batch', reason='deadline'))
+        self.emit('finished', {})
+        self.assertTrue(self.ui.candidates_button.winfo_ismapped())
+        with patch.object(app, 'build_runner', side_effect=RuntimeError('Isolated startup')):
+            self.ui.go()
+        app.ct.set_widget_scaling(1.25)
+        self.ui.reflow(900)
+        self.helper.pump(.02)
+        self.assertIsNone(self.ui._native_candidate_batch)
+        self.assertFalse(self.ui.candidates_button.winfo_ismapped())
 
     def test_ready_enables_only_affordable_alternatives_and_keeps_rank_order(self):
         data = candidates()

@@ -6,6 +6,10 @@ Policy: `native-ranked-candidate-selection-v17`. This candidate has not been pub
 
 Frozen release profile:604 tests,603 passed,1 optional private OCR fixture skipped,zero failures/errors;221.860s total. Final delta checks:81 passed,zero skips/failures/errors;62.852s total. The delta covers 20 candidate contracts, initialization, service events, user wording, translation and actual measured recovery. Nine isolated native candidate Tk cases plus two existing hit-testing cases passed, including live language switching, stale batches, read-only reopening and main-control release. No new live game read, input or dye item was used. This validates local behavior and packaging contracts; real candidate switching and the remote PC's discovery speed remain unverified.
 
+Packaged startup exposed CTk scaling replaying a hidden result button's old grid call. The follow-up clears layout history with grid_forget and keeps explicit candidate availability; initial, stopped and new-run states cannot show stale candidates after scaling. Three reproduced failures plus the existing completion/reopen case passed after the fix. NativeResizeSurface and search budgets were not changed.
+
+Final UI follow-up:20 candidate/Tk completion/runtime-language checks passed in64.878s,zero failures/errors. The final package is checked against the follow-up source fingerprint.
+
 The separate initial discovery fix resumes bounded heap scan slices, preserves phase diagnostics and requires full candidate revalidation. Exact repeated uninitialized markers preserve the previously verified fresh-process waiting behavior. A final unreadable candidate remains unknown and cannot establish uniqueness. Seventy-six focused initialization and related IO contracts passed; this does not prove the remote PC's discovery speed. See `docs/research/initial-discovery-timeout-2026-10-11.md`.
 
 ## Pre-candidate 0.4.1: Two-region dye boards (2026-10-11)
