@@ -8,6 +8,8 @@ Ordinary-screen read-only validation on the user's restarted game emitted armed,
 
 Final quick regression:581 tests,580 passed,1 optional private OCR skipped,zero failures/errors;68.922s total. Thirty-six candidate/overlay completion, atlas, two-region and language checks passed separately. No production search budget was increased. Invalid-address classification was independently reviewed and40 literal-reader/discovery cases passed; no confirmed blocker was found.
 
+Final copy change hides memory-read metrics from the overlay while retaining them in diagnostic files. Forty-nine related presentation, language, service and discovery checks passed after that change. The final executable is matched to the updated source fingerprint.
+
 ## Candidate 0.4.1rc1: Ranked native alternatives (2026-10-11)
 
 Policy: `native-ranked-candidate-selection-v17`. This candidate has not been published. Native candidates remain in the same bound session and IO lifecycle; a target hit no longer removes other audited choices. Explicit choices recompile from measured state with protected returns, and final acceptance uses current actual HEX. The topmost selection surface is interactive without activation; execution remains pass-through. Completion restores main controls and provides a read-only list. Simplified Chinese, Traditional Chinese and English copy is synchronized.

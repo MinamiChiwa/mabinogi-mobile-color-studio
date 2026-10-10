@@ -1,7 +1,7 @@
 """Presentation-only progress: counts describe actual work, never fake percentages."""
 STAGES={
     'native_validate':'检查当前色板',
-    'discovery':'扫描色板实例',
+    'discovery':'准备寻色',
     'waiting':'等待染色界面','zoom':'识别与缩放','capture':'采集颜色板',
     'align':'对齐采集画面','period':'测量色板周期','stitch':'拼接全局颜色板',
     'export':'保存颜色板','validate':'检查拼图质量','search':'搜索目标颜色',
@@ -14,20 +14,10 @@ def progress_text(data):
     title=STAGES.get(data.get('stage'),'正在按目标计算，请稍候。')
     if data.get('total'):title+=f"  {data.get('current',0)}/{data['total']}"
     body=data.get('message') or (
-        '正在准备只读扫描，暂时不要进入染色界面；等提示就绪后再开始。F9 可停止。' if data.get('stage')=='discovery' else
+        '正在准备寻色，暂时不要进入染色界面；等提示就绪后再开始。F9 可停止。' if data.get('stage')=='discovery' else
         '等待手动进入染色倒计时；F9 可停止。' if data.get('stage')=='waiting' else
         '图像处理中，鼠标暂时不动是正常现象。' if data.get('stage') in ('align','period','stitch','export','validate','search','similarity','ready') else
         '根据图像实测位移校正；F9随时停止。')
-    discovery=data.get('discovery')
-    if data.get('stage') in ('discovery','waiting') and isinstance(discovery,dict):
-        scanned=discovery.get('bytes_scanned',0)
-        regions=discovery.get('regions_visited',0)
-        eligible=discovery.get('eligible_addresses',[])
-        if type(scanned) is int and type(regions) is int and isinstance(eligible,list):
-            body+='\n已读取 '+f'{scanned/1048576:.1f} MiB · 内存区域 '+str(regions)
-            body+=' · 活动候选 '+str(len(eligible))
-            errors=discovery.get('candidate_read_failures',0)+discovery.get('read_failures',0)
-            if errors:body+=' · 未完成读取 '+str(errors)
     return title,body
 
 

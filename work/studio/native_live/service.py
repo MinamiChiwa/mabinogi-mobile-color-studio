@@ -114,7 +114,7 @@ def run_native_search(owner,rules,*,mode='search',target=None,activate=False,**u
             owner.event(name,**{key:value for key,value in row.items() if key!='event'})
             return
         message={'native_validate':'正在检查当前游戏与取色数据。','search':'正在计算可执行的目标方案。',
-            'discovery':'正在准备只读扫描，暂时不要进入染色界面；等提示就绪后再开始。F9 可停止。',
+            'discovery':'正在准备寻色，暂时不要进入染色界面；等提示就绪后再开始。F9 可停止。',
             'position':'正在调整色板。','verify':'正在核对当前游戏色码。'}.get(stage)
         if name=='discovery_progress' and row.get('phase')=='waiting':
             stage='waiting';message='正在等待并检查活动染色板；F9 可停止。'
@@ -125,7 +125,7 @@ def run_native_search(owner,rules,*,mode='search',target=None,activate=False,**u
         if name=='action' and row.get('purpose')=='refine':message='正在细化颜色，已预留恢复时间。'
         if name=='action' and row.get('purpose')=='restore_refinement':message='正在恢复已验证的颜色。'
         if stage:
-            payload={k:v for k,v in row.items() if k not in ('event','stage','message')}
+            payload={k:v for k,v in row.items() if k not in ('event','stage','message','discovery','phase_seconds')}
             # Runner.event reserves ``kind`` for the event name. Native action
             # records also have a gesture kind, so forward it under a distinct
             # key instead of causing a duplicate-key TypeError.

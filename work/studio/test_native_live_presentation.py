@@ -56,23 +56,22 @@ class NativePresentationTests(unittest.TestCase):
     def test_discovery_progress_does_not_invite_entering_before_armed(self):
         from ui_progress import progress_text
         title,body=progress_text(dict(stage='discovery'))
-        self.assertIn('扫描',title)
+        self.assertIn('准备',title)
         self.assertIn('暂时不要进入',body)
 
-    def test_discovery_reports_actual_work_and_distinguishes_unreadable_candidates(self):
+    def test_discovery_keeps_memory_reading_details_out_of_user_status(self):
         from ui_progress import progress_text
         title,body=progress_text(dict(stage='discovery',discovery=dict(bytes_scanned=33554432,
             regions_visited=256,eligible_addresses=['0x10000'],candidate_read_failures=2)))
-        self.assertIn('32.0',body);self.assertIn('256',body)
-        self.assertIn('1',body);self.assertIn('2',body)
-        self.assertNotIn('%',body)
+        self.assertEqual((title,body),progress_text(dict(stage='discovery')))
+        self.assertNotIn('MiB',body);self.assertNotIn('0x10000',body)
 
     def test_discovery_read_failure_is_explicit_and_fully_localized(self):
         import i18n
         original=i18n.language
         try:
             title,body=self.module().result_text(dict(verified=False,stop_reason='discovery_read_failure'))
-            self.assertIn('读取',title)
+            self.assertIn('准备',title)
             self.assertIn('普通界面',body)
             self.assertNotIn('未检测到',title)
             i18n.set_language('English')
