@@ -54,8 +54,9 @@ def refinement_translation(motion,points,tolerance):
 
 def score_codes(codes, rules):
     """Rank all enabled regions, retaining exact/tolerance acceptance rules."""
-    if len(rules)!=3 or len(codes)!=3 or not any(r['enabled'] for r in rules):
-        raise ValueError('Exactly three rules and at least one enabled region are required')
+    from dye_regions import rule_region_count
+    if len(codes)!=rule_region_count(rules) or not any(r['enabled'] for r in rules):
+        raise ValueError('Matching dye codes and enabled target rules are required')
     actual=[];deltas=[];normalized=[];violations=[]
     for code,rule in zip(codes,rules):
         if not rule['enabled']:

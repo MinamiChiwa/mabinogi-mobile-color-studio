@@ -3,6 +3,7 @@
 No process reads or input output. Wheel pairs are scored as a whole, allowing
 their first event to worsen error. This is not a settled-pose/live predictor.
 """
+from dye_regions import validate_region_rules
 import copy
 import math
 import time
@@ -95,7 +96,7 @@ def search_native_input_routes(session, routes, reference, geometry, settings, r
     if reference!=_pose(session['initial_pose']):raise ValueError('Search reference must be the saved initial pose')
     routes=list(routes)
     if not routes or len(routes)>64:raise ValueError('One to 64 explicit seed routes required')
-    if len(rules)!=3 or not any(r['enabled'] for r in rules):raise ValueError('Enabled three-region rules required')
+    validate_region_rules(session,rules)
     seeds=[]
     l,t,r,b=geometry.board
     for route in routes:

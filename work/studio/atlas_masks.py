@@ -19,8 +19,8 @@ def board_markers(scene):
     """Return marker coordinates in the local board-crop coordinate system."""
     left, top, right, bottom = map(int, _field(scene, 'board'))
     markers = np.asarray(_field(scene, 'markers'), dtype=float) - (left, top)
-    if markers.shape != (3, 2) or not np.isfinite(markers).all():
-        raise ValueError("Expected three finite colour-pick markers")
+    if markers.shape not in ((2,2),(3,2)) or not np.isfinite(markers).all():
+        raise ValueError("Expected two or three finite colour-pick markers")
     spacing = float(markers[1, 0] - markers[0, 0])
     if spacing <= 0:
         raise ValueError("Colour-pick markers must be ordered left to right")
@@ -39,7 +39,9 @@ def board_texture_mask(scene, *, stem_half_width=None, ring_radius=None,
     """
     markers, spacing, (w, h) = board_markers(scene)
     y, x = np.mgrid[:h, :w]
-    unit = spacing / 166.
+    # A two-region board has wider columns at the same window scale. Its
+    # connector/ring size still follows the whole board, not that extra gap.
+    unit = spacing * len(markers) / (3 * 166.)
     radius = max(1, round(18 * unit)) if ring_radius is None else int(ring_radius)
     half = max(max(1, round(18 * unit)), radius) if stem_half_width is None else int(stem_half_width)
     edge_margin = max(1, round(8 * unit)) if edge_margin is None else int(edge_margin)
@@ -70,9 +72,9 @@ def board_texture_mask(scene, *, stem_half_width=None, ring_radius=None,
 
 def material_masks(scene, *, stem_half_width=None, ring_radius=None,
                    edge_margin=None, seam_half_width=None, side_margin=None):
-    """Return three same-material masks using the shared texture exclusion."""
+    """Return one same-material mask per actual colour-pick marker."""
     markers, spacing, _ = board_markers(scene)
-    side_margin = max(1, round(8 * spacing / 166)) if side_margin is None else int(side_margin)
+    side_margin = max(1, round(8 * spacing * len(markers) / (3 * 166))) if side_margin is None else int(side_margin)
     clean = board_texture_mask(scene, stem_half_width=stem_half_width,
                                ring_radius=ring_radius, edge_margin=edge_margin,
                                seam_half_width=seam_half_width)
@@ -110,8 +112,8 @@ def save_mask_overlay(image, masks, path):
 
 def mask_summary(masks):
     masks = np.asarray(masks, dtype=bool)
-    if masks.ndim != 3:
-        raise ValueError("Expected three material masks")
+    if masks.ndim != 3 or len(masks) not in (2,3):
+        raise ValueError("Expected two or three material masks")
     return [dict(region=i + 1, valid_pixels=int(row.sum()),
                  coverage=float(row.mean())) for i, row in enumerate(masks)]
 

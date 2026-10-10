@@ -14,6 +14,7 @@ class MeasuredAtlas:
         self.capture_offset=np.asarray(capture_offset,float)
         self.basis=self.pose[:2,:2]@atlas.basis
         self.resolution=atlas.resolution
+        self.regions=getattr(atlas,'regions',3)
 
     def sample(self, region, points):
         source=(np.asarray(points)-self.pose[:2,2])@self.inverse[:2,:2].T
@@ -27,7 +28,7 @@ def reachable_candidates(atlas, capture_offset, actual_pose, markers, board, rul
 
     actual_pose is relative to the execution reference. reference_pose maps
     the capture frame to that reference, including after a user selection.
-    All three material masks and the existing colour ranking remain in use.
+    All actual material masks and the existing colour ranking remain in use.
     """
     actual=homogeneous(actual_pose)
     reference=np.eye(3) if reference_pose is None else homogeneous(reference_pose)
@@ -62,8 +63,8 @@ def nearby_zoom_detent_proposals(candidate, actual_pose, board, markers, rules, 
     actual=homogeneous(actual_pose);target=candidate_pose(candidate,board)
     points=np.asarray(markers,float)-np.asarray(board[:2],float)
     active=[i for i,r in enumerate(rules) if r.get('enabled')]
-    if (points.shape!=(3,2) or not np.isfinite(points).all() or
-            len(rules)!=3 or not active or wheel_direction not in (-1,0,1)):
+    if (len(rules) not in (2,3) or points.shape!=(len(rules),2) or not np.isfinite(points).all() or
+            not active or wheel_direction not in (-1,0,1)):
         raise ValueError('Invalid zoom detent geometry')
     start_scale=float(np.hypot(actual[0,0],actual[1,0]))
     target_scale=float(np.hypot(target[0,0],target[1,0]))

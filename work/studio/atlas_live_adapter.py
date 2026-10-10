@@ -55,7 +55,7 @@ def acquire_current(_owner, _rules, capture_dir, entry=None, strategy='grid', en
     artifact=acquire(folder,None,strategy=strategy,
                      stop=_owner.stop,target=context.get('target'),
                       activate=bool(context.get('activate',False)),entry_size=entry_size,
-                      emit=getattr(_owner,'event',None),row_stagger=.05)
+                      emit=getattr(_owner,'event',None),row_stagger=.05,rules=_rules)
     artifact['progress']=lambda **data:_owner.event('atlas_progress',**data)
     return artifact
 
@@ -179,8 +179,8 @@ def observe_current(owner, captured, rules, *, reason=None, selection_deadline=N
     observed_frames=0
     def unknown(detail):
         return dict(candidate_id=None,verified=False,accepted=False,observed_accepted=False,
-                    actual_colors=[None]*3,actual_deltas=[None]*3,maximum=None,average=None,
-                    predicted_colors=[None]*3,predicted_deltas=[None]*3,
+                    actual_colors=[None]*len(rules),actual_deltas=[None]*len(rules),maximum=None,average=None,
+                    predicted_colors=[None]*len(rules),predicted_deltas=[None]*len(rules),
                     actual_pose=None,marker_errors=None,pose_reliable=False,
                     positioning_complete=False,recovered=True,best_result_current=False,
                     recovery_reason=reason,observation_error=detail,

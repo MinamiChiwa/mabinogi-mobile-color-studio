@@ -117,6 +117,14 @@ TW={
 
 # Current product copy. Historical keys above only translate archived events.
 EN.update({
+'启用需要染色的区域，输入 HEX 色码、点击选色或使用屏幕吸管。替代颜色同样视为可接受的目标。工具自动识别双区域或三区域色板；本局不存在的区域不参与匹配，保存的设置仍会保留。':'Enable the regions to match. Enter HEX codes, choose colors, or use the eyedropper. Alternatives are also accepted targets. The tool detects two- or three-region boards automatically; absent regions are excluded without changing saved settings.',
+'本局不可用':'Unavailable this round',
+'当前颜色  本局不可用':'Current color · Unavailable this round',
+'最佳结果  本局不可用':'Best result · Unavailable this round',
+'已识别双区域色板':'Two-region dye board detected',
+'已识别 2 个染色区域，区域 3 本局不可用。':'Detected 2 dye regions. Region 3 is unavailable this round.',
+'本局没有已启用的可用区域':'No available regions are enabled',
+'本局没有已启用的可用区域，请启用区域 1 或 2。':'No available regions are enabled. Enable Region 1 or 2.',
 '目标色集合 · 1 色 · 点击查看全部':'Allowed colors · 1 color · View all colors',
 'F9 随时停止并释放鼠标  ·  切换窗口停止寻色  ·  不自动开启下一瓶染色剂':'F9 stops and releases the mouse · Switching windows stops search · No automatic next dye',
 '剩余操作额度不足，已保留当前颜色':'Insufficient remaining actions; current colors kept',
@@ -168,6 +176,14 @@ EN.update({
 '此方案名称已存在，请使用其他名称。':'That preset name already exists. Choose a different name.',
 })
 TW.update({
+'启用需要染色的区域，输入 HEX 色码、点击选色或使用屏幕吸管。替代颜色同样视为可接受的目标。工具自动识别双区域或三区域色板；本局不存在的区域不参与匹配，保存的设置仍会保留。':'啟用需要染色的區域，輸入 HEX 色碼、點擊選色或使用螢幕吸管。替代顏色同樣視為可接受的目標。工具自動辨識雙區域或三區域色板；本局不存在的區域不參與比對，已儲存的設定仍會保留。',
+'本局不可用':'本局無法使用',
+'当前颜色  本局不可用':'目前顏色 · 本局無法使用',
+'最佳结果  本局不可用':'最佳結果 · 本局無法使用',
+'已识别双区域色板':'已辨識雙區域色板',
+'已识别 2 个染色区域，区域 3 本局不可用。':'已辨識 2 個染色區域，區域 3 本局無法使用。',
+'本局没有已启用的可用区域':'本局沒有已啟用的可用區域',
+'本局没有已启用的可用区域，请启用区域 1 或 2。':'本局沒有已啟用的可用區域，請啟用區域 1 或 2。',
 '目标色集合 · 1 色 · 点击查看全部':'目標色集合 · 1 色 · 點擊查看全部',
 'F9 随时停止并释放鼠标  ·  切换窗口停止寻色  ·  不自动开启下一瓶染色剂':'F9 隨時停止並釋放滑鼠 · 切換視窗停止尋色 · 不自動開啟下一瓶染劑',
 '剩余操作额度不足，已保留当前颜色':'剩餘操作額度不足，已保留目前顏色',

@@ -189,6 +189,12 @@ _ERROR_EN = {
 for _technical, _english in _ERROR_EN.items():
     EN[ERROR_SOURCE[_technical]] = _english
 
+ERROR_SOURCE['Positioning did not converge at all color markers']='取色点未全部对齐，已停止自动移动。'
+EN['取色点未全部对齐，已停止自动移动。']='The color markers could not all be aligned. Automatic movement stopped.'
+TW['取色点未全部对齐，已停止自动移动。']='取色點未全部對齊，已停止自動移動。'
+EN['未识别到染色小游戏的完整色码卡片。请先进入限时染色界面。']='The complete dye color-card layout was not detected. Open the timed dye screen first.'
+TW['未识别到染色小游戏的完整色码卡片。请先进入限时染色界面。']='未辨識到染色小遊戲的完整色碼卡片，請先進入限時染色畫面。'
+
 for _axis, _cn, _tw, _en in ((0, '横向', '橫向', 'horizontal'), (1, '纵向', '縱向', 'vertical')):
     for _technical, _reason_cn, _reason_tw, _reason_en in (
         ('Insufficient validated period returns on axis', '重复周期证据不足', '重複週期的證據不足', 'Not enough evidence for the'),

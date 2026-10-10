@@ -158,7 +158,7 @@ i18n.install_widgets(ct)
 class Card(ct.CTkFrame):
     def __init__(self,parent,index):
         super().__init__(parent,width=CARD_WIDTH,height=CARD_HEIGHT,fg_color=PANEL,corner_radius=18,border_width=1,border_color='#2A3546')
-        self.index=index; self.enabled=tk.BooleanVar(value=True); self.mode=tk.StringVar(value='精准 HEX'); self.tolerance=tk.DoubleVar(value=8)
+        self.index=index;self.session_available=True; self.enabled=tk.BooleanVar(value=True); self.mode=tk.StringVar(value='精准 HEX'); self.tolerance=tk.DoubleVar(value=8)
         self.target=tk.StringVar(value='#202020'); self.alt=tk.StringVar(value='')
         self.grid_columnconfigure(0,weight=1)
         heading=ct.CTkFrame(self,fg_color='transparent')
@@ -206,12 +206,23 @@ class Card(ct.CTkFrame):
         self.enabled.trace_add('write',self.update_enabled)
         self.update_enabled()
     def update_enabled(self,*_):
-        enabled=self.enabled.get()
+        available=getattr(self,'session_available',True)
+        enabled=self.enabled.get() and available
         background='#192D35' if enabled else '#151B25'
         self.configure(fg_color=background,border_color=ACCENT if enabled else '#303A48',border_width=2 if enabled else 1)
-        self.enable_switch.configure(text='已启用' if enabled else '未启用',text_color=ACCENT if enabled else MUTED)
+        self.enable_switch.configure(text=('已启用' if enabled else '未启用') if available else '本局不可用',
+            width=95 if available else 112,text_color=ACCENT if enabled else MUTED)
         self.preview_frame.configure(fg_color=background)
-        self.swatch.configure(text='点击选色' if enabled else '未启用')
+        self.swatch.configure(text=('点击选色' if enabled else '未启用') if available else '本局不可用')
+    def set_session_available(self,available):
+        changed=self.session_available!=available
+        self.session_available=available;self.update_enabled()
+        if not available:
+            self.current.configure(text='当前颜色  本局不可用')
+            self.best_label.configure(text='最佳结果  本局不可用',fg_color='#28364A',text_color=MUTED)
+        elif changed:
+            self.current.configure(text='当前颜色  —')
+            self.best_label.configure(text='最佳结果  —',fg_color='#28364A',text_color=MUTED)
     def select_mode(self,value):
         self.mode.set('精准 HEX' if value==tr('精准 HEX') else '相似颜色');self.change_mode()
     def refresh_language(self):
@@ -358,6 +369,9 @@ class App(ct.CTk):
         self.strategy_note=ct.CTkLabel(controls,text='图像寻色：精准寻色故障时使用。',font=SMALL_FONT,
             text_color=MUTED,anchor='w',justify='left',wraplength=340,height=18)
         self.strategy_note.grid(row=2,column=0,columnspan=3,sticky='w',pady=(2,0))
+        self.region_note=ct.CTkLabel(controls,text='',font=SMALL_FONT,text_color=MUTED,
+            anchor='w',justify='left',wraplength=500,height=18)
+        self.region_note.grid(row=3,column=0,columnspan=3,sticky='w',pady=(2,0));self.region_note.grid_remove()
         status=ct.CTkFrame(self.page,fg_color=PANEL,corner_radius=14);status.grid(row=4,column=0,padx=BODY_SIDE_PADDING,pady=(4,8),sticky='ew');status.grid_columnconfigure(0,weight=1)
         self.status=ct.CTkLabel(status,text='就绪 · 请先选择游戏窗口和目标颜色',font=BODY_FONT,anchor='w',justify='left',wraplength=720,text_color=INK);self.status.grid(row=0,column=0,padx=18,pady=(12,5),sticky='ew')
         self.detail=ct.CTkLabel(status,text='',font=SMALL_FONT,text_color=MUTED,wraplength=720,anchor='w',justify='left')
@@ -469,6 +483,7 @@ class App(ct.CTk):
             self._text_wrap_width=text_wrap
             for label in (self.status,self.detail):label.configure(wraplength=text_wrap)
             self.footer.configure(wraplength=min(340,text_wrap))
+            if hasattr(self,'region_note'):self.region_note.configure(wraplength=text_wrap)
         # Keep the fixed card viewport centered in the responsive page while
         # allowing the header, controls, status and footer to span the window.
         self.page.grid_columnconfigure(0,weight=1)
@@ -526,7 +541,11 @@ class App(ct.CTk):
         save_settings(DATA/'settings.json',language=value)
     def display_best(self,row):
         self.best_summary=row
-        for c,r in zip(self.cards,row['regions']):
+        for index,c in enumerate(self.cards):
+            if not getattr(c,'session_available',True):continue
+            if index>=len(row['regions']):
+                c.best_label.configure(text='最佳结果  —',fg_color='#28364A',text_color=MUTED);continue
+            r=row['regions'][index]
             delta=r['delta'];color=r['color']
             text=f'{color or "—"} · ΔE {delta:.2f}' if delta is not None else f'{color or "—"} · 未参与匹配'
             c.best_label.configure(text=text,fg_color=color or '#28364A',text_color='#17202B' if color and sum(rgb(color))>430 else 'white')
@@ -661,6 +680,8 @@ class App(ct.CTk):
         if self.busy:
             self.status.configure(text='任务已启动，正在等待或寻色；按 F9 停止。');return
         if self.picking:return
+        for c in self.cards:c.set_session_available(True)
+        self.region_note.grid_remove()
         try:
             rules=[dict(c.rule(),priority=c.priority.get()) for c in self.cards]
             if not getattr(self,'_profile_read_failed',False) or getattr(self,'_autosave_job',None) is not None:self.flush_autosave()
@@ -734,6 +755,7 @@ class App(ct.CTk):
             prefix=tr('自动检测')+' · ' if self.selected_window is None else tr('游戏窗口 · ')
             label=prefix+d['title']
             self.window_button.configure(text=label if len(label)<=34 else label[:31]+'…')
+        elif k=='region_layout':self.apply_region_layout(d)
         elif k=='targets':
             for c,color in zip(self.cards,d['colors']):
                 c.enabled.set(True);c.target.set(color);c.alt.set('')
@@ -752,6 +774,7 @@ class App(ct.CTk):
             title,body=progress_text(d)
             self.status.configure(text=tr(title));self.set_detail(tr(body))
         elif k=='native_result':
+            if d.get('region_count') in (2,3):self.apply_region_layout(d)
             from native_status import result_text
             title,detail=result_text(d)
             self.status.configure(text=tr(title));self.set_detail(tr(detail))
@@ -819,6 +842,18 @@ class App(ct.CTk):
                 message=d['message']+'\n\n当前颜色：'+' / '.join(c or '未识别' for c in d.get('colors',[]))
                 self.after(100,lambda m=message,o=d.get('outcome'):messagebox.showinfo(tr('流程完成 · '+('妥协结果' if o=='compromise' else '目标达标')),tr(m),parent=self))
         elif k=='finished':self.finish_run()
+    def apply_region_layout(self,data):
+        from dye_regions import region_count
+        count=region_count(data['region_count'])
+        rules=data.get('rules')
+        if not isinstance(rules,(list,tuple)) or len(rules)!=count:
+            raise ValueError('Target rules do not match the actual dye regions')
+        self.active_rules=json.loads(json.dumps(rules))
+        self.active_region_count=count
+        for index,card in enumerate(self.cards):card.set_session_available(index<count)
+        if count==2:
+            self.region_note.configure(text='已识别 2 个染色区域，区域 3 本局不可用。');self.region_note.grid()
+        else:self.region_note.grid_remove()
     def close(self):
         if self.busy:self.stop();self.after(250,self.close)
         else:

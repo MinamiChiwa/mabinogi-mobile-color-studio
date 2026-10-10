@@ -19,15 +19,15 @@ from input_gestures import PointerGesture
 from .compromise import predicted_quality,choose_compromise
 from native_periodic_search import search_periodic_targets
 from native_periodic_route import compile_periodic_approach
+from dye_regions import region_count, rule_region_count, session_region_count, validate_region_rules
 
 POLICY='all_recorded_points'
 PLAN_OBSERVATION_MAX_AGE_SECONDS=15.
 
 
 def normalize_target_rules(rules):
-    """Own a canonical, strictly typed three-region target; no silent coercion."""
-    if not isinstance(rules,(list,tuple)) or len(rules)!=3:
-        raise ValueError('Exactly three target rules required')
+    """Own canonical, strictly typed actual-layout targets; no silent coercion."""
+    rule_region_count(rules)
     owned=[]
     from region_priority import priority_indices
     priority_indices(rules)
@@ -59,6 +59,7 @@ def _json(value):
 
 def _fingerprint(context):
     session=context['session']
+    session_region_count(session)
     data={k:context[k] for k in ('checkpoint_binding','board','local_size','settings',
         'wheel_delta_per_step','input_coordinate_convention','calibration_evidence')}
     if context.get('pixel_mapping') is not None:
@@ -82,8 +83,11 @@ def _checked_checkpoint(context, checkpoint):
     if _json(checkpoint.get('pixel_mapping')) != _json(context.get('pixel_mapping')):
         raise ValueError('Checkpoint physical pixel mapping changed')
     codes=checkpoint.get('client_hex')
-    if not isinstance(codes,(list,tuple)) or len(codes)!=3 or any(not isinstance(c,str) or not re.fullmatch(r'#[0-9A-F]{6}',c) for c in codes):
-        raise ValueError('Three observed HEX values required')
+    count=session_region_count(context['session'])
+    if checkpoint.get('region_count',count)!=count or checkpoint.get('actual_count',count)!=count:
+        raise ValueError('Checkpoint dye region count changed')
+    if not isinstance(codes,(list,tuple)) or len(codes)!=count or any(not isinstance(c,str) or not re.fullmatch(r'#[0-9A-F]{6}',c) for c in codes):
+        raise ValueError('Observed HEX values must match the actual dye layout')
     pose=_pose(checkpoint['pose'])
     rules=[dict(enabled=True,exact=True,colors=[c],tolerance=0) for c in codes]
     if score_native_pose(context['session'],pose,rules)['colors']!=list(codes):
@@ -130,10 +134,16 @@ EXECUTION_RESERVE_SECONDS=10.
 def _frames(checkpoint, frames):
     if not isinstance(frames,(list,tuple)) or len(frames)!=2:
         raise ValueError('Two independent screenshot reads required')
+    count=region_count(len(checkpoint['client_hex']))
     previous=None
     for frame in frames:
         if frame.get('hex')!=checkpoint['client_hex']:
             raise ValueError('Screenshot and checkpoint HEX disagree')
+        for key in ('screenshot_hex','hex_source','cards','markers'):
+            if key in frame and len(frame[key])!=count:
+                raise ValueError('Screenshot region count differs from checkpoint')
+        if frame.get('region_count',count)!=count:
+            raise ValueError('Screenshot dye region count changed')
         seconds=None if frame.get('timer_advisory') is True else frame.get('remaining_seconds')
         when=frame.get('captured_monotonic')
         if (seconds is not None and (type(seconds) is not int or not 1<=seconds<=120)) or type(when) not in (int,float) or not math.isfinite(when) or when<=0:
@@ -175,7 +185,7 @@ def assess_feedback(context, checkpoint, frames, rules, *, expected_pose=None):
     result=assess_native_feedback(context,checkpoint,rules,expected_pose=expected_pose)
     result['screenshot_verified']=all(
         frame.get('screenshot_hex',frame['hex'])[i]==checkpoint['client_hex'][i] and
-        frame.get('hex_source',['screenshot']*3)[i]=='screenshot'
+        frame.get('hex_source',['screenshot']*len(rules))[i]=='screenshot'
         for frame in frames for i,rule in enumerate(rules) if rule['enabled'])
     if result['observed_target_accepted'] and not result['screenshot_verified']:
         result.update(observed_target_accepted=False,stop_reason='target_visual_unconfirmed')
@@ -186,8 +196,7 @@ def assess_native_feedback(context, checkpoint, rules, *, expected_pose=None):
     """Intermediate bound native readback, never a screenshot success claim."""
     rules=normalize_target_rules(rules)
     pose=_checked_checkpoint(context,checkpoint)
-    if len(rules)!=3 or not any(r['enabled'] for r in rules):
-        raise ValueError('Three rules with an enabled target required')
+    validate_region_rules(context['session'],rules)
     score=score_codes(checkpoint['client_hex'],rules)
     status='target_observed' if score['accepted'] else 'replan_required'
     errors=None

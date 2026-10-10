@@ -17,7 +17,7 @@ def inspect(r,a,cls):
  controller=r.u64(a+fs['<TransitionController>k__BackingField']);state=struct.unpack('<i',r.read(controller+20,4))[0]
  material=r.u64(data+df['SharedMaterial']);native_material=r.u64(material+16)
  active_result=r.u64(a+fs['<Result>k__BackingField'])
- return {'address':hex(a),'data':hex(data),'native_textures':[hex(x) for x in natives],'live_textures':all(natives),'native_material':hex(native_material),'controller_state':state,'active_result':hex(active_result),'capture_eligible':all(natives) and bool(native_material) and bool(active_result) and state==2}
+ return {'address':hex(a),'data':hex(data),'region_count':count,'native_textures':[hex(x) for x in natives],'live_textures':all(natives),'native_material':hex(native_material),'controller_state':state,'active_result':hex(active_result),'capture_eligible':all(natives) and bool(native_material) and bool(active_result) and state==2}
 def scan(r,capture=False):
  cls=r.u64(r.base+0x106c9010);pattern=struct.pack('<Q',cls);hits=[];saved=[];seen=set();total=0;t=time.perf_counter()
  for region in r.regions():

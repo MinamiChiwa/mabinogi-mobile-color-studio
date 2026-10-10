@@ -195,6 +195,17 @@ class AtlasService:
         emit('atlas_status',message='正在采集本局颜色板。')
         try:
             captured=self.callbacks.acquire(owner,rules,**context)
+            scene=captured.get('scene') if isinstance(captured,dict) else None
+            if scene is not None and hasattr(scene,'cards'):
+                from dye_regions import region_count,bind_region_rules
+                count=region_count(len(scene.cards))
+                effective=deepcopy(list(rules[:count]))
+                emit('region_layout',region_count=count,available_regions=[i<count for i in range(3)],rules=effective)
+                if not any(r.get('enabled') for r in effective):
+                    emit('atlas_recovery_unavailable',message='本局没有已启用的可用区域，请启用区域 1 或 2。')
+                    return dict(stop_reason='no_available_regions',region_count=count,actual_input_attempts=0,
+                                verified=False,accepted=False,actual_colors=[None]*count,actual_deltas=[None]*count)
+                rules=bind_region_rules(rules,count)
         except Exception as exc:
             if _is_safety_interrupt(exc):raise
             emit('atlas_recovery_unavailable',

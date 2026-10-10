@@ -590,7 +590,7 @@ def wait_for_dye_board(g, stop, *, started=None, log=lambda *a,**k:None,
                 ready_at=ready_at,budget=budget)
 
 
-def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=False,entry_size=None,emit=None,row_stagger=0.,response_protocol='baseline',settling_probes=False,probe_cycles=3,probe_anchors=None):
+def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=False,entry_size=None,emit=None,row_stagger=0.,response_protocol='baseline',settling_probes=False,probe_cycles=3,probe_anchors=None,rules=None):
     if not np.isfinite(row_stagger) or not 0 <= row_stagger <= .1:
         raise ValueError('row_stagger must be between 0 and 0.1')
     if (response_protocol not in ('baseline','rotation_compare','zoom_reversibility') or
@@ -668,6 +668,17 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
             verify_countdown=strategy in ("grid","probe","response"))
         scene=ready["scene"];im=ready["image"];game_deadline=ready["game_deadline"]
         ready_at=ready["ready_at"];budget=ready["budget"]
+        if rules is not None:
+            from copy import deepcopy
+            from dye_regions import region_count,bind_region_rules
+            count=region_count(len(scene.cards))
+            effective=deepcopy(list(rules[:count]))
+            if emit:emit('region_layout',region_count=count,available_regions=[i<count for i in range(3)],rules=effective)
+            log('region_binding',region_count=count,available_regions=list(range(count)),rules=effective)
+            if not any(rule.get('enabled') for rule in effective):
+                raise ValueError('本局没有已启用的可用区域，请启用区域 1 或 2。')
+            rules=bind_region_rules(rules,count)
+        detected_count=len(scene.cards) if len(scene.cards) in (2,3) else None
         if strategy in ("grid","probe","response"):
             # Probe the game's own zoom limit in short bursts.  Capturing and
             # recognizing every single notch made acquisition unnecessarily
@@ -689,7 +700,7 @@ def acquire(folder,entry=None,strategy='legacy',stop=None,target=None,activate=F
                 candidate_im=g.capture()
                 zoom_timing['capture_seconds']+=time.monotonic()-tick
                 tick=time.monotonic()
-                try:candidate=recognize(candidate_im,with_ocr=False,previous=scene)
+                try:candidate=recognize(candidate_im,with_ocr=False,previous=scene,region_count=detected_count)
                 except (ValueError,RuntimeError):
                     zoom_timing['recognition_seconds']+=time.monotonic()-tick
                     zoom_stop_reason='recognition_failed'

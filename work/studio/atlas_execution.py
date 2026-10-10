@@ -483,7 +483,7 @@ def verify_result(candidate,actual,rules):
     from color_family import family_priority, family_fields
     from region_priority import priority_fields
     from vision import rgb
-    if len(actual)!=3 or any(r['enabled'] and actual[i] is None for i,r in enumerate(rules)):
+    if len(rules) not in (2,3) or len(actual)!=len(rules) or any(r['enabled'] and actual[i] is None for i,r in enumerate(rules)):
         raise RuntimeError('Game HEX could not be read reliably')
     deltas=[error(actual[i],r['colors'],False) if r['enabled'] else None for i,r in enumerate(rules)]
     prediction_errors=[error(actual[i],[candidate['colors'][i]],False)
@@ -518,7 +518,7 @@ def _refresh_prediction(adapter,candidate,actual,rules,emit):
         refreshed=None;failure=str(exc)
     adapter.check()
     if refreshed is None:
-        candidate=dict(candidate,colors=[None]*3,deltas=[None]*3,
+        candidate=dict(candidate,colors=[None]*len(rules),deltas=[None]*len(rules),
                        accepted=False,prediction_pose=None,
                        prediction_pose_source=('rescore_failed' if failure else 'unsupported_measured_pose'))
     else:candidate=refreshed
@@ -722,8 +722,8 @@ def _recover_current_result(adapter, candidate, rules, actual, markers, target,
             marker_errors=marker_errors(target,actual,markers).tolist(),
             verified=False,accepted=False,pose_reliable=True,recovered=True,
             positioning_complete=False,recovery_reason=str(reason),
-            actual_colors=[None]*3,actual_deltas=[None]*3,
-            predicted_colors=[None]*3,predicted_deltas=[None]*3)
+            actual_colors=[None]*len(rules),actual_deltas=[None]*len(rules),
+            predicted_colors=[None]*len(rules),predicted_deltas=[None]*len(rules))
     pose_observation=None
     if pose_current and actual is not None and pose_frame is not None:
         pose_observation=pose_only()
@@ -758,7 +758,7 @@ def _recover_current_result(adapter, candidate, rules, actual, markers, target,
             return pose_observation
         # The interrupted route did not reach the proposal. Its colours cannot
         # be used as a prediction of this read-only recovery observation.
-        observation=dict(candidate,colors=[None]*3,deltas=[None]*3)
+        observation=dict(candidate,colors=[None]*len(rules),deltas=[None]*len(rules))
         result = verify_result(observation, second, rules)
         result.update(proposal_colors=deepcopy(candidate['colors']),
                       prediction_pose_source='unverified_recovery_pose')
@@ -796,11 +796,11 @@ def _recover_current_result(adapter, candidate, rules, actual, markers, target,
         emit('atlas_recovery', dict(
             candidate_id=candidate['id'], reason=str(reason),
             actual_pose=pose, marker_errors=errors,
-            predicted_colors=result.get('predicted_colors', [None] * 3),
-            predicted_deltas=result.get('predicted_deltas', [None] * 3),
-            actual_colors=result.get('actual_colors', [None] * 3),
-            actual_deltas=result.get('actual_deltas', [None] * 3),
-            prediction_errors=result.get('prediction_errors', [None] * 3),
+            predicted_colors=result.get('predicted_colors', [None] * len(rules)),
+            predicted_deltas=result.get('predicted_deltas', [None] * len(rules)),
+            actual_colors=result.get('actual_colors', [None] * len(rules)),
+            actual_deltas=result.get('actual_deltas', [None] * len(rules)),
+            prediction_errors=result.get('prediction_errors', [None] * len(rules)),
             maximum=result.get('maximum'), average=result.get('average'),
             **{k:result[k] for k in ('region_priority',) if k in result},
             accepted=False, observed_accepted=observed_accepted, verified=True,
@@ -1166,7 +1166,7 @@ def execute_candidate(adapter,batch,batch_id,candidate_id,reference,rules,emit=l
                  bound_route_marker_errors=route_errors.tolist() if route_errors is not None else None,
                  marker_errors=marker_errors(target,actual,markers).tolist()))
         errors=marker_errors(target,actual,markers)
-        if np.max(errors)>POSITION_TOLERANCE:raise RuntimeError('Positioning did not converge at all three markers')
+        if np.max(errors)>POSITION_TOLERANCE:raise RuntimeError('Positioning did not converge at all color markers')
         adapter.check()
         if clock()>=batch.deadline:raise CandidateExpired('No time for HEX verification')
         emit('atlas_progress',dict(stage='verify'))

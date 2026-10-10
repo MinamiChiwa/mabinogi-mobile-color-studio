@@ -3,6 +3,7 @@
 
 def result_text(data):
     reason=data.get('stop_reason')
+    if reason=='no_available_regions':return ('本局没有已启用的可用区域','本局没有已启用的可用区域，请启用区域 1 或 2。')
     if data.get('verified') and data.get('accepted') and reason=='target_observed':
         return ('目标 HEX 已精确匹配' if data.get('target_exact') else '目标颜色已在容差内匹配',
                 '游戏色码已复核，请在游戏内手动确认是否套用。')

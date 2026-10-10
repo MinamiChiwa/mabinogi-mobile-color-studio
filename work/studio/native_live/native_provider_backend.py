@@ -2,6 +2,7 @@
 import sys, struct, hashlib, ctypes, time, math, json
 import numpy as np
 from pathlib import Path
+from dye_regions import region_count,session_region_count
 from .runtime_read import Reader, K
 from .capture_dye_state import checked_object, mm_items, snapshot
 from .scan_live_dye import inspect, scan
@@ -101,9 +102,15 @@ class CurrentBuildBackend:
         before = r.read(result + 16, 16)
         data = r.u64(address + fields['data'])
         df = checked_object(r, data, 'Client.CodeGenerated.UI.DyeingPaletteControlData')
-        array, count = mm_items(r, r.u64(data + df['PaletteFragmentDataList']))
-        if count != 3:
-            raise ValueError('Only three-fragment layout validated')
+        fragment_list = r.u64(data + df['PaletteFragmentDataList'])
+        array, count = mm_items(r, fragment_list)
+        count = region_count(count)
+        if len(state['native_textures']) != count:
+            raise ValueError('Fragment and texture region counts disagree')
+        colors_list = r.u64(address + fields['colorPickerColors'])
+        color_array, color_count = mm_items(r, colors_list)
+        if color_count != count:
+            raise ValueError('Fragment and picker color region counts disagree')
         fingerprints = []
         for i in range(count):
             fragment = r.u64(array + 32 + i * 8)
@@ -118,12 +125,16 @@ class CurrentBuildBackend:
                                  r.read(fragment + ff['NormalizedPositionY'], 4).hex()))
         ratio = r.read(data + df['ColorPreserveRatio'], 4).hex()
         after = r.read(result + 16, 16)
-        if before != after or state != inspect(r, address, cls):
+        if (before != after or state != inspect(r, address, cls)
+                or fragment_list != r.u64(data + df['PaletteFragmentDataList'])
+                or mm_items(r, fragment_list) != (array, count)
+                or colors_list != r.u64(address + fields['colorPickerColors'])
+                or mm_items(r, colors_list) != (color_array, count)):
             raise ValueError('Palette changed during probe')
         x,y,scale,rotation = struct.unpack('<4f', after)
         token = (address, data, state['active_result'], tuple(state['native_textures']), state['native_material'],
                  tuple(fingerprints), ratio)
-        return dict(active=True, session_token=token,
+        return dict(active=True, session_token=token,region_count=count,
                     pose=dict(position=[x,y], scale=scale, rotation_degrees=rotation))
 
     def capture(self, address, deadline, check):
@@ -141,33 +152,37 @@ class CurrentBuildBackend:
             if clock()>=deadline:raise TimeoutError('Validation capture deadline expired')
         guard();identity=self.process_identity();before=self.probe(address,deadline,guard)
         if before.get('active') is not True:raise ValueError('No active palette for validation capture')
+        count=region_count(before['region_count'])
         self.reader.guard=guard;started=clock()
         folder,record=snapshot(self.reader,address,'validation_capture',output_root=self.output_root)
         folder=Path(folder);binding_file=folder/'validation_binding.json'
         binding=dict(session_binding_verified=False,ready_for_input=False,screenshot_hex_verified=False,
-            server_confirmation_verified=False,process_identity=identity,session_token=before['session_token'])
+            server_confirmation_verified=False,process_identity=identity,session_token=before['session_token'],region_count=count)
         binding_file.write_text(json.dumps(binding,indent=2),encoding='utf-8')
         try:
             guard();after=self.probe(address,deadline,guard)
             if (after.get('active') is not True or after.get('session_token')!=before['session_token']
-                    or after.get('pose')!=before.get('pose')):
+                    or after.get('pose')!=before.get('pose') or after.get('region_count')!=count):
                 raise ValueError('Session/pose changed during palette export')
             if self.process_identity()!=identity:raise OSError('Process changed during palette export')
             token=after['session_token'];fragments=record['fragments']
             pose=dict(position=record['position'],scale=record['scale'],rotation_degrees=record['rotation_degrees'])
             if (record['pid']!=identity[0] or int(record['instance_address'],16)!=address
-                    or pose!=after['pose'] or len(fragments)!=3 or int(record['active_result_pointer'],16)!=int(token[2],16)):
+                    or pose!=after['pose'] or len(fragments)!=count or record.get('region_count')!=count
+                    or len(token[3])!=count or len(token[5])!=count
+                    or int(record['active_result_pointer'],16)!=int(token[2],16)):
                 raise ValueError('Export attribution/pose mismatch')
             captured=tuple((int(f['resource_object'],16),f['raw_sha256'],struct.pack('<f',f['normalized_picker_y']).hex()) for f in fragments)
             if captured!=token[5] or struct.pack('<f',record['color_preserve_ratio']).hex()!=token[6]:
                 raise ValueError('Export pixel/picker fingerprint mismatch')
             guard();session=load_session(folder);predicted=[]
+            if session_region_count(session)!=count:raise ValueError('Export session region count mismatch')
             for index,uv in enumerate(session['picker_uv']):
                 guard()
-                coord=distort_cpu_uv(picker_view_uv(index,3,uv[1],pose['position'],pose['scale'],pose['rotation_degrees']))
+                coord=distort_cpu_uv(picker_view_uv(index,count,uv[1],pose['position'],pose['scale'],pose['rotation_degrees']))
                 predicted.append(sample_cpu(session['pixels'][index],coord,session['color_preserve_ratio'])/np.float32(255))
             predicted=np.asarray(predicted,dtype=np.float32);observed=np.asarray(record['picker_colors_rgba'],dtype=np.float32)
-            if observed.shape!=(3,4) or not np.isfinite(observed).all():raise ValueError('Invalid captured client colors')
+            if observed.shape!=(count,4) or not np.isfinite(observed).all():raise ValueError('Invalid captured client colors')
             codes=lambda rows:['#%02X%02X%02X'%tuple(int(v) for v in color32(row)) for row in rows]
             predicted_hex=codes(predicted);client_hex=codes(observed[:,:3])
             difference=float(np.max(np.abs(predicted-observed[:,:3])))
@@ -325,6 +340,7 @@ class CurrentBuildBackend:
         if self.process_identity()!=identity:raise OSError('Process identity changed during motion read')
         guard()
         result=dict(active=True,ready_for_input=False,motion=motion,session_token=after['session_token'],
+                    region_count=after['region_count'],
                     process_identity=identity,read_started_monotonic=started,read_finished_monotonic=clock(),
                     missing_requirements=['runtime_geometry','scroll_calibration'],
                     execution_verified=False,game_response_verified=False,release_inertia_modelled=False)

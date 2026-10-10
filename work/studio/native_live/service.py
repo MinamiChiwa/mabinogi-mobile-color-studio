@@ -15,6 +15,7 @@ from .probe_timer import prepare_timer_assets
 from .dye_hex_glyphs import prepare_hex_assets
 from .same_session_dye_planner import normalize_target_rules
 from .controller import run_goal_loop
+from dye_regions import session_region_count,bind_region_rules
 
 
 def _prepare(pid,folder,check,hwnd=None):
@@ -86,6 +87,7 @@ def run_native_search(owner,rules,*,mode='search',target=None,activate=False,**u
     result=dict(stop_reason='not_started',verified=False,accepted=False,target_exact=False,
         actual_colors=[None]*3,actual_deltas=[None]*3,actual_input_attempts=0,server_confirmation_verified=False)
     rules=normalize_target_rules(copy.deepcopy(rules));result['rules']=rules
+    result['requested_rules']=copy.deepcopy(rules)
     u.GetAsyncKeyState.argtypes=[ctypes.c_int];u.GetAsyncKeyState.restype=ctypes.c_short
     def check():
         if owner.stop.is_set() or u.GetAsyncKeyState(0x78)&0x8000:
@@ -124,13 +126,22 @@ def run_native_search(owner,rules,*,mode='search',target=None,activate=False,**u
         if baseline['stop_reason']!='passive_baseline_collected':result['stop_reason']=baseline['stop_reason']
         else:
             check();session=load_session(baseline['capture']['capture_folder'])
+            count=session_region_count(session)
+            result.update(region_count=count,available_regions=[i<count for i in range(3)],
+                          actual_colors=[None]*count,actual_deltas=[None]*count)
+            effective=copy.deepcopy(rules[:count])
+            owner.event('region_layout',region_count=count,available_regions=result['available_regions'],rules=effective)
+            if not any(r['enabled'] for r in effective):
+                result.update(rules=effective,stop_reason='no_available_regions')
+                raise ValueError('No enabled targets exist on this dye board')
+            rules=normalize_target_rules(bind_region_rules(rules,count));result['rules']=rules
             settings=InputSettings(**baseline['baseline']['motion']['settings'])
             adapter=ProjectClosedLoopIO(backend,baseline,folder/'native-actions',stop=owner.stop)
             result.update(run_goal_loop(adapter,session,settings,rules,
                 engineering_deadline=baseline['session_deadline_monotonic'],event=event))
     except InterruptedError as exc:result.update(stop_reason='interrupted',error=str(exc))
     except (ValueError,OSError,RuntimeError) as exc:
-        result.update(stop_reason='unavailable',error=type(exc).__name__+': '+str(exc),
+        result.update(stop_reason='no_available_regions' if result.get('stop_reason')=='no_available_regions' else 'unavailable',error=type(exc).__name__+': '+str(exc),
             unavailable_reason=unavailable_reason(exc))
     except Exception as exc:result.update(stop_reason='internal_error',error=type(exc).__name__+': '+str(exc),
                                          error_traceback=traceback.format_exc())
@@ -152,5 +163,6 @@ def run_native_search(owner,rules,*,mode='search',target=None,activate=False,**u
         'stop_reason','outcome','accepted','verified','target_exact',
         'actual_colors','actual_deltas','best_actual_colors',
         'actual_input_attempts','maximum','average','restored','best_current','screenshot_verified',
-        'server_confirmation_verified','enabled_regions','rules','refinement_stop','unavailable_reason')})
+        'server_confirmation_verified','enabled_regions','rules','region_count','available_regions',
+        'refinement_stop','unavailable_reason')})
     return result

@@ -3,6 +3,7 @@
 No process or input adapter. Historical routes require explicit capture,
 pixel, geometry, settings and sample-policy binding, never a global cache.
 """
+from dye_regions import validate_region_rules
 import copy
 from dataclasses import asdict
 import hashlib
@@ -68,8 +69,8 @@ def search_native_input_pipeline(session,grid,geometry,settings,rules,*,wheel_de
     Final model budget and CPU acceptance remain separate from live success.
     """
     check();start=clock()
-    if not isinstance(grid,PoseGrid) or len(rules)!=3 or not any(r['enabled'] for r in rules):
-        raise ValueError('Grid and enabled three-region rules required')
+    if not isinstance(grid,PoseGrid):raise ValueError('PoseGrid required')
+    validate_region_rules(session,rules)
     if not all(math.isfinite(v) for v in (now,deadline,time_budget_seconds,wheel_delta_per_step)) or time_budget_seconds<=0 or wheel_delta_per_step==0:
         raise ValueError('Finite clocks, positive budget and explicit wheel required')
     if sample_policy!='all_recorded_points':raise ValueError('Only full-recorded-points pipeline supported')

@@ -14,6 +14,7 @@ from .dye_visual_readiness import VisualNotReady
 from .compromise import rebase_compromise_plan,observed_quality,predicted_quality,quality_fields
 from .refinement import find_refinement,find_recovery
 from native_input_route_search import _needed
+from dye_regions import session_region_count,bind_region_rules
 
 
 class GoalStop(Exception):pass
@@ -21,13 +22,14 @@ class GoalStop(Exception):pass
 
 def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.monotonic,
         max_rounds=64,max_actions=64,planner=plan_from_checkpoint,event=lambda row:None,pause=time.sleep):
-    rules=normalize_target_rules(copy.deepcopy(rules))
+    count=session_region_count(session)
+    rules=normalize_target_rules(bind_region_rules(rules,count))
     if (type(max_rounds) is not int or not 1<=max_rounds<=64 or type(max_actions) is not int or not 1<=max_actions<=64
         or not math.isfinite(engineering_deadline)):
         raise ValueError('Invalid native execution limits')
     start=clock();end=engineering_deadline;timer_grace_until=start+EARLY_TIMER_GRACE_SECONDS
     backend_binding=None;previous_timer=None;current=None;context=None
-    result=dict(rules=rules,stop_reason='not_started',accepted=False,target_exact=False,verified=False,
+    result=dict(rules=rules,region_count=count,stop_reason='not_started',accepted=False,target_exact=False,verified=False,
         planning_rounds=[],steps=[],observations=[],actual_input_attempts=0,
         server_confirmation_verified=False,initial_visual_retries=0,observation_retries=0,compromise_selected=False)
     compromise_route=None;compromise_template=None;best_observed=None
@@ -209,8 +211,8 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                 needed=_needed(route,3.,.5),source='protected_actual_reference'))
         def endpoint_checkpoint(reference,row):
             # Disabled regions are omitted from target predictions, while a
-            # bound native checkpoint always includes all three client HEXes.
-            neutral=[dict(enabled=True,exact=True,colors=['#000000'],tolerance=0.) for _ in range(3)]
+            # bound native checkpoint includes every actual client HEX.
+            neutral=[dict(enabled=True,exact=True,colors=['#000000'],tolerance=0.) for _ in range(count)]
             return dict(reference,pose=row['final_pose'],
                 client_hex=score_native_pose(session,row['final_pose'],neutral)['colors'])
         while result['actual_input_attempts']<max_actions:
@@ -598,7 +600,7 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                 if result.get('restoration_rounds') else None)
     else:
         result.update(verified=False,accepted=False,target_exact=False,
-            actual_colors=[None]*3,actual_deltas=[None]*3,current=None)
+            actual_colors=[None]*count,actual_deltas=[None]*count,current=None)
         if current is not None:
             result['native_current']=current
             score=score_codes(current['checkpoint']['client_hex'],rules)

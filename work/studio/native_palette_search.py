@@ -9,6 +9,7 @@ import math
 import time
 import heapq
 import numpy as np
+from dye_regions import validate_region_rules
 from native_palette_scoring import score_native_pose
 
 
@@ -59,8 +60,7 @@ def search_pose_grid(session, grid, rules, *, max_candidates=10000, top_k=10,
         raise ValueError('Invalid candidate/retention limit')
     if not math.isfinite(time_budget_seconds) or time_budget_seconds <= 0:
         raise ValueError('Positive finite time budget required')
-    if len(rules) != 3 or not any(rule['enabled'] for rule in rules):
-        raise ValueError('Three rules with at least one enabled region required')
+    validate_region_rules(session, rules)
     start = clock()
     deadline = start + time_budget_seconds
     retained = []

@@ -64,7 +64,9 @@ def _row(context, checkpoint, rules, route, guard, source):
 
 
 def _endpoint_checkpoint(context, checkpoint, pose, guard):
-    neutral = [dict(enabled=True, exact=True, colors=['#000000'], tolerance=0.)] * 3
+    from dye_regions import session_region_count
+    neutral = [dict(enabled=True, exact=True, colors=['#000000'], tolerance=0.)
+               for _ in range(session_region_count(context['session']))]
     codes = score_native_pose(context['session'], pose, neutral, check=guard)['colors']
     return dict(copy.deepcopy(checkpoint), pose=copy.deepcopy(pose), client_hex=codes)
 

@@ -2,11 +2,11 @@
 import math
 import numpy as np
 from vision import error, normalize_hex, rgb
+from dye_regions import rule_region_count
 
 
 def priority_indices(rules):
-    if not isinstance(rules,(list,tuple)) or len(rules)!=3 or any(not isinstance(r,dict) for r in rules):
-        raise ValueError('Exactly three dictionary target rules required')
+    rule_region_count(rules)
     if not any('priority' in r for r in rules):
         return None
     enabled = [i for i, r in enumerate(rules) if r.get('enabled')]

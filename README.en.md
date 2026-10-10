@@ -21,6 +21,8 @@ Extract the entire release and run `ColorStudio.exe`. Keep `_internal` beside it
 
 Each palette is bound to its game session. Regions share transformations; mathematical palette candidates still need an executable route and game HEX verification. Predicted colors do not prove a match. If all targets cannot be met, the tool tries to retain the best measured compromise in priority order.
 
+Two- and three-region boards are detected automatically. A two-region round uses its actual left and right regions; the third UI card is marked unavailable without changing saved settings or priorities. If only the absent third region is enabled, no input is sent and the tool asks you to enable Region 1 or 2.
+
 When leather, wood or another material’s base palette lacks pure black or white, `#000000` or `#FFFFFF` cannot be matched exactly. Refer to the game’s actual HEX values. Multiple exact matches and finding a globally optimal result within the time limit are not guaranteed.
 
 ## Settings and presets

@@ -4,6 +4,7 @@ Texture sample sites are finite. A completed site scan or pair enumeration
 does not prove exhaustion of continuous bilinear color regions. Every returned
 solution is checked by the original float32 CPU picker, never treated as live.
 """
+from dye_regions import validate_region_rules
 import heapq,itertools,math,time
 import numpy as np
 from native_palette_model import picker_view_uv,sample_cpu,color32,distort_uv
@@ -36,12 +37,12 @@ def search_periodic_targets(session,rules,*,minimum_scale,maximum_scale,
     fractions=tuple(float(v) for v in subpixel_fractions)
     if not fractions or len(fractions)>8 or any(not math.isfinite(v) or not 0<=v<1 for v in fractions):
         raise ValueError('Invalid sample fractions')
-    if len(rules)!=3 or not any(r['enabled'] for r in rules):raise ValueError('Enabled three-region rules required')
+    count=validate_region_rules(session,rules)
     reference=_pose(session['initial_pose'] if reference is None else reference)
     start=clock();end=start+time_budget_seconds
     result=dict(candidates=[],domain=dict(translation='one_full_canonical_period',
         canonical_uv_bounds=[[0.,1.],[0.,1.]],scale=[minimum_scale,maximum_scale],
-        rotation_degrees=[-180.,180.]),target_sites_per_region=[0]*3,
+        rotation_degrees=[-180.,180.]),target_sites_per_region=[0]*count,
         sample_fractions=list(fractions),site_scan_complete=False,pair_lattice_complete=False,
         continuous_complete=False,stop_reason='not_started',pair_proposals=0,cpu_evaluations=0,
         cpu_pool_complete=False,peak_pair_block_size=0,
@@ -67,7 +68,7 @@ def search_periodic_targets(session,rules,*,minimum_scale,maximum_scale,
         guard()
         theta=math.radians(angle);rotation=np.array([[math.cos(theta),-math.sin(theta)],
                                                    [math.sin(theta),math.cos(theta)]])
-        ref_uv=picker_view_uv(anchor,3,session['picker_uv'][anchor][1],reference['position'],scale,angle)
+        ref_uv=picker_view_uv(anchor,count,session['picker_uv'][anchor][1],reference['position'],scale,angle)
         lift=np.rint(ref_uv-z)
         position=np.asarray(session['picker_uv'][anchor])-.5-scale*(rotation@(z+lift))
         pose=_pose(dict(position=position,scale=scale,rotation_degrees=angle))
@@ -125,7 +126,7 @@ def search_periodic_targets(session,rules,*,minimum_scale,maximum_scale,
             result['stop_reason']='target_not_present_on_sample_lattice'
         elif len(enabled)==1:
             i=enabled[0]
-            ref=picker_view_uv(i,3,session['picker_uv'][i][1],**reference)
+            ref=picker_view_uv(i,count,session['picker_uv'][i][1],**reference)
             distances=np.linalg.norm((sites[i]-ref+.5)%1.-.5,axis=1)
             for z in sites[i][np.argsort(distances)]:
                 offer(i,z,reference['scale'],reference['rotation_degrees'])
@@ -216,7 +217,7 @@ def search_periodic_targets(session,rules,*,minimum_scale,maximum_scale,
                                     # Screen every material before pruning this
                                     # nearest pool. A low-priority third loss
                                     # must not discard a higher-priority hit.
-                                    all_colors=[None]*3;all_losses=[None]*3
+                                    all_colors=[None]*count;all_losses=[None]*count
                                     for region in enabled:
                                         guard()
                                         ratio=complex(*(np.asarray(session['picker_uv'][region])-session['picker_uv'][a]))/complex(*delta)

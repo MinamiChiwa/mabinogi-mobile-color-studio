@@ -25,16 +25,17 @@ def score_pose(atlas, capture_offset, pose, markers, board, rules, *,
     points=np.asarray(markers,float)-np.asarray(board[:2],float)
     offsets=np.asarray(screen_offsets,float)
     capture_offset=np.asarray(capture_offset,float)
-    if (points.shape!=(3,2) or capture_offset.shape!=(2,) or
+    regions=len(rules)
+    if (regions not in (2,3) or points.shape!=(regions,2) or capture_offset.shape!=(2,) or
             offsets.ndim!=2 or offsets.shape[1]!=2 or not len(offsets) or
             not np.isfinite(np.r_[points.ravel(),offsets.ravel(),capture_offset]).all() or
-            not np.array_equal(offsets[0],[0,0]) or len(rules)!=3):
+            not np.array_equal(offsets[0],[0,0]) or getattr(atlas,'regions',regions)!=regions):
         raise ValueError('Invalid pose sampling geometry')
     enabled=[i for i,r in enumerate(rules) if r.get('enabled')]
     if not enabled:return None
     inverse=np.linalg.inv(transform[:2,:2])
-    colors=[None]*3;distances=[None]*3
-    sample_family_losses=[None]*3
+    colors=[None]*regions;distances=[None]*regions
+    sample_family_losses=[None]*regions
     supported=np.ones(len(offsets),bool);passed=supported.copy()
     for region in enabled:
         check()
@@ -51,8 +52,8 @@ def score_pose(atlas, capture_offset, pose, markers, board, rules, *,
     hits,exact_max,exact_average,exact_total=exact_priority(colors,distances,rules)
     family_max,family_avg,family_losses=family_priority(colors,rules)
     result=dict(predicted=True,verified=False,execution_verified=False,
-                colors=['#%02X%02X%02X'%tuple(colors[i][0]) if i in enabled else None for i in range(3)],
-                deltas=[float(distances[i][0]) if i in enabled else None for i in range(3)],
+                colors=['#%02X%02X%02X'%tuple(colors[i][0]) if i in enabled else None for i in range(regions)],
+                deltas=[float(distances[i][0]) if i in enabled else None for i in range(regions)],
                 maximum=float(maximum[0]),average=float(average[0]),accepted=bool(passed[0]),
                 **exact_fields(hits,exact_max,exact_average,exact_total,0))
     result.update(family_fields(family_max,family_avg,family_losses,0))

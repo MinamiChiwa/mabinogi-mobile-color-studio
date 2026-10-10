@@ -3,6 +3,7 @@
 Edits recompile the affected suffix from a replayed prefix. No live input,
 inertia prediction, or guarantee beyond finite conditional CPU endpoints.
 """
+from dye_regions import validate_region_rules
 import copy
 import json
 import math
@@ -42,7 +43,7 @@ def refine_native_wheel_pivots(session, routes, reference, geometry, settings, r
     if sample_policy!='all_recorded_points':raise ValueError('Explicit full-point assumption required')
     reference=_pose(reference)
     if reference!=_pose(session['initial_pose']):raise ValueError('Saved initial reference required')
-    if len(rules)!=3 or not any(r['enabled'] for r in rules):raise ValueError('Three rules with enabled region required')
+    validate_region_rules(session,rules)
     seeds=copy.deepcopy(list(routes))
     if not 1<=len(seeds)<=64:raise ValueError('One to 64 explicit routes required')
     l,t,r,b=geometry.board

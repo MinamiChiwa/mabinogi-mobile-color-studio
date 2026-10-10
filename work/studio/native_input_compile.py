@@ -12,6 +12,7 @@ from planner import decompose_gestures
 from input_gestures import drag_gesture, grouped_rotation_gesture, wheel_gesture
 from native_input_response import replay_native_route, _pose
 from native_palette_pose import relative_board_pose
+from dye_regions import region_count
 
 
 def native_drag_gesture(geometry, settings, dx, dy):
@@ -87,8 +88,9 @@ def compile_native_route(target, reference, geometry, settings, markers, *,
     gesture_board=(l+input_margin,t+input_margin,r-input_margin,b-input_margin)
     if gesture_board[2]-gesture_board[0]<24 or gesture_board[3]-gesture_board[1]<24:
         raise ValueError('Pointer margin leaves no visible input area')
-    if points.shape != (3, 2) or not np.isfinite(points).all():
-        raise ValueError('Three finite screen markers required')
+    marker_count = region_count(len(points))
+    if points.shape != (marker_count, 2) or not np.isfinite(points).all():
+        raise ValueError('Finite actual-layout screen markers required')
     local_markers = points-np.asarray(board[:2])
     desired = relative_board_pose(target, reference, board)
     current = reference
@@ -158,7 +160,7 @@ def compile_native_route(target, reference, geometry, settings, markers, *,
         # Translation at three marker landings, including their mean, gives
         # useful alternatives when scale/angle do not quite reach the target.
         current_matrix = relative_board_pose(current, reference, board)
-        landed = np.column_stack((local_markers, np.ones(3))) @ (current_matrix@np.linalg.inv(desired)).T
+        landed = np.column_stack((local_markers, np.ones(marker_count))) @ (current_matrix@np.linalg.inv(desired)).T
         shifts = local_markers-landed[:, :2]
         translations = [shifts.mean(axis=0), *shifts, np.asarray(pivots['drag'])]
         used = set()

@@ -75,7 +75,7 @@ def select_color_candidates(rows, rules, limit, *, preserve_routes=False):
         return selected
     reserved=set();slot=len(selected)-1
     for region in exact:
-        options=[row for row in ranked if row.get('deltas',[None]*3)[region] is not None]
+        options=[row for row in ranked if row.get('deltas',[None]*len(rules))[region] is not None]
         if not options:continue
         nearest=min(options,key=lambda row:(float(row['deltas'][region]),candidate_rank(row)))
         key=tuple(nearest['colors'])
@@ -157,7 +157,7 @@ def _seeds(atlas, region, rule, limit, source_radius, include_compromises=False)
 def _sample_transforms(atlas, markers, rules, multipliers, offsets, jitter=(0,0)):
     enabled=[i for i,r in enumerate(rules) if r['enabled']]
     usable=np.ones(len(multipliers),bool); passes=usable.copy()
-    all_colors=[None]*3; all_distances=[None]*3
+    all_colors=[None]*len(rules); all_distances=[None]*len(rules)
     delta=complex(*jitter)
     for region in enabled:
         source=(complex(*markers[region])+delta-offsets)/multipliers
@@ -185,10 +185,11 @@ def similarity_candidates(atlas, markers, rules, current_translation, board_shap
     """
     markers=np.asarray(markers,float); current=np.asarray(current_translation,float)
     bounds=np.asarray(scale_bounds,float); shape=np.asarray(board_shape,float)
-    if (markers.shape!=(3,2) or current.shape!=(2,) or shape.shape!=(2,) or
+    regions=len(rules)
+    if (regions not in (2,3) or markers.shape!=(regions,2) or current.shape!=(2,) or shape.shape!=(2,) or
         bounds.shape!=(2,) or not np.isfinite(np.r_[markers.ravel(),current,shape,bounds,max_angle,landing_radius]).all() or
         np.any(shape<=0) or not 0<bounds[0]<=bounds[1] or not 0<=max_angle<=180 or
-        landing_radius<0 or len(rules)!=3 or not 1<=limit<=100 or not 1<=seed_limit<=512 or
+        landing_radius<0 or getattr(atlas,'regions',regions)!=regions or not 1<=limit<=100 or not 1<=seed_limit<=512 or
         not 0<=cycle_radius<=2):
         raise ValueError('Invalid similarity search geometry or bounds')
     enabled=[i for i,r in enumerate(rules) if r['enabled']]
@@ -331,9 +332,9 @@ def similarity_candidates(atlas, markers, rules, current_translation, board_shap
     for k,v in enumerate(pool):
         if not usable[k] or (not include_compromises and not passed[k]):continue
         multiplier,offset,absolute_offset,move,_,_=v
-        hexes=['#%02X%02X%02X'%tuple(colors[i][k]) if i in enabled else None for i in range(3)]
+        hexes=['#%02X%02X%02X'%tuple(colors[i][k]) if i in enabled else None for i in range(regions)]
         rows.append(dict(id=k,predicted=True,verified=False,accepted=bool(passed[k]),
-            colors=hexes,deltas=[float(distances[i][k]) if i in enabled else None for i in range(3)],
+            colors=hexes,deltas=[float(distances[i][k]) if i in enabled else None for i in range(regions)],
             maximum=float(maximum[k]),average=float(average[k]),
             dx=float(move.real),dy=float(move.imag),angle=float(np.degrees(np.angle(multiplier))),
             scale=float(abs(multiplier)),matrix=[[float(multiplier.real),float(-multiplier.imag),float(offset.real)],

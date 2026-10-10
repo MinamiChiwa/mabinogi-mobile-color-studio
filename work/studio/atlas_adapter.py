@@ -18,7 +18,7 @@ def rules_targets(rules):
             colors=rule.get('colors') or []
             if not colors:raise ValueError('Enabled atlas rule has no target')
             targets.append(colors[0])
-    if len(targets)!=3:raise ValueError('Atlas analysis expects three rules')
+    if len(targets) not in (2,3):raise ValueError('Atlas analysis expects two or three rules')
     return targets
 
 

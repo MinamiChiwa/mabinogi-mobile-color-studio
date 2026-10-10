@@ -5,6 +5,7 @@ from atlas_pose import pose_fields
 from atlas_execution import reposition_budget
 from native_palette_pose import relative_board_pose, score_board_pose
 from native_palette_scoring import score_native_pose
+from dye_regions import session_region_count
 
 
 def assess_native_action(session, target, reference, board, markers, rules, *,
@@ -18,8 +19,8 @@ def assess_native_action(session, target, reference, board, markers, rules, *,
     if not all(math.isfinite(v) for v in (now, deadline)):
         raise ValueError('Finite timing values required')
     points = np.asarray(markers, dtype=float)
-    if points.shape != (3, 2) or not np.isfinite(points).all():
-        raise ValueError('Three finite screen marker positions required')
+    if points.shape != (session_region_count(session), 2) or not np.isfinite(points).all():
+        raise ValueError('Finite actual-layout screen marker positions required')
     check()
     proposal = score_native_pose(session, target, rules, check=check)
     relative = relative_board_pose(target, reference, board)

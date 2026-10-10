@@ -6,11 +6,11 @@ def describe_result(colors,rules):
     regions=[]
     for i,(color,rule) in enumerate(zip(colors,rules)):
         delta=error(color,rule['colors'],False) if rule['enabled'] and color else None
-        regions.append(dict(region=i+1,color=color,enabled=rule['enabled'],
+        regions.append(dict(region=i+1,color=color,enabled=rule['enabled'],available=True,
                             targets=rule.get('colors',[]),delta=delta))
     values=[r['delta'] for r in regions if r['enabled']]
     valid=bool(values) and all(v is not None and math.isfinite(v) for v in values)
-    return dict(regions=regions,maximum=max(values) if valid else None,
+    return dict(regions=regions,region_count=len(rules),maximum=max(values) if valid else None,
                 average=sum(values)/len(values) if valid else None)
 
 def read_history(path):

@@ -89,7 +89,7 @@ class NativeLiveServiceTests(unittest.TestCase):
                  patch.object(m,'collect_validation_session',return_value=dict(
                      stop_reason='passive_baseline_collected',capture={'capture_folder':'unused'},
                      baseline={'motion':{'settings':{} } },session_deadline_monotonic=100.0)), \
-                 patch.object(m,'load_session',return_value={}), \
+                 patch.object(m,'load_session',return_value=dict(pixels=[None]*3,picker_uv=[[1/6,.5],[.5,.5],[5/6,.5]])), \
                  patch.object(m,'InputSettings',return_value={}), \
                  patch.object(m,'ProjectClosedLoopIO',return_value=SimpleNamespace(input_attempts=0,release=lambda:None)), \
                  patch.object(m,'run_goal_loop',side_effect=fake_loop):

@@ -1,4 +1,5 @@
 """Bounded offline ranking of modeled action endpoints, never live execution."""
+from dye_regions import validate_region_rules
 import math
 import time
 import numpy as np
@@ -20,8 +21,7 @@ def search_native_actions(session, poses, reference, board, markers, rules, *,
         raise ValueError('Invalid top_k')
     if not all(math.isfinite(v) for v in (now, deadline, time_budget_seconds)) or time_budget_seconds <= 0:
         raise ValueError('Finite clocks and positive search budget required')
-    if len(rules) != 3 or not any(rule['enabled'] for rule in rules):
-        raise ValueError('Three rules with at least one enabled region required')
+    validate_region_rules(session, rules)
     start = clock()
     end = start + min(time_budget_seconds, max(0., deadline - now))
     endpoints = {}

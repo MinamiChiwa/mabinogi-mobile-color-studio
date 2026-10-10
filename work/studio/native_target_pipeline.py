@@ -1,4 +1,5 @@
 """Offline target-seed, shortlist, endpoint and refinement stages, one budget."""
+from dye_regions import validate_region_rules
 import heapq
 import itertools
 import math
@@ -22,8 +23,9 @@ def search_target_pipeline(session, grid, reference, board, markers, rules, *,
     Stage budgets are caps, not independent deadline extensions. Unused stage
     time is available for the final refinement within the overall deadline.
     """
-    if not isinstance(grid, PoseGrid) or len(rules) != 3 or not any(r['enabled'] for r in rules):
-        raise ValueError('Grid and enabled three-region rules required')
+    if not isinstance(grid, PoseGrid):
+        raise ValueError('PoseGrid required')
+    validate_region_rules(session, rules)
     if not all(math.isfinite(v) for v in (now, deadline, time_budget_seconds)) or time_budget_seconds <= 0:
         raise ValueError('Invalid workflow timing')
     if type(shortlist) is not int or not 1 <= shortlist <= 1000 or type(top_k) is not int or not 1 <= top_k <= 100:

@@ -98,7 +98,7 @@ def visible_candidates(image, scene, rules, *, limit=8, excluded=(), material_ma
     plausible screenshot rendering, never evidence of actual game HEX.
     """
     enabled = [i for i, rule in enumerate(rules) if rule.get('enabled')]
-    if len(rules) != 3 or len(enabled) != 1:
+    if len(rules) not in (2,3) or len(scene.markers)!=len(rules) or len(enabled) != 1:
         raise ValueError('Single-region search requires exactly one enabled region')
     region = enabled[0]
     l, t, r, b = map(int, scene.board)
@@ -214,14 +214,14 @@ class _Search:
                             else limits.max_candidate_trials)
         self.exploration_limit = (limits.precision_max_explorations if self.exact and self.zoom_capable
                                   else limits.max_explorations)
-        self.enabled = [i == self.region for i in range(3)]
+        self.enabled = [i == self.region for i in range(len(rules))]
         self.marker = np.asarray(scene.markers[self.region], float)
         l, t, r, b = scene.board
         self.cap = np.maximum(1, np.floor(np.asarray([r-l, b-t]) * limits.max_translation_fraction)).astype(int)
         self.pose = np.eye(3)
         self.epoch = 0
         self.image = None
-        self.colors = [None] * 3
+        self.colors = [None] * len(rules)
         self.verified = False
         self.current = False
         self.best = None
@@ -283,8 +283,8 @@ class _Search:
         try:
             values = self.io.read(image, enabled=self.enabled,
                                   deadline=self.deadline - self.limits.finish_reserve_seconds)
-            if len(values) != 3:
-                return [None] * 3
+            if len(values) != len(self.rules):
+                return [None] * len(self.rules)
             values = list(values)
             for index, value in enumerate(values):
                 if not self.enabled[index] or value is None:
@@ -299,7 +299,7 @@ class _Search:
             # F9/window/hard-time guards are rechecked before treating this
             # as an ordinary OCR observation miss.
             self.io.check()
-            return [None] * 3
+            return [None] * len(self.rules)
 
     def capture(self):
         failure = None
@@ -452,7 +452,7 @@ class _Search:
         before = self.image
         started = self.io.clock()
         self.current = self.verified = False
-        self.colors = [None] * 3
+        self.colors = [None] * len(self.rules)
         try:
             self.io.drag(self.scene.board, int(command[0]), int(command[1]))
             self.moves += 1
@@ -625,7 +625,7 @@ class _Search:
         before = self.image
         started = self.io.clock()
         self.current = self.verified = False
-        self.colors = [None]*3
+        self.colors = [None]*len(self.rules)
         try:
             self.io.wheel(self.scene.board, int(steps), anchor=tuple(self.marker))
             self.moves += 1
@@ -1045,7 +1045,7 @@ class _Search:
 def run_single_region(io, scene, rules, *, game_deadline, search_started_at=None, limits=None):
     """Run finite local proposals/exploration and return an honest live result."""
     enabled = [i for i, rule in enumerate(rules) if rule.get('enabled')]
-    if len(rules) != 3 or len(enabled) != 1:
+    if len(rules) not in (2,3) or len(scene.markers)!=len(rules) or len(enabled) != 1:
         raise ValueError('Single-region search requires exactly one enabled region')
     if not math.isfinite(game_deadline):
         raise ValueError('Single-region search requires a finite game deadline')

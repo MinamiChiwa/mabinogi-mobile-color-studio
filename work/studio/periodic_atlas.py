@@ -17,9 +17,10 @@ class PeriodicAtlas:
                 or abs(np.linalg.det(self.basis)) < 1e-6
                 or self.origin.shape != (2,) or not np.isfinite(self.origin).all()):
             raise ValueError('A finite, non-degenerate measured period basis is required')
-        if not 4 <= resolution <= 1024 or regions != 3:
-            raise ValueError('Use 4..1024 samples per period and three material regions')
+        if not 4 <= resolution <= 1024 or type(regions) is not int or regions not in (2,3):
+            raise ValueError('Use 4..1024 samples per period and two or three material regions')
         self.resolution = int(resolution)
+        self.regions=regions
         shape = (regions, self.resolution, self.resolution)
         self.count = np.zeros(shape, np.uint32)
         # RGB values are bounded to 0..255 and the atlas only accumulates the
@@ -33,7 +34,7 @@ class PeriodicAtlas:
     def add(self, image, masks, translation=(0, 0)):
         """Accumulate a fixed-scale/angle frame using image-measured translation.
 
-        masks is three boolean masks in full image coordinates. The caller must
+        masks has one boolean mask per material in full image coordinates. The caller must
         exclude UI, circles, lines, cursor, seams and low-confidence alignment.
         Translation is absolute relative to this atlas's reference frame.
         """
@@ -42,7 +43,7 @@ class PeriodicAtlas:
         translation = np.asarray(translation, float)
         if image.ndim != 3 or image.shape[2] != 3 or image.dtype != np.uint8:
             raise ValueError('Expected native uint8 RGB image')
-        if masks.shape != (3, *image.shape[:2]):
+        if masks.shape != (self.regions, *image.shape[:2]):
             raise ValueError('Expected one full-image mask per region')
         if translation.shape != (2,) or not np.isfinite(translation).all():
             raise ValueError('Expected finite measured translation')
@@ -76,7 +77,7 @@ class PeriodicAtlas:
         image=np.asarray(image);masks=np.asarray(masks,bool);translation=np.asarray(translation,float)
         if image.ndim!=3 or image.shape[2]!=3 or image.dtype!=np.uint8:
             raise ValueError('Expected native uint8 RGB image')
-        if masks.shape!=(3,*image.shape[:2]) or translation.shape!=(2,) or not np.isfinite(translation).all():
+        if masks.shape!=(self.regions,*image.shape[:2]) or translation.shape!=(2,) or not np.isfinite(translation).all():
             raise ValueError('Invalid masks or measured translation')
         h,w=image.shape[:2];n=self.resolution
         corners=(np.array([[0,0],[w-1,0],[0,h-1],[w-1,h-1]])-self.origin-translation)@np.linalg.inv(self.basis).T
@@ -153,7 +154,7 @@ class PeriodicAtlas:
         return [dict(region=i + 1, coverage=float(valid[i].mean()),
                      observed=float((self.count[i] > 0).mean()),
                      overlap_rmse=float(rmse[i][self.count[i] > 1].mean())
-                     if (self.count[i] > 1).any() else None) for i in range(3)]
+                     if (self.count[i] > 1).any() else None) for i in range(self.regions)]
 
     def snapshot(self):
         """Prepare immutable maps once after accumulation for this session.
@@ -168,7 +169,7 @@ class AtlasSnapshot:
     """Read-only sampling view; numerically identical to the source maps."""
     def __init__(self, atlas):
         self.basis=atlas.basis.copy();self.origin=atlas.origin.copy()
-        self.resolution=atlas.resolution;self.count=atlas.count.copy()
+        self.resolution=atlas.resolution;self.count=atlas.count.copy();self.regions=atlas.regions
         self.colors,self.valid,self.rmse=atlas.maps()
         for value in (self.basis,self.origin,self.count,self.colors,self.valid,self.rmse):
             value.flags.writeable=False
@@ -249,8 +250,10 @@ def translation_candidates(atlas, markers, rules, current_translation=(0, 0),
     """
     markers = np.asarray(markers, float)
     current = np.asarray(current_translation, float)
-    if markers.shape != (3, 2) or not np.isfinite(markers).all() or len(rules) != 3:
-        raise ValueError('Expected three markers and three rules')
+    regions=len(rules)
+    if (regions not in (2,3) or markers.shape != (regions,2) or not np.isfinite(markers).all()
+            or getattr(atlas,'regions',regions)!=regions):
+        raise ValueError('Atlas, markers and rules must have matching two or three regions')
     if current.shape != (2,) or not np.isfinite(current).all() or not 1 <= limit <= 100:
         raise ValueError('Invalid current translation or result limit')
     if not np.isfinite(landing_radius) or landing_radius < 0:
@@ -292,7 +295,7 @@ def translation_candidates(atlas, markers, rules, current_translation=(0, 0),
         candidate_mask=np.isfinite(distance)
     count=len(moves)
     predictions = []; deltas = []; passes = []; usable = np.ones(count, bool)
-    for i in range(3):
+    for i in range(regions):
         if cancelled():
             raise InterruptedError('Calculation cancelled')
         sampled, supported = atlas.sample(i,markers[i]-sample_shifts)
@@ -361,13 +364,13 @@ def translation_candidates(atlas, markers, rules, current_translation=(0, 0),
             raise InterruptedError('Calculation cancelled')
         if not usable[index] or not np.isfinite(distance[index]):
             continue
-        hexes = ['#%02X%02X%02X' % tuple(predictions[i][index]) if i in enabled else None for i in range(3)]
+        hexes = ['#%02X%02X%02X' % tuple(predictions[i][index]) if i in enabled else None for i in range(regions)]
         key = tuple(hexes)
         if key in seen:
             continue
         seen.add(key)
         result.append(dict(id=len(result), predicted=True, verified=False,
-                           colors=hexes, deltas=[float(deltas[i][index]) if i in enabled else None for i in range(3)],
+                           colors=hexes, deltas=[float(deltas[i][index]) if i in enabled else None for i in range(regions)],
                            maximum=float(maximum[index]), average=float(average[index]),
                            accepted=bool(passed[index]), phase=shifts[index].tolist(),
                            dx=float(moves[index, 0]), dy=float(moves[index, 1]), angle=0., scale=1.))

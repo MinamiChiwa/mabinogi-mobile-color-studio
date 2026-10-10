@@ -119,6 +119,7 @@ RELEASE_TEST_IDS = (
 )
 
 DESKTOP_TEST_PREFIXES = (
+    'test_two_region_ui.',
     'test_resize_surface.',
     'test_profile_ui.',
     'test_native_ui_hit_testing.',

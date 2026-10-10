@@ -27,16 +27,16 @@ def save_atlas(path, **arrays):
 def export_maps(out,atlas):
     started=time.perf_counter()
     colors,valid,rmse=atlas.maps()
-    for j in range(3):
+    for j in range(len(colors)):
         Image.fromarray(np.dstack((colors[j],valid[j].astype(np.uint8)*255))).save(
             out/f'region-{j+1}.png',compress_level=1)
     save_atlas(out/'atlas.npz',colors=colors,valid=valid,count=atlas.count,
                rmse=rmse,basis=atlas.basis,origin=atlas.origin)
     expanded_out=out/'expanded';expanded_out.mkdir(exist_ok=True)
-    for filename in ('atlas.npz','region-1.png','region-2.png','region-3.png'):
+    for filename in ('atlas.npz',*(f'region-{j+1}.png' for j in range(len(colors)))):
         shutil.copyfile(out/filename,expanded_out/filename)
-    canvas=Image.new('RGB',(1560,560),'#18212b');draw=ImageDraw.Draw(canvas)
-    for j in range(3):
+    canvas=Image.new('RGB',(520*len(colors),560),'#18212b');draw=ImageDraw.Draw(canvas)
+    for j in range(len(colors)):
         tile=Image.fromarray(np.dstack((colors[j],valid[j].astype(np.uint8)*255))).resize((512,512))
         canvas.paste(tile,(8+j*520,40),tile.getchannel('A'))
         draw.text((12+j*520,14),f'Region {j+1} - native capture',fill='white')
@@ -148,7 +148,7 @@ def scene_record(log):
 def quality_gate(coverage, validation, min_coverage=.90, max_rmse=8.0,
                  min_validation_coverage=.90, required_regions=None):
     """Decide whether a captured atlas is safe to publish as candidates."""
-    required = set(range(1, 4) if required_regions is None else required_regions)
+    required = set((row['region'] for row in coverage) if required_regions is None else required_regions)
     if not required or not required.issubset({1, 2, 3}):
         return dict(passed=False, thresholds=dict(min_coverage=min_coverage,
                      min_validation_coverage=min_validation_coverage,
@@ -167,7 +167,7 @@ def quality_gate(coverage, validation, min_coverage=.90, max_rmse=8.0,
         row['required'] = row['region'] in required
         if not row['required']:
             row['passed'] = True
-    return dict(passed=bool(rows) and all(r['passed'] for r in rows if r['required']),
+    return dict(passed=bool(rows) and required.issubset({row['region'] for row in rows}) and all(r['passed'] for r in rows if r['required']),
                 thresholds=dict(min_coverage=min_coverage,
                                 min_validation_coverage=min_validation_coverage,
                                 max_rgb_rmse=max_rmse),
@@ -182,7 +182,8 @@ def validation_summary(validation):
                               for row in frame['prediction'] if row['region']==region),
                  rgb_rmse=max(float(row['rgb_rmse']) if row['rgb_rmse'] is not None else float('inf')
                               for frame in validation for row in frame['prediction']
-                              if row['region']==region)) for region in (1,2,3)]
+                              if row['region']==region)) for region in
+                sorted(row['region'] for row in validation[0]['prediction'])]
 
 
 class CaptureAlignment:
@@ -235,12 +236,16 @@ def run(source,game_codes=None,example_targets=None,target_rules=None,output=Non
     out.mkdir(parents=True,exist_ok=True)
     if target_rules is not None:
         rules=[dict(rule) for rule in target_rules]
-        if len(rules)!=3:raise ValueError('Exactly three target rules are required')
+        if len(rules) not in (2,3):raise ValueError('Two or three target rules are required')
     else:
         rules=[dict(enabled=True,colors=[c],exact=False,tolerance=8)
                for c in example_targets] if example_targets else []
     log=json.loads((source/'log.json').read_text())
     scene=scene_record(log)
+    from dye_regions import region_count as validate_count,bind_region_rules
+    regions=validate_count(len(scene['markers']))
+    if rules:rules=bind_region_rules(rules,regions)
+    if game_codes is not None and len(game_codes)!=regions:raise ValueError('Game HEX count differs from capture regions')
     sequence=frame_sequence(log);names=sequence['names']
     if (prepared is not None and (prepared.names!=names or
             prepared.scene['board']!=scene['board'] or prepared.scene['markers']!=scene['markers'])):
@@ -286,7 +291,7 @@ def run(source,game_codes=None,example_targets=None,target_rules=None,output=Non
     # Use the finer phase grid for every mode. This avoids mode-dependent
     # candidate coverage and gives similar-color searches the same precision
     # as exact HEX searches.
-    atlas=PeriodicAtlas([[px,0],[0,py]],resolution=atlas_resolution)
+    atlas=PeriodicAtlas([[px,0],[0,py]],resolution=atlas_resolution,regions=regions)
     for count,j in enumerate(train_indices,1):
         progress(stage='stitch',current=count,total=len(train_indices))
         if check:check()
@@ -312,7 +317,7 @@ def run(source,game_codes=None,example_targets=None,target_rules=None,output=Non
     summary=validation_summary(validation)
     timings['validation_seconds']=time.perf_counter()-stage
     enabled_regions = ([i + 1 for i, rule in enumerate(rules) if rule.get('enabled')]
-                       if rules else [1, 2, 3])
+                       if rules else list(range(1,regions+1)))
     gate=quality_gate(coverage, summary, required_regions=enabled_regions) if validation else dict(passed=False)
     geometry_record=next((r for r in log if r.get('kind')=='frame' and r.get('name')=='original'),
                          next(r for r in log if r.get('kind')=='frame'))
@@ -332,7 +337,7 @@ def run(source,game_codes=None,example_targets=None,target_rules=None,output=Non
     expanded_out=out/'expanded';expanded_out.mkdir(exist_ok=True)
     # Optional manually transcribed final-frame game codes; never live OCR.
     marker_check=[]
-    for j in range(3):
+    for j in range(regions):
         values,supported=expanded.sample(j,[markers[j]],offsets[-1])
         predicted='#%02X%02X%02X'%tuple(np.rint(values[0]).clip(0,255).astype(int)) if supported[0] else None
         actual=game_codes[j] if game_codes else None

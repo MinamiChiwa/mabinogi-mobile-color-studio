@@ -2,6 +2,7 @@
 import math
 import time
 import heapq
+from dye_regions import validate_region_rules
 from native_palette_scoring import _pose, score_native_pose
 
 
@@ -29,8 +30,7 @@ def refine_native_poses(session, seeds, rules, *, translation_steps=(.01, .0025)
     if len(seeds) > 1000:
         raise ValueError('At most 1000 seeds allowed')
     seeds = [_pose(seed) for seed in seeds]
-    if len(rules) != 3 or not any(rule['enabled'] for rule in rules):
-        raise ValueError('Three rules with at least one enabled region required')
+    validate_region_rules(session, rules)
     start = clock()
     deadline = start + time_budget_seconds
     layers = max(len(translation_steps), len(scale_steps), len(rotation_steps))

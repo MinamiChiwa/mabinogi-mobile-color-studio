@@ -1,5 +1,17 @@
 # Current verification scope
 
+## Release 0.4.1: Two-region dye boards (2026-10-11)
+
+Policy: `native-dynamic-dye-regions-v16`. The two latest user records completed window/build preflight, then rejected the palette with `Only three-fragment layout validated`, before any input. No two-region capture or screenshot survived that failure. Actual two-region identification is based on the user's observation; the archive alone proves a non-three count.
+
+Actual 2/3 layout now propagates through stable reader/capture attribution, physical picker coordinates, scoring, periodic target search, route compilation, measured controller feedback, restoration, visual recognition and fallback atlas/single-target paths. Two-region horizontal pickers are .25/.75. RGB channels, matrix sizes, two-frame verification, deadlines and strict Exact/Similar rules retain their original meanings. Existing three-region captures infer their count without adding a mandatory old fingerprint field.
+
+Native vision binds the actual count and rejects missing/mismatched cards. Unbound visual recognition requires a complete square-board boundary before accepting two cards. Fallback acquisition binds rules before any zoom/drag. Third-card preferences and priority remain saved but unavailable for that round; two-region result/history/overlay arrays contain only two real slots. Only an absent enabled third target sends zero input and gives a clear message.
+
+Final release regression:536 tests,535 passed,1 optional private OCR fixture skipped,zero failures/errors;182.402s execution,183.329s total. Model, reader and visual related matrices were also checked during implementation. These checks use simulated MMLists, synthetic two-fragment gradients with literal expected HEX, real glyph resources, production planners/controllers and independent old three-region fixtures. No new game process capture, input or dye item was used. Actual two-region game accuracy remains unverified until a new-version user run. Details: `docs/research/two-region-dye-2026-10-11.md`.
+
+Final quick including its three desktop smoke contracts:502 tests,501 passed,1 skipped,zero failures/errors;43.319s execution,46.261s total. The added two-region count/model contracts remain in quick; expensive recorded search matrices remain release/research only.
+
 ## Release 0.4.0 (2026-10-11)
 
 Policy: `native-priority-similar-fine-scale-v15`. Current UI settings autosave; named presets support independent editing/loading/deletion and retain unique three-region priorities. Both native and fallback visual paths prefer all enabled targets, then ordered satisfaction and Delta-E. Exact HEX rules, disabled regions and alternatives retain their original acceptance semantics.

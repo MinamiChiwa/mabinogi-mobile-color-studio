@@ -10,6 +10,7 @@ import numpy as np
 from PIL import Image
 from native_palette_model import picker_view_uv, distort_cpu_uv, sample_cpu, color32
 from hex_refinement import score_codes
+from dye_regions import region_count, session_region_count, validate_region_rules
 
 
 def _pose(value):
@@ -22,16 +23,24 @@ def _pose(value):
 
 
 def load_session(folder):
-    """Load and validate a three-fragment saved session; never query a process."""
+    """Load and validate an actual-layout saved session; never query a process."""
     folder = Path(folder).resolve()
     data = json.loads((folder / 'snapshot.json').read_text(encoding='utf-8'))
-    if len(data['fragments']) != 3 or not data['state_stable_during_read']:
-        raise ValueError('A stable three-fragment capture is required')
+    count = region_count(len(data['fragments']))
+    if not data['state_stable_during_read']:
+        raise ValueError('A stable dye capture is required')
+    for key in ('region_count', 'actual_count'):
+        if key in data and region_count(data[key]) != count:
+            raise ValueError('Actual dye count differs from captured fragments')
+    if 'picker_colors_rgba' in data and len(data['picker_colors_rgba']) != count:
+        raise ValueError('Captured client color count differs from fragments')
     p = float(data['color_preserve_ratio'])
     if not np.isfinite(p) or not 0 <= p < 1:
         raise ValueError('Unsupported color preservation ratio')
     pixels, points = [], []
     for index, fragment in enumerate(data['fragments']):
+        if fragment.get('index', index) != index:
+            raise ValueError('Captured fragment order differs from picker order')
         source = (folder / fragment['pixel_file']).resolve()
         if not source.is_relative_to(folder):
             raise ValueError('Pixel file must remain in the capture directory')
@@ -46,8 +55,8 @@ def load_session(folder):
             raise ValueError('Invalid picker position')
         array.setflags(write=False)
         pixels.append(array)
-        points.append([(index + .5) / 3, y])
-    return dict(pixels=tuple(pixels), picker_uv=points, color_preserve_ratio=p,
+        points.append([(index + .5) / count, y])
+    return dict(pixels=tuple(pixels), picker_uv=points, color_preserve_ratio=p, region_count=count,
                 initial_pose=_pose(data), source='captured_native_pixels',
                 capture_id=data.get('captured_at_utc', folder.name))
 
@@ -55,14 +64,13 @@ def load_session(folder):
 def score_native_pose(session, pose, rules, *, check=lambda: None):
     """Predict and rank the enabled cards using existing exact/Delta-E rules."""
     pose = _pose(pose)
-    if len(rules) != 3:
-        raise ValueError('Exactly three rules required')
+    count = validate_region_rules(session, rules)
     check()
-    coordinates = np.array([distort_cpu_uv(picker_view_uv(i, 3, uv[1], pose['position'], pose['scale'], pose['rotation_degrees']))
+    coordinates = np.array([distort_cpu_uv(picker_view_uv(i, count, uv[1], pose['position'], pose['scale'], pose['rotation_degrees']))
                             for i, uv in enumerate(session['picker_uv'])])
     if not np.isfinite(coordinates).all():
         raise ValueError('Nonfinite transformed UV')
-    colors, floats = [None] * 3, [None] * 3
+    colors, floats = [None] * count, [None] * count
     for index, rule in enumerate(rules):
         check()
         if not rule['enabled']:

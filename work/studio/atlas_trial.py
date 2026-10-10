@@ -67,7 +67,8 @@ def motion(a,b,scene):
     yy,xx=np.where(mask[::8,::8]>0);xx=xx*8;yy=yy*8
     points=np.column_stack((xx,yy))@matrix[:,:2].T+matrix[:,2]
     px,py=points.T;w=r-l;h=bottom-t
-    good=(px>0)&(px<w-1)&(py>0)&(py<h-1)&(np.floor(xx/(w/3))==np.floor(px/(w/3)))
+    regions=len(scene.markers)
+    good=(px>0)&(px<w-1)&(py>0)&(py<h-1)&(np.floor(xx/(w/regions))==np.floor(px/(w/regions)))
     good &= mask[np.clip(np.rint(py).astype(int),0,h-1),np.clip(np.rint(px).astype(int),0,w-1)]>0
     if good.sum()<200:return None
     actual=cv2.remap(b[t:bottom,l:r].astype(np.float32),px[good,None].astype(np.float32),py[good,None].astype(np.float32),cv2.INTER_LINEAR).reshape(-1,3)
@@ -80,7 +81,7 @@ def motion(a,b,scene):
 def load_atlas(path):
     with np.load(path,allow_pickle=False) as saved:
         colors=saved['colors'].astype(float);valid=saved['valid'];count=saved['count']*valid
-        atlas=PeriodicAtlas(saved['basis'],saved['origin'],colors.shape[1])
+        atlas=PeriodicAtlas(saved['basis'],saved['origin'],colors.shape[1],regions=colors.shape[0])
         atlas.count=count;atlas.total=colors*count[...,None]
         atlas.squared=(colors**2+saved['rmse'][...,None]**2)*count[...,None]
     return atlas
@@ -212,8 +213,8 @@ def run(args):
             l,t,r,b=scene.board;mask=texture_mask(scene,current.shape)>0
             y,x=np.where(mask[::9,::9]);x=x*9;y=y*9
             checks=[]
-            for region in range(3):
-                bank=(x>(r-l)*region/3+25)&(x<(r-l)*(region+1)/3-25)
+            for region in range(len(scene.markers)):
+                bank=(x>(r-l)*region/len(scene.markers)+25)&(x<(r-l)*(region+1)/len(scene.markers)-25)
                 points=np.column_stack((x[bank],y[bank]))
                 predicted,valid=atlas.sample(region,points,displacement)
                 actual=current[t+y[bank],l+x[bank]]

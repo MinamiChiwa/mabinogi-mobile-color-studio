@@ -6,6 +6,7 @@ process, resolves an address, sends input, or treats saved captures as live.
 import math
 import re
 import numpy as np
+from dye_regions import region_count
 
 _HEX64=re.compile(r'^[0-9a-fA-F]{64}$')
 
@@ -60,8 +61,12 @@ def validate_observation(record):
     if not isinstance(record.get('session_token'),str) or not record['session_token']:
         raise ValueError('Live session token required')
     pixels=record.get('pixel_sha256')
-    if not isinstance(pixels,(list,tuple)) or len(pixels)!=3 or any(not isinstance(v,str) or not _HEX64.fullmatch(v) for v in pixels):
-        raise ValueError('Three pixel fingerprints required')
+    if not isinstance(pixels,(list,tuple)) or any(not isinstance(v,str) or not _HEX64.fullmatch(v) for v in pixels):
+        raise ValueError('Pixel fingerprints required')
+    count=region_count(len(pixels))
+    for key in ('region_count','actual_count'):
+        if key in record and region_count(record[key])!=count:
+            raise ValueError('Observation dye region count differs from fingerprints')
     pose=_pose(record.get('pose'))
     anim=record.get('animator')
     if not isinstance(anim,dict): raise ValueError('Animator records required')

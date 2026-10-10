@@ -324,10 +324,13 @@ class SearchOverlay(ct.CTkToplevel):
         self.results.grid(row=4,column=0,padx=2,pady=(0,10),sticky='ew');self._has_results=True;self._collapsed=False;self.copy.grid();self.activity.grid();self.collapse.configure(text='收起');self.resize_surface()
         self.render('游戏色码已复核','部分区域与目标色系不符。' if data.get('family_consistent') is False else
                     '全部目标达标，请在游戏内手动确认是否套用。' if data['accepted'] else '本轮候选实测未达标；当前颜色如下，尚不能判断色板无解。')
-        for i in range(3):
+        count=len(data['actual_colors'])
+        if count not in (2,3) or len(data['actual_deltas'])!=count:
+            raise ValueError('Observed result region counts disagree')
+        for i in range(count):
             if data['actual_deltas'][i] is None:continue
-            predicted=data.get('predicted_colors',[None]*3)[i]
-            delta=data.get('predicted_deltas',[None]*3)[i]
+            predicted=data.get('predicted_colors',[None]*count)[i]
+            delta=data.get('predicted_deltas',[None]*count)[i]
             text=f"区域 {i+1}\n"
             if predicted is not None and delta is not None:
                 text+=f"预测 {predicted} · ΔE {delta:.2f}\n"
@@ -380,6 +383,11 @@ class SearchOverlay(ct.CTkToplevel):
             ct.CTkLabel(self.results,text=tr(text),justify='left',anchor='w').pack(fill='x',padx=8,pady=8)
     def handle(self,kind,data):
         if getattr(self,'_dismissed',False):return
+        if kind=='region_layout':
+            self.rules=list(data['rules'])
+            if data.get('region_count')==2:
+                self.render('已识别双区域色板','已识别 2 个染色区域，区域 3 本局不可用。')
+            return
         if kind in ('native_progress','native_result'):
             self._native_run=True
             if not getattr(self,'_passive_input',False):self.set_passive_input(True)

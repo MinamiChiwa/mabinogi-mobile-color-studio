@@ -1,4 +1,5 @@
 """Target-colored subpixel lattice seeds; not a complete interpolation search."""
+from dye_regions import validate_region_rules
 import math
 import time
 import numpy as np
@@ -39,8 +40,7 @@ def target_seed_poses(session, rules, *, scales=(1.,), rotations_degrees=(0.,),
         raise ValueError('Invalid pixel seed limit')
     if type(max_candidates) is not int or not 1 <= max_candidates <= 100000 or not math.isfinite(time_budget_seconds) or time_budget_seconds <= 0:
         raise ValueError('Invalid generation budget')
-    if len(rules) != 3 or not any(rule['enabled'] for rule in rules):
-        raise ValueError('Three rules with an enabled region required')
+    count = validate_region_rules(session, rules)
     reference = _pose(session['initial_pose'] if reference is None else reference)
     start = clock()
     end = start + time_budget_seconds
@@ -87,7 +87,7 @@ def target_seed_poses(session, rules, *, scales=(1.,), rotations_degrees=(0.,),
                     selected = np.argsort(losses, kind='stable')[:pixels_per_region]
                     choices.extend((float(losses[index]), int(index), fx, fy, uv_samples[index]) for index in selected)
             choices.sort(key=lambda row: (row[0], row[1], row[2], row[3]))
-            z_reference = picker_view_uv(region, 3, session['picker_uv'][region][1], **reference).astype(float)
+            z_reference = picker_view_uv(region, count, session['picker_uv'][region][1], **reference).astype(float)
             for loss, index, fx, fy, uv in choices[:pixels_per_region]:
                 guard()
                 y, x = divmod(int(index), width)

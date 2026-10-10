@@ -137,7 +137,7 @@ def error(color,targets,exact):
     return float(np.min(np.linalg.norm(lab([rgb(color)])-lab([rgb(t) for t in targets]),axis=1)))
 
 def accepted(colors,rules):
-    if len(colors)!=3 or len(rules)!=3 or not any(rule['enabled'] for rule in rules):return False
+    if len(rules) not in (2,3) or len(colors)!=len(rules) or not any(rule['enabled'] for rule in rules):return False
     return all(not rule['enabled'] or (color is not None and error(color,rule['colors'],rule['exact']) <= (0 if rule['exact'] else rule['tolerance'])) for color,rule in zip(colors,rules))
 
 def ocr(im,whitelist,psm=7, *, deadline=None,clock=time.monotonic,check=lambda:None):
@@ -156,7 +156,42 @@ class Scene:
     seconds:int|None
     button:tuple|None
 
-def color_cards(image):
+    @property
+    def region_count(self):
+        return len(self.cards)
+
+def _card_board(cards,width,height):
+    centers=[x+cw//2 for x,y,cw,ch in cards]
+    spacing=centers[1]-centers[0]
+    left=round(centers[0]-spacing*.5);right=round(centers[-1]+spacing*.5)
+    top=max(c[1]+c[3] for c in cards)+round(cards[0][2]*.25)
+    return left,top,right,top+(right-left)
+
+
+def _complete_board_boundary(image,cards):
+    """A pair needs four independent visible edges of its full square board.
+
+    Card spacing alone cannot distinguish two regions from a hidden third.
+    Only the unbound visual path uses this conservative extra evidence.
+    """
+    h,w=image.shape[:2];left,top,right,bottom=_card_board(cards,w,h)
+    offset=max(3,round(cards[0][2]*.03));margin=max(offset+1,round((right-left)*.04))
+    if not (offset<=left<right<w-offset and offset<=top<bottom<h-offset):return False
+    xs=np.arange(left+margin,right-margin);ys=np.arange(top+margin,bottom-margin)
+    if not len(xs) or not len(ys):return False
+    values=image.astype(np.int16)
+    edges=((values[top,xs],values[top-offset,xs]),
+           (values[bottom-1,xs],values[bottom-1+offset,xs]),
+           (values[ys,left],values[ys,left-offset]),
+           (values[ys,right-1],values[ys,right-1+offset]))
+    return all(np.mean(np.max(np.abs(inside-outside),axis=1)>=24)>=.85
+               for inside,outside in edges)
+
+
+def color_cards(image,region_count=None):
+    if region_count is not None:
+        from dye_regions import region_count as validate_count
+        validate_count(region_count)
     h,w=image.shape[:2]
     mask=cv2.inRange(image,np.array([218]*3,np.uint8),np.array([255]*3,np.uint8))
     k=max(5,round(min(w,h)*.007)); k+=1-k%2
@@ -167,13 +202,18 @@ def color_cards(image):
         if min(cw,ch)<min(w,h)*.045 or cw>w*.32 or not .7<cw/ch<1.45: continue
         if cv2.contourArea(c)<cw*ch*.45:continue
         candidates.append((x,y,cw,ch))
-    for triple in itertools.combinations(candidates,3):
-        a=sorted(triple)
-        if max(t[1] for t in a)-min(t[1] for t in a)>min(t[3] for t in a)*.2:continue
-        if max(t[2] for t in a)>min(t[2] for t in a)*1.25:continue
-        if abs((a[1][0]-a[0][0])-(a[2][0]-a[1][0]))>a[0][2]*.3:continue
-        if a[1][0]-a[0][0]<a[0][2]*1.05:continue
-        return [(x,y,cw,cw) for x,y,cw,ch in a]
+    for count in (3,2):
+        for group in itertools.combinations(candidates,count):
+            a=sorted(group)
+            if max(t[1] for t in a)-min(t[1] for t in a)>min(t[3] for t in a)*.2:continue
+            if max(t[2] for t in a)>min(t[2] for t in a)*1.25:continue
+            if count==3 and abs((a[1][0]-a[0][0])-(a[2][0]-a[1][0]))>a[0][2]*.3:continue
+            if a[1][0]-a[0][0]<a[0][2]*1.05:continue
+            cards=[(x,y,cw,cw) for x,y,cw,ch in a]
+            if count==3:return cards if region_count in (None,3) else None
+            if region_count==2 or (region_count is None and _complete_board_boundary(image,cards)):
+                return cards
+        if region_count==3:break
     return None
 
 def _swatch_distance(value,samples):
@@ -633,12 +673,12 @@ def timer_seconds(image, unit=None, previous=None):
         if ordered:return min(ordered,key=lambda v:abs(v-int(previous)))
     return max(values)
 
-def recognize(image,with_ocr=True,previous=None,enabled=None,*,read_colors=True):
-    cards=color_cards(image)
-    if cards is None:raise ValueError('未识别到染色小游戏的三张色码卡片。请先进入限时染色界面。')
+def recognize(image,with_ocr=True,previous=None,enabled=None,*,read_colors=True,region_count=None):
+    cards=color_cards(image,region_count=region_count)
+    if cards is None:raise ValueError('未识别到染色小游戏的完整色码卡片。请先进入限时染色界面。')
     h,w=image.shape[:2]; white=np.min(image,axis=2)>210
     markers=[]
-    stable=previous is not None and len(previous.cards)==3 and all(max(abs(a-b) for a,b in zip(old,new))<=2 for old,new in zip(previous.cards,cards))
+    stable=previous is not None and len(previous.cards)==len(cards) and len(previous.markers)==len(cards) and all(max(abs(a-b) for a,b in zip(old,new))<=2 for old,new in zip(previous.cards,cards))
     for index,(x,y,cw,ch) in enumerate(cards):
         if stable:
             markers.append(previous.markers[index]);continue
@@ -665,14 +705,11 @@ def recognize(image,with_ocr=True,previous=None,enabled=None,*,read_colors=True)
         markers.append(refine_marker_center(image,(cx,best[1]),cw))
     # Board bounds are card-layout geometry. A subpixel ring refinement must
     # not move the crop or its coordinate origin by a rounding pixel.
-    card_centers=[x+cw//2 for x,y,cw,ch in cards]
-    spacing=card_centers[1]-card_centers[0]
-    left=max(0,round(card_centers[0]-spacing*.5)); right=min(w,round(card_centers[2]+spacing*.5))
-    top=max(c[1]+c[3] for c in cards)+round(cards[0][2]*.25)
-    bottom=min(h-3,top+(right-left))
+    left,top,right,bottom=_card_board(cards,w,h)
+    left=max(0,left);right=min(w,right);bottom=min(h-3,top+(right-left))
     # Board interior is square in both portrait and landscape layouts.
     if any(not(top<my<bottom) for mx,my in markers):raise ValueError('色板定位不完整，已停止以避免误操作。')
-    colors=read_codes(image,cards,markers,enabled=enabled) if with_ocr and read_colors else [None]*3
+    colors=read_codes(image,cards,markers,enabled=enabled) if with_ocr and read_colors else [None]*len(cards)
     seconds=None
     if with_ocr:
         unit=cards[0][2]
@@ -727,28 +764,30 @@ def measure_board_motion(before,after,board,feature_cache=None,texture_mask=None
             'matrix':matrix.tolist(),'origin':[l,t]}
 
 def candidate_shift(image,scene,rules,visited=(),excluded=()):
-    """Score shared translations using each third's own visible texture."""
-    l,t,r,b=scene.board; third=(r-l)/3
+    """Score shared translations using each actual material's visible texture."""
+    if len(scene.markers) not in (2,3) or len(rules)!=len(scene.markers):
+        raise ValueError('Markers and rules must have matching two or three regions')
+    l,t,r,b=scene.board; region_width=(r-l)/len(scene.markers)
     # Native-pixel sampling: a one-pixel pure dye must not fall between grid rows.
     # Cover the full visible height, including points near the board's edges.
     enabled=[p for p,rule in zip(scene.markers,rules) if rule['enabled']]
     if not enabled:return None
     ymin=int(np.ceil(max(my-(b-9) for mx,my in enabled)))
     ymax=int(np.floor(min(my-(t+9) for mx,my in enabled)))
-    yy,xx=np.mgrid[ymin:ymax+1,-int(third*.5):int(third*.5)+1]
+    yy,xx=np.mgrid[ymin:ymax+1,-int(region_width*.5):int(region_width*.5)+1]
     dx,dy=xx.ravel(),yy.ravel(); scores=np.zeros(dx.shape,float); valid=np.ones(dx.shape,bool)
     active=0;raw_worst=np.zeros(dx.shape);raw_total=np.zeros(dx.shape);feasible=np.ones(dx.shape,bool)
     for i,((mx,my),rule) in enumerate(zip(scene.markers,rules)):
         if not rule['enabled']:continue
         active+=1; sx=mx-dx; sy=my-dy
-        good=(sx>l+i*third+5)&(sx<l+(i+1)*third-5)&(sy>t+8)&(sy<b-8)
+        good=(sx>l+i*region_width+5)&(sx<l+(i+1)*region_width-5)&(sy>t+8)&(sy<b-8)
         sx=np.rint(np.clip(sx,0,image.shape[1]-1)).astype(int)
         sy=np.rint(np.clip(sy,0,image.shape[0]-1)).astype(int)
         pixels=image[sy,sx]; colors=lab(pixels)
         distances=np.min(np.linalg.norm(colors[:,None,:]-lab([rgb(c) for c in rule['colors']])[None,:,:],axis=2),axis=1)
         # Exclude UI geometry, not white dye. Pure white is a valid target.
         stem=(np.abs(sx-mx)<=3)&(sy<=my)
-        radius=max(6,round(third*.055))
+        radius=max(6,round((r-l)/3*.055))
         marker=(sx-mx)**2+(sy-my)**2<=(radius+3)**2
         good &= ~(stem|marker)
         for region,px,py in excluded:

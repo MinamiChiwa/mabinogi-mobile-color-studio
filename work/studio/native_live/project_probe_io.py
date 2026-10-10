@@ -7,6 +7,7 @@ from input_gestures import PointerGesture
 from .dye_action_checkpoint import record_action_checkpoint, _binding
 from vision import recognize,read_codes,_swatch_distance
 from .probe_timer import read_timer
+from dye_regions import region_count as validate_region_count
 
 
 class FrameReadTimeout(TimeoutError):
@@ -18,10 +19,10 @@ class FrameReadTimeout(TimeoutError):
 
 def merge_native_hex(decoded, native_hex):
     """Fill only OCR omissions from the same checkpoint's native HEX."""
-    if not isinstance(decoded, dict) or not isinstance(decoded.get('hex'), list) or len(decoded['hex']) != 3:
-        raise ValueError('Three screenshot HEX values required')
-    if not isinstance(native_hex, (list, tuple)) or len(native_hex) != 3:
-        raise ValueError('Three native checkpoint HEX values required')
+    if not isinstance(decoded, dict) or not isinstance(decoded.get('hex'), list) or len(decoded['hex']) not in (2,3):
+        raise ValueError('Two or three screenshot HEX values required')
+    if not isinstance(native_hex, (list, tuple)) or len(native_hex) != len(decoded['hex']):
+        raise ValueError('Screenshot and native checkpoint region counts disagree')
     values=list(decoded['hex']);sources=[]
     for index,(observed,native) in enumerate(zip(values,native_hex)):
         if observed is None:
@@ -42,8 +43,9 @@ def probe_layout_scale(width,height):
     return min(width/1280,height/960)
 
 
-def _recognize_native_layout(image,board):
+def _recognize_native_layout(image,board,region_count=3):
     """Search actual pixels near a measured native board, then restore origin."""
+    region_count=validate_region_count(region_count)
     h,w=image.shape[:2]
     if (not isinstance(board,(list,tuple)) or len(board)!=4
             or any(type(v) not in (int,float) or not math.isfinite(v) for v in board)):
@@ -51,18 +53,18 @@ def _recognize_native_layout(image,board):
     l,t,r,b=board;side=r-l
     if (not 0<=l<r<=w or not 0<=t<b<=h or abs(side-(b-t))>max(2,side*.02)):
         raise ValueError('Native board must be visible and square')
-    # Cards are directly above the three equal board columns. Restrict the
+    # Cards are directly above the actual equal board columns. Restrict the
     # detector's scale priors to this measured UI region, not the whole client;
     # a large desktop can still contain small, fully visible cards.
     left=max(0,math.floor(l-side*.06));top=max(0,math.floor(t-side*.30))
     right=min(w,math.ceil(r+side*.06));bottom=min(h,math.ceil(b+side*.03))
-    scene=recognize(image[top:bottom,left:right],with_ocr=False)
+    scene=recognize(image[top:bottom,left:right],with_ocr=False,region_count=region_count)
     scene.cards=[(x+left,y+top,cw,ch) for x,y,cw,ch in scene.cards]
     scene.markers=[(x+left,y+top) for x,y in scene.markers]
     vl,vt,vr,vb=scene.board;scene.board=(vl+left,vt+top,vr+left,vb+top)
     centers=[c[0]+c[2]/2 for c in scene.cards]
     tolerance=4*max(1.,side/499.2)
-    if max(abs(x-(l+(i+.5)*side/3)) for i,x in enumerate(centers))>tolerance:
+    if len(centers)!=region_count or max(abs(x-(l+(i+.5)*side/region_count)) for i,x in enumerate(centers))>tolerance:
         raise ValueError('Visual cards disagree with native board')
     if max(abs(a-v) for a,v in zip(board,scene.board))>max(6.,side*.025):
         raise ValueError('Visual board disagrees with native board')
@@ -70,18 +72,19 @@ def _recognize_native_layout(image,board):
 
 
 def read_probe_frame(image,*,deadline,check=lambda:None,clock=time.monotonic,previous_timer=None,captured_at=None,hex_fallback=None,
-        timer_mode='required',card_cache=None,native_board=None):
+        timer_mode='required',card_cache=None,native_board=None,region_count=3):
     def guard():
         check()
         if deadline is not None and clock()>=deadline:raise TimeoutError('Frame read deadline expired')
     guard()
     if image.ndim!=3 or image.shape[2]!=3 or image.dtype!=np.uint8:raise ValueError('RGB uint8 probe frame required')
     h,w=image.shape[:2];probe_layout_scale(w,h)
-    scene=recognize(image,with_ocr=False) if native_board is None else _recognize_native_layout(image,native_board)
+    region_count=validate_region_count(region_count)
+    scene=recognize(image,with_ocr=False,region_count=region_count) if native_board is None else _recognize_native_layout(image,native_board,region_count)
     guard()
     fallback_reads=[];codes=[None]*len(scene.cards);cache_hits=[False]*len(scene.cards);keys=[];samples=[]
     def frame_record(**extra):
-        return dict(hex=codes,hex_fallback_reads=fallback_reads,hex_cache_hits=cache_hits,
+        return dict(hex=codes,region_count=region_count,hex_fallback_reads=fallback_reads,hex_cache_hits=cache_hits,
             hex_recognition_sources=['exact_card_pixels_cache' if hit else 'screenshot_text' if code is not None else 'unresolved'
                 for hit,code in zip(cache_hits,codes)],
             timer_layout_assumption='measured_anchor_with_top_left_HUD_prior',
@@ -166,6 +169,17 @@ def read_probe_frame(image,*,deadline,check=lambda:None,clock=time.monotonic,pre
     return frame_record(**timer)
 
 
+def _observation_region_count(observation):
+    token=observation.get('session_token')
+    fingerprints=token[5] if isinstance(token,(list,tuple)) and len(token)>=6 else None
+    count=observation.get('region_count')
+    if count is None:count=len(fingerprints) if isinstance(fingerprints,(list,tuple)) else 3
+    count=validate_region_count(count)
+    if isinstance(fingerprints,(list,tuple)) and len(fingerprints)!=count:
+        raise ValueError('Bound palette region counts disagree')
+    return count
+
+
 class ProjectProbeIO:
     def __init__(self,backend,baseline,folder,*,game=None,stop=None,f9_pressed=None):
         self.backend=backend;self.reference=baseline;self.folder=Path(folder);self.folder.mkdir(parents=True,exist_ok=True)
@@ -230,11 +244,12 @@ class ProjectProbeIO:
             if [image.shape[1],image.shape[0]]!=list(expected):raise ValueError('Captured physical client extent mismatch')
             path=self.folder/(label+'_frame'+str(index)+'.png');Image.fromarray(image).save(path)
             board=self.last_observation['window_mapping_candidate']['client_board_candidate']
+            region_count=_observation_region_count(self.last_observation)
             try:
                 decoded=read_probe_frame(image,deadline=min(deadline,time.monotonic()+5),check=self._input_guard,
                     previous_timer=self.previous_timer,captured_at=captured,hex_fallback=getattr(self,'hex_fallback',None),
                     timer_mode='skip' if captured<getattr(self,'timer_grace_until',0.) else 'advisory',card_cache=self.card_cache,
-                    native_board=board)
+                    native_board=board,region_count=region_count)
             except FrameReadTimeout as exc:
                 self._input_guard()
                 decoded=exc.partial_frame
@@ -242,11 +257,11 @@ class ProjectProbeIO:
             if self.last_client_hex is not None:
                 decoded=merge_native_hex(decoded,self.last_client_hex)
             if decoded['remaining_seconds'] is not None:self.previous_timer=(decoded['remaining_seconds'],captured)
-            # Visually observed card centers should follow the native three
+            # Visually observed card centers should follow the actual native
             # equal columns; this detects a gross wrong screen/viewport.
             l,t,r,b=board
             centers=[c[0]+c[2]/2 for c in decoded['cards']]
-            if max(abs(x-(l+(i+.5)*(r-l)/3)) for i,x in enumerate(centers))>4*max(1.,(r-l)/499.2):
+            if len(centers)!=region_count or max(abs(x-(l+(i+.5)*(r-l)/region_count)) for i,x in enumerate(centers))>4*max(1.,(r-l)/499.2):
                 raise ValueError('Visual cards disagree with native board')
             frame=dict(decoded,captured_monotonic=captured,file=str(path))
             path.with_suffix('.json').write_text(json.dumps(frame,indent=2),encoding='utf-8')

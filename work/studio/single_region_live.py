@@ -13,7 +13,7 @@ from vision import configure_ocr, read_codes
 
 
 def result_fields(result, rules):
-    measured=describe_result(result.get('actual_colors') or [None]*3,rules)
+    measured=describe_result(result.get('actual_colors') or [None]*len(rules),rules)
     return dict(result,actual_deltas=[row['delta'] for row in measured['regions']],
                 maximum=measured['maximum'],average=measured['average'])
 
@@ -47,8 +47,8 @@ class SingleRegionIO:
     def read(self,image,*,enabled,deadline):
         self.check()
         self.code_read_stats['calls']+=1
-        if self.clock()>=deadline:return [None]*3
-        output=[None]*3;needed=list(enabled);cards={}
+        if self.clock()>=deadline:return [None]*len(self.rules)
+        output=[None]*len(self.rules);needed=list(enabled);cards={}
         for index,(x,y,w,h) in enumerate(self.scene.cards):
             if not enabled[index]:continue
             pixels=image[y:y+h,x:x+w,:3]
@@ -157,6 +157,16 @@ def run_live_single_region(owner,rules,*,target=None,activate=False,**_context):
                                 keep_active=keep_active,
                                 emit=lambda _kind,**data:owner.event('single_progress',**data),
                                 progress_stage='observe')
+        from dye_regions import region_count,bind_region_rules
+        count=region_count(len(ready['scene'].cards))
+        effective=[dict(rule) for rule in rules[:count]]
+        owner.event('region_layout',region_count=count,available_regions=[i<count for i in range(3)],rules=effective)
+        if not any(rule.get('enabled') for rule in effective):
+            owner.event('single_progress',stage='observe',message='本局没有已启用的可用区域，请启用区域 1 或 2。')
+            result=dict(stop_reason='no_available_regions',region_count=count,verified=False,accepted=False,
+                        actual_colors=[None]*count,actual_deltas=[None]*count,actual_input_attempts=0)
+            return result
+        rules=bind_region_rules(rules,count)
         io=SingleRegionIO(owner,game,ready['scene'],folder,rules)
         result=run_single_region(io,ready['scene'],rules,game_deadline=ready['budget'].deadline,
                                  search_started_at=ready['ready_at'])
