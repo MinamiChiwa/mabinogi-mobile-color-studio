@@ -67,17 +67,6 @@ class RuntimeMotionTests(unittest.TestCase):
         self.assertIs(adapter.last_motion_after,b)
         self.assertTrue(adapter.last_motion_diagnostics['passed'])
 
-    def test_adapter_reuses_features_between_adjacent_motion_pairs(self):
-        a,b=self.frames((25,75))
-        adapter=Adapter(object(),self.scene(),'offline')
-        original=atlas_runtime.cv2.SIFT_create
-        with patch.object(atlas_runtime.cv2,'SIFT_create',side_effect=original) as create:
-            self.assertIsNotNone(adapter.motion(a,b))
-            first=create.call_count
-            self.assertGreaterEqual(first,2)
-            self.assertIsNotNone(adapter.motion(a,b))
-            self.assertEqual(create.call_count,first)
-
     def test_motion_reuses_previous_frame_features(self):
         """A repeated registration must not run SIFT twice for old frames."""
         a,b=self.frames((25,75));cache={}

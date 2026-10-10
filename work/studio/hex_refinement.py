@@ -73,7 +73,9 @@ def score_codes(codes, rules):
         violations.append(distance>tolerance)
         actual.append(color);deltas.append(delta)
     ok=accepted(actual,rules)
-    rank=(not ok,max(normalized),sum(violations),float(np.mean(normalized)))
+    from region_priority import priority_components
+    ordered=priority_components(actual,rules,deltas)
+    rank=(not ok,*(ordered or ()),max(normalized),sum(violations),float(np.mean(normalized)))
     target_exact=all(not r['enabled'] or error(actual[i],r['colors'],True)==0
                      for i,r in enumerate(rules))
     return dict(colors=actual,deltas=deltas,accepted=ok,target_exact=target_exact,rank=rank)

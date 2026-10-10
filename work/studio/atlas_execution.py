@@ -31,41 +31,6 @@ ROUTE_REPLAN_TOLERANCE = 1.0
 ROUTE_REPLAN_HYSTERESIS = 0.25
 
 
-def _check_attempt_budget(stage_budget, gesture, *, return_seconds=0.,
-                          registration_seconds=.6, verification_seconds=1.0,
-                          safety_seconds=.25, emit=None, step=None, action=None):
-    """Reserve the complete post-input attempt before sending a gesture.
-
-    ``ExecutionStageBudget.for_attempt`` enables this gate. Directly
-    constructed legacy budgets still perform their historical stage check.
-    Costs deliberately include settling/registration, two-frame HEX
-    verification, the measured return route and a small safety margin.
-    """
-    if stage_budget is None:
-        return
-    record = gesture.record()
-    action_seconds = max(float(record.get('input_seconds', 0.)), .05) + .15
-    evidence=getattr(stage_budget,'cost_evidence',None)
-    if evidence is not None:
-        action_seconds=evidence.estimate_seconds('input',floor=action_seconds)
-        registration_seconds=evidence.estimate_seconds('registration',floor=registration_seconds)
-        verification_seconds=evidence.estimate_seconds('verification',floor=verification_seconds)
-    costs = dict(action_seconds=action_seconds,
-                 registration_seconds=float(registration_seconds),
-                 verification_seconds=float(verification_seconds),
-                 return_seconds=max(0., float(return_seconds)),
-                 safety_seconds=float(safety_seconds))
-    try:
-        stage_budget.check_attempt(**costs)
-    except StageBudgetExceeded:
-        if callable(emit):
-            emit('atlas_attempt_budget_blocked', dict(
-                step=step, action=action, costs=costs,
-                remaining=max(0., float(stage_budget.exploration_deadline) -
-                             float(stage_budget.clock()))))
-        raise
-
-
 def _route_needs_replan(errors, *, rotation_quantized=False, initial=True):
     if rotation_quantized:
         return True
@@ -516,6 +481,7 @@ def checked_translation(motion):
 
 def verify_result(candidate,actual,rules):
     from color_family import family_priority, family_fields
+    from region_priority import priority_fields
     from vision import rgb
     if len(actual)!=3 or any(r['enabled'] and actual[i] is None for i,r in enumerate(rules)):
         raise RuntimeError('Game HEX could not be read reliably')
@@ -533,7 +499,8 @@ def verify_result(candidate,actual,rules):
                 accepted=accepted(actual,rules),verified=True,**family_fields(*family,0),
                 exact_matches=exact_matches,exact_total=len(exact_regions),
                 exact_maximum=max((deltas[i] for i in exact_regions),default=0.),
-                exact_average=float(np.mean([deltas[i] for i in exact_regions])) if exact_regions else 0.)
+                exact_average=float(np.mean([deltas[i] for i in exact_regions])) if exact_regions else 0.,
+                **priority_fields(actual,deltas,rules))
 
 
 def _refresh_prediction(adapter,candidate,actual,rules,emit):
@@ -566,7 +533,7 @@ def _refresh_prediction(adapter,candidate,actual,rules,emit):
 
 def _feedback_refine(adapter, candidate, actual, before, codes, rules, markers,
                      board, deadline, emit, clock=time.monotonic,
-                     stage_budget=None, return_guard=None, max_probes=8):
+                     stage_budget=None, return_guard=None, max_probes=2):
     """Probe a tiny measured translation neighbourhood around a verified pose.
 
     The game HEX is authoritative here. Every probe is an integer drag followed
@@ -587,23 +554,21 @@ def _feedback_refine(adapter, candidate, actual, before, codes, rules, markers,
     from hex_feedback_search import (stable_hex_read, score_observation,
         retain_best, NeighborhoodLimits, neighborhood_offsets,
         UnstableHexRead, SearchDeadlineExceeded)
-    if len(codes)!=len(rules) or any(r.get('enabled') and codes[i] is None for i,r in enumerate(rules)):
+    if any(r.get('enabled') and codes[i] is None for i,r in enumerate(rules)):
         return actual, before, list(codes), None, False, 'unreadable_initial'
     try:
         best = score_observation(codes, rules, pose=actual[:2,2])
-        best['pose_matrix']=actual[:2].tolist()
     except Exception:
         return actual, before, list(codes), None, False, 'unscorable_initial'
     current_actual = actual.copy(); current_frame = before; current_codes = list(codes)
     origin_actual = actual.copy()
     best_actual = current_actual.copy(); best_frame = current_frame; best_codes = current_codes[:]
-    # Probe the complete one-pixel neighbourhood around the measured landing
-    # point.  A single miss is not evidence that the other three axes (or the
-    # diagonals) cannot improve the joint result.  The hard probe limit,
-    # countdown deadline, return guard and stage budget still bound the work;
-    # when time is tight the loop exits before emitting another input.
+    # Axis probes keep the physical walk within one pixel of the starting pose.
+    # The default is deliberately two probes: a first miss ends the feedback
+    # search immediately, while a second probe is spent only after measurable
+    # improvement and sufficient remaining budget.
     offsets = neighborhood_offsets(NeighborhoodLimits(steps=(1.0,), radius=1.5,
-                                                     include_diagonals=True))
+                                                     include_diagonals=False))
     max_probes=max(0,min(int(max_probes),len(offsets)))
     probes = 0; reason = 'neighborhood_exhausted'
     for offset in offsets:
@@ -626,7 +591,6 @@ def _feedback_refine(adapter, candidate, actual, before, codes, rules, markers,
             if not np.any(command): continue
             gesture = planned_gesture('drag', board, command)
             if not gesture.has_effect: continue
-            return_seconds = 1.5
             if callable(return_guard):
                 projected = homogeneous([[1., 0., float(command[0])],
                                          [0., 1., float(command[1])]]) @ current_actual
@@ -635,10 +599,6 @@ def _feedback_refine(adapter, candidate, actual, before, codes, rules, markers,
                     projected_pose=projected)
                 if not isinstance(reserve, dict) or not reserve.get('allowed', False):
                     reason = 'return_reserve'; break
-                return_seconds = float(reserve.get('return_needed') or 1.5)
-            _check_attempt_budget(stage_budget, gesture,
-                                  return_seconds=return_seconds, emit=emit,
-                                  step=probes + 1, action='drag')
             adapter.perform_gesture(gesture); input_sent = True
             adapter.pause(.12)
             after = adapter.capture()
@@ -673,7 +633,6 @@ def _feedback_refine(adapter, candidate, actual, before, codes, rules, markers,
             checked_translation(tail)
             sample = score_observation(stable['codes'], rules, pose=next_actual[:2,2],
                                        frames=2)
-            sample['pose_matrix']=next_actual[:2].tolist()
             probes += 1
             emit('atlas_hex_feedback', dict(step=probes, offset=command.tolist(),
                  codes=sample['codes'], rank=sample['rank'], improved=sample['score_key'] < best['score_key']))
@@ -685,11 +644,8 @@ def _feedback_refine(adapter, candidate, actual, before, codes, rules, markers,
                 best_actual = current_actual.copy(); best_frame = current_frame; best_codes = current_codes[:]
                 if bool(sample.get('accepted')):
                     reason = 'target_exact'; break
-            # Keep checking the remaining neighbours after a miss.  The
-            # retained global best is restored once the bounded neighbourhood
-            # is exhausted (or the countdown guard stops further probes).
-            elif probes >= max_probes:
-                reason = 'probe_limit'; break
+            elif probes == 1:
+                reason = 'no_improvement'; break
         except (UnstableHexRead, SearchDeadlineExceeded, StageBudgetExceeded) as exc:
             reason = str(exc); break
         except Exception as exc:
@@ -715,17 +671,11 @@ def _feedback_refine(adapter, candidate, actual, before, codes, rules, markers,
             else:
                 gesture = planned_gesture('drag', board, delta)
                 if gesture.has_effect:
-                    return_seconds = 1.5
                     if callable(return_guard):
                         reserve = guarded_return(current_actual.copy(), 1.6,
                                                projected_pose=best_actual)
                         if not isinstance(reserve, dict) or not reserve.get('allowed', False):
                             raise CandidateExpired('return reserve reached')
-                        return_seconds = float(reserve.get('return_needed') or 1.5)
-                    _check_attempt_budget(stage_budget, gesture,
-                                          return_seconds=return_seconds,
-                                          emit=emit, step=probes + 1,
-                                          action='drag_restore')
                     adapter.perform_gesture(gesture); restore_input_sent = True; adapter.pause(.12)
                     after = adapter.capture()
                     registration = _measured_motion(adapter, current_frame, after, emit,
@@ -753,45 +703,6 @@ def _feedback_refine(adapter, candidate, actual, before, codes, rules, markers,
                 raise
             reason = str(exc)
     return current_actual, current_frame, current_codes, best, restored, reason
-
-
-def _feedback_observation_result(candidate, observation, rules, actual_pose):
-    """Convert one retained HEX feedback sample into the normal result shape.
-
-    ``score_observation`` intentionally stays adapter agnostic and therefore
-    only contains the measured codes and ranking fields.  The service/UI use
-    the same result contract as a regular candidate, so build that contract
-    here without ever treating the requested or historical pose as current.
-    """
-    codes=list(observation.get('codes') or [])
-    result=verify_result(candidate,codes,rules)
-    pose=np.asarray(observation.get('pose_matrix',actual_pose), float)
-    if pose.shape==(2,):
-        pose=np.array([[1.,0.,pose[0]],[0.,1.,pose[1]]])
-    if pose.shape!=(2,3):
-        raise ValueError('Measured feedback pose must be a 2x3 transform or point')
-    result.update(actual_pose=pose.tolist(),
-                  feedback_best=True, feedback_best_available=True,
-                  prediction_pose_source='measured_hex_feedback')
-    return result
-
-
-def _unknown_feedback_result(candidate, codes, rules, actual_pose):
-    """Represent the live pose when feedback HEX is no longer readable.
-
-    An input has already happened at this point.  Returning the pre-action
-    HEX would be unsafe, so retain only the current pose and explicit unknown
-    colour fields until the user verifies the game screen.
-    """
-    values=list(codes or [])
-    if len(values)!=len(rules):values=[None]*len(rules)
-    return dict(candidate_id=candidate['id'],predicted_colors=candidate.get('colors'),
-                predicted_deltas=candidate.get('deltas'),actual_colors=values,
-                actual_deltas=[None]*len(rules),prediction_errors=[None]*len(rules),
-                maximum=None,average=None,accepted=False,verified=False,
-                actual_pose=np.asarray(actual_pose, float)[:2].tolist(),
-                feedback_best_available=False,feedback_best=False,
-                prediction_pose_source='measured_hex_feedback_unreadable')
 
 
 def _recover_current_result(adapter, candidate, rules, actual, markers, target,
@@ -891,6 +802,7 @@ def _recover_current_result(adapter, candidate, rules, actual, markers, target,
             actual_deltas=result.get('actual_deltas', [None] * 3),
             prediction_errors=result.get('prediction_errors', [None] * 3),
             maximum=result.get('maximum'), average=result.get('average'),
+            **{k:result[k] for k in ('region_priority',) if k in result},
             accepted=False, observed_accepted=observed_accepted, verified=True,
             recovered=True, pose_reliable=pose_reliable,
             positioning_complete=False))
@@ -1134,7 +1046,6 @@ def execute_candidate(adapter,batch,batch_id,candidate_id,reference,rules,emit=l
                                      anchor=anchor,gesture=gesture.record()))
             if stage_budget is not None:stage_budget.check_input()
             return_guard=getattr(adapter,'return_guard',None)
-            return_seconds = 1.5
             if callable(return_guard):
                 # Protect the checkpoint before leaving the last measured
                 # pose. Include input, settling and the next measurement;
@@ -1172,10 +1083,6 @@ def execute_candidate(adapter,batch,batch_id,candidate_id,reference,rules,emit=l
                          upcoming_seconds=upcoming,budget=return_budget,
                          actual_pose=actual[:2].tolist(),input_sent=False))
                     raise RuntimeError('Return reserve reached before the next input')
-                return_seconds = float(return_budget.get('return_needed') or 1.5)
-            _check_attempt_budget(stage_budget, gesture,
-                                  return_seconds=return_seconds, emit=emit,
-                                  step=step + 1, action=kind)
             pose_current=False
             adapter.perform_gesture(gesture)
             adapter.pause(.15)
@@ -1263,7 +1170,6 @@ def execute_candidate(adapter,batch,batch_id,candidate_id,reference,rules,emit=l
         adapter.check()
         if clock()>=batch.deadline:raise CandidateExpired('No time for HEX verification')
         emit('atlas_progress',dict(stage='verify'))
-        verification_started=time.perf_counter()
         if stage_budget is not None:stage_budget.check_observation()
         first=adapter.read_codes(before)
         if stage_budget is not None:stage_budget.check_observation()
@@ -1287,9 +1193,6 @@ def execute_candidate(adapter,batch,batch_id,candidate_id,reference,rules,emit=l
         if np.max(errors)>POSITION_TOLERANCE:raise CandidateExpired('Marker alignment changed during verification')
         adapter.check()
         if clock()>=batch.deadline:raise CandidateExpired('HEX verification exceeded the deadline')
-        evidence=getattr(adapter,'evidence',None)
-        if evidence is not None:
-            evidence.record_duration('verification',time.perf_counter()-verification_started)
         # The controller accepts a small alignment residual and may replan at
         # a measured detent. Neither case preserves the old predicted colours.
         # Resample at the final registered pose, independently of game HEX.
@@ -1303,7 +1206,7 @@ def execute_candidate(adapter,batch,batch_id,candidate_id,reference,rules,emit=l
         # measured sample. Exact candidates stop here to avoid needless dye
         # motion; misses receive the explicit compromise metadata below.
         initial_verified=verify_result(candidate,second,rules)
-        if not initial_verified.get('accepted') and not candidate.get('restore_checkpoint'):
+        if not initial_verified.get('accepted'):
             feedback_used=True
             actual, verified_frame, second, feedback_best, feedback_restored, feedback_reason = _feedback_refine(
                 adapter, candidate, actual, verified_frame, second, rules, markers,
@@ -1314,33 +1217,14 @@ def execute_candidate(adapter,batch,batch_id,candidate_id,reference,rules,emit=l
             errors=marker_errors(target,actual,markers)
             if np.max(errors)>FEEDBACK_POSITION_TOLERANCE:
                 raise CandidateExpired('Marker alignment changed during HEX feedback search')
-        # ``second`` belongs to the live pose after feedback.  It may be
-        # unreadable when a settling read or the attempted return runs out of
-        # budget; never fall back to the HEX from before that input.
-        try:
-            result=verify_result(candidate,second,rules)
-        except (RuntimeError, ValueError):
-            if len(second)!=len(rules) or any(r.get('enabled') and second[i] is None
-                                              for i,r in enumerate(rules)):
-                result=_unknown_feedback_result(candidate,second,rules,actual)
-            else:
-                raise
-        if feedback_best is not None:
-            # Keep the retained sample separate from the current live pose.
-            # This is the only safe way to tell the user that a better colour
-            # was measured but could not be restored before the countdown.
-            result['feedback_best_available']=True
-            if not feedback_restored:
-                result['best_result']=_feedback_observation_result(
-                    candidate,feedback_best,rules,feedback_best.get('pose',actual[:2,2]))
-            result['best_result_current']=bool(feedback_restored)
+        result=verify_result(candidate,second,rules)
         result.update(actual_pose=actual[:2].tolist(),marker_errors=errors.tolist(),
                       replanned=pose_replanned,predicted_accepted=bool(candidate.get('accepted')),
                       prediction_pose_source=candidate.get('prediction_pose_source','proposal'),
                       prediction_pose=candidate.get('prediction_pose'),
                       feedback_refined=feedback_used,
                       feedback_reason=feedback_reason,
-                      best_result_current=result.get('best_result_current',bool(feedback_restored)),
+                      best_result_current=bool(feedback_restored),
                       compromise=not bool(result.get('accepted')))
         adapter.verified_frame=verified_frame
         if reservation=='choice':

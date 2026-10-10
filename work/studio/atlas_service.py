@@ -11,7 +11,7 @@ import time
 import uuid
 from atlas_execution import reposition_budget
 from workflow_budget import earliest_deadline
-from candidate_ranking import candidate_rank,progressive_candidate_rank,candidate_quality
+from candidate_ranking import candidate_rank,candidate_quality
 from atlas_pose import relative_candidate, candidate_pose, homogeneous, pose_fields
 
 
@@ -24,12 +24,6 @@ class AtlasCallbacks:
     select: object=None
     prepare: object=None
     observe_current: object=None
-    # Optional experimental path: a callback may collect a few anchors,
-    # generate joint candidates, and perform local refinement.  It is never
-    # called unless ``progressive_search`` is explicitly enabled in context
-    # (or the builder marks the report as progressive).
-    progressive: object=None
-    finish_checkpoint: object=None
 
 
 def quality_failure_message(gate):
@@ -69,48 +63,6 @@ def _protected_route(row,budget):
     return (budget.get('allowed',False) and stability.get('passed',False) and
             stability.get('samples_complete',True) and
             (not transforms or stability.get('response_profile_verified',False)))
-
-
-def _enabled_region_count(rules):
-    """Return the number of enabled regions participating in this search."""
-    try:
-        return sum(1 for rule in rules if isinstance(rule,dict) and rule.get('enabled'))
-    except TypeError:
-        return 0
-
-
-def _has_exact_region(rules):
-    """Whether at least one enabled region uses byte-exact matching."""
-    try:
-        return any(isinstance(rule,dict) and rule.get('enabled') and rule.get('exact')
-                   for rule in rules)
-    except TypeError:
-        return False
-
-
-def _observation_snapshot(result):
-    return deepcopy({key:value for key,value in result.items() if key not in (
-        'best_result','baseline_result','best_observed_result','round_evidence')})
-
-
-def _with_history(result,state):
-    """Attach history without substituting historical HEX for the current read."""
-    baseline=state.get('baseline')
-    if not isinstance(result,dict) or not isinstance(baseline,dict):return result
-    snapshots=[row for row in (state.get('best'),baseline,result,result.get('best_result'))
-               if isinstance(row,dict) and _measured_quality(row) is not None]
-    best=min(snapshots,key=_measured_quality) if snapshots else None
-    if best is not None:state['best']=_observation_snapshot(best)
-    colors=result.get('actual_colors')
-    same_colors=bool(best is not None and result.get('verified') and colors is not None and
-                     colors==best.get('actual_colors'))
-    current=bool(same_colors and result.get('actual_pose') is not None and
-                 not result.get('recovered') and result.get('positioning_complete') is not False)
-    return dict(result,baseline_result=_observation_snapshot(baseline),
-                best_observed_result=_observation_snapshot(best) if best else None,
-                best_result=_observation_snapshot(best) if best else None,
-                best_result_current=current,historical_best_unrestored=bool(best and not same_colors),
-                history_color_matches_current=same_colors)
 
 
 class AtlasService:
@@ -156,7 +108,6 @@ class AtlasService:
         observed=dict(observed,early_exit=True,recovery_reason=reason,
                       candidate_id=None,actual_pose=None,pose_reliable=False,
                       accepted=False,recovered=True,best_result_current=False,positioning_complete=False)
-        observed=_with_history(observed,context.get('_checkpoint_state',{}))
         owner.event('atlas_recovery',**observed)
         return observed
 
@@ -221,15 +172,13 @@ class AtlasService:
                 if prepared is not None:
                     owner.event('atlas_status',message='正在恢复本轮已实测的最佳方案。')
                     attempted=True
-                    restored=self.callbacks.choice(owner,report,prepared[0],rules,
-                                                    **dict(context,recording_return=True))
+                    restored=self.callbacks.choice(owner,report,prepared[0],rules,**context)
                     result=(restored if isinstance(restored,dict) else
                             dict(verified=False,actual_pose=None,candidate_id=best['candidate_id']))
                     quality=_measured_quality(result)
                     if (quality is not None and quality<=_measured_quality(best) and
                             result.get('actual_pose') is not None and not result.get('recovered') and
                             result.get('positioning_complete') is not False):
-                        if report.get('evidence') is not None:report['evidence'].mark_return(True)
                         return dict(result,best_result_current=True,restored_best=True)
             except Exception as exc:
                 if _is_safety_interrupt(exc):raise
@@ -238,39 +187,11 @@ class AtlasService:
                     result=dict(verified=False,actual_pose=None,candidate_id=best['candidate_id'])
         result=dict(result,best_result=deepcopy(best),best_result_current=False,
                     restore_attempted=attempted,restore_detail=detail)
-        if attempted and report.get('evidence') is not None:report['evidence'].mark_return(False)
         owner.event('atlas_best_not_restored',**result)
         return result
 
     def run(self, owner, rules, **context):
-        state={}
-        result=self._run(owner,rules,**dict(context,_checkpoint_state=state))
-        return _with_history(result,state)
-
-    def _finish_checkpoint(self,owner,captured,rules,context,emit):
-        callback=self.callbacks.finish_checkpoint
-        if not callable(callback):return None
-        try:result=callback(owner,captured,rules,**context)
-        except Exception as exc:
-            if _is_safety_interrupt(exc):raise
-            owner.event('atlas_recovery_unavailable',
-                message='最佳结果返程未能完成，已停止自动移动。',detail=str(exc))
-            return self._observe_early_exit(owner,captured,rules,context,'checkpoint_return_failed')
-        if not isinstance(result,dict):return None
-        result=_with_history(result,context['_checkpoint_state'])
-        located=bool(result.get('verified') and result.get('actual_pose') is not None
-                     and not result.get('recovered') and result.get('positioning_complete') is not False)
-        emit('atlas_checkpoint_verified' if located and result.get('best_result_current')
-             else 'atlas_best_not_restored',**result)
-        return result
-
-    def _run(self,owner,rules,**context):
-        state=context['_checkpoint_state']
-        def emit(kind,**data):
-            if kind in ('atlas_default_verified','atlas_verified','atlas_checkpoint_verified',
-                        'atlas_recovery','atlas_best_not_restored','atlas_best_observed'):
-                data=_with_history(data,state)
-            owner.event(kind,**data)
+        emit=owner.event
         emit('atlas_status',message='正在采集本局颜色板。')
         try:
             captured=self.callbacks.acquire(owner,rules,**context)
@@ -280,19 +201,6 @@ class AtlasService:
                  message='颜色板采集未能完成，已停止自动移动并保留游戏当前画面。',
                  detail=str(exc))
             return None
-        if isinstance(captured,dict):
-            state['baseline']=captured.get('baseline_result')
-            if captured.get('baseline_matched'):
-                result=_with_history(dict(captured['baseline_result'],positioning_complete=True,
-                    baseline_current=True,best_result_current=True),state)
-                emit('atlas_checkpoint_verified',**result)
-                return result
-            if captured.get('baseline_unavailable'):
-                return self._observe_early_exit(owner,captured,rules,context,'baseline_unavailable')
-            if captured.get('checkpoint_budget_stop'):
-                finished=self._finish_checkpoint(owner,captured,rules,context,emit)
-                if finished is not None:return finished
-                return self._observe_early_exit(owner,captured,rules,context,'checkpoint_return_unavailable')
         try:
             report=self.callbacks.build(captured,rules,**context)
         except Exception as exc:
@@ -301,21 +209,8 @@ class AtlasService:
                  message='颜色板校验未能完成，已停止自动移动并保留游戏当前画面。',
                  detail=str(exc))
             return self._observe_early_exit(owner,captured,rules,context,'atlas_build_failed')
-        if isinstance(report.get('baseline_result'),dict):
-            state['baseline']=report['baseline_result']
         gate=report.get('quality_gate',{})
         if not gate.get('passed',False):
-            if report.get('alignment_error'):
-                # Capture already stopped at the first bad frame.  Surface
-                # that fact directly instead of presenting a generic atlas
-                # quality failure while the UI appears frozen at N/48.
-                emit('atlas_recovery_unavailable',
-                     message='颜色板采集在第 %s 步对齐失败，已停止自动移动并读取当前游戏色码。' %
-                             (report.get('alignment_frames') or '?'),
-                     detail=str(report.get('alignment_error')),
-                     reason='atlas_capture_alignment_failed')
-                return self._observe_early_exit(owner,captured,rules,context,
-                                                'atlas_capture_alignment_failed')
             emit('atlas_invalidated',reason='atlas_quality_failed',search_performed=False,
                  message=quality_failure_message(gate),quality_gate=gate)
             return self._observe_early_exit(owner,captured,rules,context,'atlas_quality_failed')
@@ -330,42 +225,11 @@ class AtlasService:
         context=dict(context,selection_deadline=deadline)
         if batch is not None and deadline is not None:batch.deadline=deadline
         emit('atlas_ready',quality_gate=gate)
-        progressive = bool(context.get('progressive_search') or
-                           report.get('search_mode') == 'progressive')
-        # The staged path is deliberately opt-in.  A callback returns either
-        # a candidate list or a report fragment containing ``candidates``;
-        # malformed/failed staged searches fall back to the complete atlas
-        # result and are surfaced as diagnostics, never as a hard failure.
-        if progressive and callable(getattr(self.callbacks, 'progressive', None)):
-            complete_candidates=list(report.get('candidates',[]))
-            try:
-                staged=self.callbacks.progressive(owner,captured,report,rules,**context)
-                if isinstance(staged,dict):
-                    report.update(staged)
-                elif isinstance(staged,list):
-                    report['candidates']=staged
-                else:
-                    raise ValueError('progressive callback returned no candidate report')
-                if not report.get('candidates'):
-                    # An empty anchor/refinement result is an unavailable
-                    # staged search. Preserve the already-built full atlas so
-                    # the explicit experiment switch cannot turn a recoverable
-                    # search into a false no-candidate result.
-                    report['candidates']=complete_candidates
-                    raise ValueError('progressive callback returned no candidates')
-                report['search_mode']='progressive'
-            except Exception as exc:
-                if _is_safety_interrupt(exc):raise
-                report['candidates']=complete_candidates
-                emit('atlas_progressive_unavailable',detail=str(exc),
-                     message='渐进候选搜索未完成，回退完整颜色板候选。')
-                progressive=False
-        rank_fn=progressive_candidate_rank if progressive else candidate_rank
         rows=report.get('candidates',[])
         raw_rows=list(rows)
         raw_accepted=[row for row in raw_rows if row.get('accepted')]
         compromise_rows=[row for row in raw_rows if row not in raw_accepted]
-        best_compromise=min(compromise_rows,key=rank_fn) if compromise_rows else None
+        best_compromise=min(compromise_rows,key=candidate_rank) if compromise_rows else None
         emit('atlas_search_summary',raw_count=len(raw_rows),
              family_consistent_count=sum(row.get('family_consistent',False) for row in raw_rows),
              predicted_accepted_count=len(raw_accepted),
@@ -374,32 +238,8 @@ class AtlasService:
              best_compromise_average=best_compromise.get('average') if best_compromise else None,
              search_diagnostics=report.get('search_diagnostics',{}))
         compromise_only=not bool(raw_accepted)
-        # Exact mode is a preference for ranking and acceptance, not a reason
-        # to abandon a usable round.  In particular, a multi-region exact
-        # target may have no jointly exact sample even though the atlas has a
-        # safe, measured near match.  Keep that candidate in the normal route
-        # and verification pipeline so the player gets the closest measured
-        # result instead of paying for a dye with no positioned result.  The
-        # compromise_only flag below is carried through the candidate event,
-        # result payload, and UI; no dye confirmation is sent automatically.
-        compromise_fallback = compromise_only and _enabled_region_count(rules) >= 2
-        strict_exact_fallback = _has_exact_region(rules)
-        if compromise_fallback:
-            search_diagnostics=report.get('search_diagnostics',{})
-            family_count=sum(bool(row.get('family_consistent')) for row in raw_rows)
-            emit('atlas_status',
-                 message=('未找到所有启用区域共同精准命中，正在定位综合色差最小的妥协方案；不会自动确认染色。'
-                          if strict_exact_fallback else
-                          '未找到所有启用区域共同达标方案，正在定位综合色差最小的妥协方案；不会自动确认染色。'),
-                 reason='no_joint_candidate',candidate_count=len(raw_rows),
-                 family_consistent_count=family_count,
-                 strict_exact=strict_exact_fallback,
-                 exact_target_availability=search_diagnostics.get('exact_target_availability',{}))
         if not rows:
             diagnostics=report.get('search_diagnostics',{})
-            if diagnostics.get('route_binding_stop_reason') or diagnostics.get('search_stop_reason'):
-                finished=self._finish_checkpoint(owner,captured,rules,context,emit)
-                if finished is not None:return finished
             stable_count=diagnostics.get('stable_route_count',0)
             message=('本轮没有在预测阶段确认稳定可达的方案，未发送自动移动。'
                      if diagnostics.get('stability_required') else
@@ -409,7 +249,7 @@ class AtlasService:
                  stable_route_count=stable_count,
                  search_diagnostics=report.get('search_diagnostics',{}))
             return self._observe_early_exit(owner,captured,rules,context,'no_executable_candidate')
-        rows=sorted(rows,key=rank_fn)
+        rows=sorted(rows,key=candidate_rank)
         batch_id=report.get('batch_id') or (batch.id if batch is not None else uuid.uuid4().hex)
         board=report.get('board')
         markers=(batch.context.markers if batch is not None else report.get('markers'))
@@ -424,43 +264,22 @@ class AtlasService:
             if budget['allowed']:available.append((row,budget))
         default,default_budget=available[0] if available else (rows[0],{'allowed':False})
         if not default_budget['allowed']:
-            finished=self._finish_checkpoint(owner,captured,rules,context,emit)
-            if finished is not None:return finished
             if batch is not None:batch.invalidate()
             emit('atlas_default_unavailable',message='剩余时间不足以安全定位并复核自动最佳方案，未发送定位操作。',budget=default_budget)
             return self._observe_early_exit(owner,captured,rules,context,'default_budget_unavailable')
         # Only publish routes that passed the complete motion simulation and
         # fit the remaining game time. Raw search results stay in diagnostics.
         rows=[row for row,_budget in available]
-        default_context=context
-        baseline=report.get('baseline_result') or {}
-        if baseline.get('entry_checkpoint') and _measured_quality(baseline) is not None:
-            target=dict(baseline,**pose_fields(baseline['actual_pose'],board))
-            prospective=candidate_pose(default,board)[:2].tolist()
-            returning=self._prepare_protected(owner,report,target,prospective,rules,context)
-            if returning is None or time.monotonic()+default_budget['needed']+returning[1]['needed']>=deadline:
-                finished=self._finish_checkpoint(owner,captured,rules,context,emit)
-                if finished is not None:return finished
-                return self._observe_early_exit(owner,captured,rules,context,'baseline_return_budget_unavailable')
-            default_context=dict(context,return_guard=self._return_guard(owner,report,target,rules,context))
         family_unavailable=all(row.get('family_consistent') is False for row in rows)
         emit('atlas_candidates',batch_id=batch_id,candidates=rows,default_id=default['id'],
              compromise_only=compromise_only,
-             compromise_fallback=compromise_fallback,
-             strict_exact=strict_exact_fallback,
              family_unavailable=family_unavailable,
-             message=('本轮可执行方案均有区域偏离目标色系，以下按综合色差与落点稳定性排序；不会自动确认染色。'
-                      if family_unavailable and compromise_fallback else
-                      '本轮可执行方案均有区域偏离目标色系，以下按综合色差与落点稳定性排序。'
+             message=('本轮可执行方案均有区域偏离目标色系，以下按综合色差与落点稳定性排序。'
                       if family_unavailable else
-                      ('未找到所有启用区域共同精准命中，正在定位综合色差最小的妥协方案；不会自动确认染色。'
-                       if strict_exact_fallback else
-                       '未找到所有启用区域共同达标方案，正在定位综合色差最小的妥协方案；不会自动确认染色。')
-                      if compromise_fallback else
                       '未找到满足所设目标的组合，正在定位最接近的妥协方案。'
                       if compromise_only else None))
         try:
-            result=self.callbacks.default(owner,report,default,rules,**default_context)
+            result=self.callbacks.default(owner,report,default,rules,**context)
         except Exception as exc:
             if _is_safety_interrupt(exc):raise
             # An input or verification fault after the session has started is
@@ -481,16 +300,6 @@ class AtlasService:
         result=dict(result, predicted_accepted=result.get('predicted_accepted',bool(default.get('accepted'))),
                     compromise=compromise_only or not bool(default.get('accepted')),
                     candidate_id=default['id'])
-        # A local HEX feedback probe may have measured a better sample but
-        # failed to return to it before the deadline.  That payload is a
-        # terminal, explicitly split observation: the current game pose stays
-        # authoritative and ``best_result`` is historical only.  Do not feed
-        # it into the ordinary candidate loop or present it as a verified
-        # automatic result.
-        if result.get('feedback_best_available') and not result.get('best_result_current'):
-            if batch is not None:batch.invalidate()
-            emit('atlas_best_not_restored',**result)
-            return result
         # A recovery can continue only from a newly registered pose. The
         # alternate-candidate path keeps that observation as its checkpoint
         # and does not repeat the failed transform.
@@ -515,26 +324,12 @@ class AtlasService:
         # logic as ordinary candidates, rather than executing inside a callback.
         recovery_rows=report.pop('recovery_candidates',[])
         if recovery_rows:
-            rows=sorted(rows+recovery_rows,key=rank_fn)
+            rows=sorted(rows+recovery_rows,key=candidate_rank)
             emit('atlas_candidates',batch_id=batch_id,candidates=rows,default_id=default['id'],
                  compromise_only=not any(row.get('accepted') for row in rows),
                  family_unavailable=all(row.get('family_consistent') is False for row in rows))
         attempted={default['id']}
         best_result=deepcopy(result);best_candidate=default
-        baseline=report.get('baseline_result')
-        if (_measured_quality(baseline or {}) is not None and
-                _measured_quality(baseline)<_measured_quality(best_result)):
-            # Acquisition itself has left the entry sample. A verified worse
-            # first candidate must not become the automatic "best" merely
-            # because the entry result was observed before atlas building.
-            restored=self._restore_observed(owner,report,result,baseline,
-                dict(baseline,**pose_fields(baseline['actual_pose'],board)),rules,context)
-            restored=_with_history(restored,state)
-            if batch is not None:batch.invalidate()
-            if restored.get('best_result_current'):
-                restored=dict(restored,compromise=not bool(restored.get('accepted')))
-                emit('atlas_checkpoint_verified',**restored)
-            return restored
         def checkpoint_target():
             # Restore the measured endpoint, which may differ from the
             # originally published candidate after execution replanning.
@@ -585,7 +380,7 @@ class AtlasService:
                     verified=False,actual_pose=None,detail='choice callback returned no result'),
                     best_result,checkpoint_target(),rules,context)
             result=dict(trial, predicted_accepted=trial.get('predicted_accepted',bool(default.get('accepted'))),
-                        compromise=compromise_only or not bool(trial.get('accepted')),
+                        compromise=not bool(trial.get('accepted')),
                         candidate_id=default['id'])
             quality=_measured_quality(result)
             if quality is not None and quality<best_quality:
@@ -620,7 +415,7 @@ class AtlasService:
         # A compromise deliberately exceeds a configured target. Keep the
         # highest-ranked affordable proposal and enable choices instead of
         # walking through successively worse predictions.
-        result=dict(result,compromise=compromise_only or not bool(result.get('accepted')),
+        result=dict(result,compromise=not bool(result.get('accepted')),
                     best_result=deepcopy(best_result),best_result_current=True)
         emit('atlas_default_verified',**result)
         try:
@@ -717,7 +512,7 @@ class AtlasService:
                 choice.get('recovered') or choice.get('positioning_complete') is False):
             return incomplete_choice(dict(choice,candidate_id=candidate['id']))
         choice=dict(choice, predicted_accepted=choice.get('predicted_accepted',bool(candidate.get('accepted'))),
-                    compromise=compromise_only or not bool(choice.get('accepted')),
+                    compromise=not bool(choice.get('accepted')),
                     candidate_id=candidate['id'])
         emit('atlas_verified',**choice)
         return choice

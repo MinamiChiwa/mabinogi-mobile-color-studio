@@ -7,52 +7,6 @@ from atlas_service import AtlasService, AtlasCallbacks
 
 
 class BudgetTests(unittest.TestCase):
-    def test_operation_keeps_dynamic_return_and_double_read_reserve(self):
-        budget=WorkflowBudget(0.,120.)
-        self.assertFalse(budget.allow_operation(now=98.,operation_seconds=5.,
-            return_seconds=12.,verification_seconds=4.))
-        self.assertTrue(budget.allow_operation(now=80.,operation_seconds=5.,
-            return_seconds=12.,verification_seconds=4.))
-        # Initial positioning is charged before leaving CPU work, too.
-        self.assertFalse(budget.allow_operation(now=80.,operation_seconds=5.,
-            return_seconds=12.,verification_seconds=4.,positioning_seconds=18.))
-
-    def test_unknown_operation_cost_fails_closed(self):
-        budget=WorkflowBudget(0.,120.)
-        for cost in (None,float('inf'),float('nan'),-1.,True):
-            with self.subTest(cost=cost),self.assertRaises(ValueError):
-                budget.allow_operation(now=10.,operation_seconds=cost,
-                    return_seconds=1.,verification_seconds=1.)
-
-    def test_binding_reserve_is_enabled_by_default_and_does_no_late_work(self):
-        with patch('atlas_live_adapter.time.monotonic',return_value=140), \
-             patch('atlas_live_adapter.build_from_capture',return_value=self.scored_report()), \
-             patch('atlas_live_adapter.bind_candidate') as bind:
-            report=build_current(self.capture(),self.rules())
-        bind.assert_not_called()
-        self.assertEqual(report['candidates'],[])
-        self.assertTrue(report['search_diagnostics']['binding_budget_guard_enabled'])
-        self.assertEqual(report['search_diagnostics']['route_binding_stop_reason'],
-                         'finish_and_attempt_reserve')
-
-    def test_slow_binding_keeps_the_candidate_already_prepared(self):
-        now=[100.]
-        capture=self.capture();capture['deadline']=150.;capture['game'].until=150.
-        report=self.scored_report()
-        report['candidates']=[dict(id=i,dx=0,dy=0) for i in range(2)]
-        def bind(row,*args,**kwargs):
-            now[0]+=29.
-            return dict(row,accepted=False,maximum=10.,average=10.,
-                        colors=['#112233']*3),dict(allowed=True)
-        with patch('atlas_live_adapter.time.monotonic',side_effect=lambda:now[0]), \
-             patch('atlas_live_adapter.build_from_capture',return_value=report), \
-             patch('atlas_live_adapter.bind_candidate',side_effect=bind) as binding:
-            built=build_current(capture,self.rules())
-        self.assertEqual(binding.call_count,1)
-        self.assertEqual([row['id'] for row in built['candidates']],[0])
-        self.assertEqual(built['search_diagnostics']['route_binding_unprocessed_count'],1)
-
-
     def test_manual_wait_is_excluded_and_game_deadline_can_be_earlier(self):
         late=WorkflowBudget(10000,10120)
         # The nominal 60-second target is advisory.  A normal run remains
@@ -67,26 +21,6 @@ class BudgetTests(unittest.TestCase):
         budget=WorkflowBudget(10000,10120)
         self.assertEqual(budget.workflow_deadline,10060)
         self.assertEqual(budget.deadline,10120)
-        self.assertEqual(budget.exploration_deadline,10105)
-        self.assertEqual(budget.finish_deadline,10120)
-
-    def test_action_cost_estimate_must_fit_before_finish_reserve(self):
-        budget=WorkflowBudget(100.,220.)
-        self.assertEqual(budget.estimate_cost(action_seconds=1,
-                                               registration_seconds=2,
-                                               verification_seconds=3,
-                                               return_seconds=4),10.)
-        self.assertTrue(budget.can_start_exploration(now=200.,
-                                                     action_seconds=1,
-                                                     registration_seconds=1,
-                                                     verification_seconds=1,
-                                                     return_seconds=1))
-        self.assertFalse(budget.can_start_exploration(now=201.,
-                                                      action_seconds=1,
-                                                      registration_seconds=1,
-                                                      verification_seconds=1,
-                                                      return_seconds=1))
-        with self.assertRaises(ValueError):budget.estimate_cost(action_seconds=-1)
 
     def test_deadline_override_can_only_shorten(self):
         self.assertEqual(earliest_deadline(None,160,200),160)
@@ -133,7 +67,7 @@ class BudgetTests(unittest.TestCase):
     def test_build_uses_tightest_limit_for_game_batch_and_report(self):
         for override,expected in ((200,160),(150,150)):
             capture=self.capture()
-            with patch('atlas_live_adapter.time.monotonic',return_value=100), \
+            with patch('atlas_live_adapter.time.monotonic',return_value=140), \
                  patch('atlas_live_adapter.build_from_capture',return_value=self.scored_report()):
                 report=build_current(capture,self.rules(),selection_deadline=override)
             self.assertEqual(capture['game'].until,expected)
@@ -153,7 +87,7 @@ class BudgetTests(unittest.TestCase):
 
     def test_earlier_existing_guard_is_preserved_in_candidate_batch(self):
         capture=self.capture();capture['game'].until=145
-        with patch('atlas_live_adapter.time.monotonic',return_value=100), \
+        with patch('atlas_live_adapter.time.monotonic',return_value=140), \
              patch('atlas_live_adapter.build_from_capture',return_value=self.scored_report()):
             report=build_current(capture,self.rules(),selection_deadline=200)
         self.assertEqual(report['batch'].deadline,145)

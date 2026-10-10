@@ -1,0 +1,9 @@
+{
+  "asset_sha256": "54318c7d0a43b72861af24d02704b96ac8efe6a7b6ff03db6e97d0aaa5a3bb0b",
+  "schema": 1,
+  "thresholds": [
+    160,
+    180
+  ],
+  "source": "Archived successful screenshot text glyphs"
+}

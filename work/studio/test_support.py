@@ -6,8 +6,46 @@ slightly different copy of the fixture.
 """
 
 from types import SimpleNamespace
+import json
+from pathlib import Path
+import unittest
 
 import numpy as np
+
+
+def requires_local_fixture(*paths):
+    """Skip only undistributed files; malformed or wrong evidence still fails."""
+    for value in paths:
+        path = Path(value)
+        if not path.is_file():
+            raise unittest.SkipTest('Optional local fixture not distributed: ' + str(path))
+
+
+def requires_palette_fixture(folder):
+    folder = Path(folder)
+    snapshot = folder / 'snapshot.json'
+    requires_local_fixture(snapshot)
+    # Do not catch JSON/schema errors: existing corrupted evidence must fail.
+    data = json.loads(snapshot.read_text(encoding='utf-8'))
+    requires_local_fixture(*(folder / fragment['pixel_file'] for fragment in data['fragments']))
+
+
+def requires_native_case(folder):
+    folder = Path(folder)
+    requires_local_fixture(folder / 'case.json')
+    requires_palette_fixture(folder / 'palette')
+
+
+def load_local_palette_session(folder):
+    """Keep the real production loader and its hashes after presence checks."""
+    from native_palette_scoring import load_session
+    requires_palette_fixture(folder)
+    return load_session(folder)
+
+
+def read_local_fixture_text(path, **kwargs):
+    requires_local_fixture(path)
+    return Path(path).read_text(**kwargs)
 
 
 class SimulatedReturnAdapter:

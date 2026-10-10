@@ -62,29 +62,31 @@ class UiLanguageTests(unittest.TestCase):
         self.assertNotIn('先拼接本局色板，再搜索并定位；最终是否染色由你确认。',source)
 
     def test_tutorial_step_is_short_and_tips_cover_matching_behavior(self):
-        section=dict(TUTORIAL)['4. 选择匹配模式']
-        self.assertEqual(section,'为每个区域选择精准或相似模式。')
-        self.assertEqual(len([heading for heading,_ in TUTORIAL if heading.startswith('Tips ')]),2)
+        section=dict(TUTORIAL)['3. 选择匹配模式']
+        self.assertIn('六位色码完全一致',section)
+        self.assertEqual(len([heading for heading,_ in TUTORIAL if heading.startswith('Tips ')]),4)
         tips=dict(TUTORIAL)
-        self.assertIn('设定的色差范围',tips['Tips 1 · 匹配方式'])
-        self.assertIn('稳定、均衡',tips['Tips 1 · 匹配方式'])
-        self.assertIn('整体质量相同时优先精准命中',tips['Tips 1 · 匹配方式'])
-        self.assertIn('浮窗会显示进度',tips['Tips 2 · 等待与候选'])
-        self.assertNotIn('ΔE≤8',section)
-        self.assertEqual(EN[section],'Choose Exact or Similar for each region.')
-        self.assertEqual(TW[section],'為每個區域選擇精準或相似模式。')
-        self.assertIn('stable, balanced results',EN[tips['Tips 1 · 匹配方式']])
+        self.assertIn('优先级',tips['Tips 1 · 寻色与结果'])
+        self.assertIn('皮革、木材',tips['Tips 2 · 材质限制'])
+        self.assertIn('不能保证成功率',tips['Tips 3 · 多色精准'])
+        self.assertIn('自动保存',tips['Tips 4 · 自动保存与方案'])
+        self.assertNotIn('1280',str(TUTORIAL))
+        self.assertNotIn('60 秒',str(TUTORIAL))
+        for heading,body in TUTORIAL:
+            self.assertIn(heading,EN)
+            self.assertIn(body,EN)
+            self.assertIn(body,TW)
 
     def test_short_tutorial_copy_has_natural_english_and_traditional_versions(self):
-        source=dict(TUTORIAL)['Tips 1 · 匹配方式']
+        source=dict(TUTORIAL)['Tips 1 · 寻色与结果']
         original=i18n.language
         try:
             i18n.set_language('English')
             self.assertEqual(str(i18n.tr(source)),EN[source])
-            self.assertIn('stable, balanced results',EN[source])
+            self.assertIn('priority order',EN[source])
             i18n.set_language('繁體中文')
             self.assertEqual(str(i18n.tr(source)),TW[source])
-            self.assertIn('穩定、均衡的結果',TW[source])
+            self.assertIn('優先順序',TW[source])
         finally:i18n.set_language(original)
 
     def test_risk_notice_uses_courteous_language(self):
@@ -168,22 +170,6 @@ class UiLanguageTests(unittest.TestCase):
             self.assertEqual(str(i18n.tr(body)),'Rechecking the countdown reading')
         finally:i18n.set_language(original)
 
-    def test_alignment_failure_progress_is_a_visible_recovery_stage(self):
-        from ui_progress import progress_text
-        title,body=progress_text({'stage':'recover','current':45,'total':48,
-                                  'message':'配准失败，已停止继续移动，正在读取当前游戏颜色。'})
-        self.assertEqual(title,'停止采集并读取当前颜色  45/48')
-        self.assertIn('配准失败',body)
-        original=i18n.language
-        try:
-            i18n.set_language('English')
-            self.assertEqual(str(i18n.tr(title)),'Stopping capture and reading the current colors  45/48')
-            self.assertIn('Alignment failed',str(i18n.tr(body)))
-            i18n.set_language('繁體中文')
-            self.assertIn('停止採集',str(i18n.tr(title)))
-            self.assertIn('對齊失敗',str(i18n.tr(body)))
-        finally:i18n.set_language(original)
-
     def test_single_region_compromise_is_explicit_and_translated(self):
         from ui_progress import single_result_presentation
         result=dict(verified=True,accepted=False,best_verified=True,best_current=True,
@@ -209,8 +195,7 @@ class UiLanguageTests(unittest.TestCase):
     def test_single_region_unrestored_best_is_separate_from_normal_compromise(self):
         from ui_progress import single_result_presentation
         title,body=single_result_presentation(dict(verified=True,accepted=False,
-            best_verified=True,best_current=True,historical_best_unrestored=True,
-            outcome='compromise'))
+            best_verified=True,best_current=False,outcome='compromise'))
         self.assertIn('妥协方案',title)
         self.assertIn('未能恢复',body)
 
@@ -220,25 +205,6 @@ class UiLanguageTests(unittest.TestCase):
             outcome='unverified'))
         self.assertNotIn('妥协',title)
         self.assertIn('未完成复核',body)
-
-
-class ResultStatePresentationTests(unittest.TestCase):
-    def test_located_compromise_read_only_and_history_are_distinct_in_three_languages(self):
-        from ui_progress import atlas_result_presentation
-        states=[dict(verified=True,accepted=False,positioning_complete=True),
-                dict(verified=True,accepted=False,positioning_complete=False,recovered=True),
-                dict(verified=True,historical_best_unrestored=True,positioning_complete=False)]
-        titles=[atlas_result_presentation(data)[0] for data in states]
-        self.assertEqual(titles,['未命中目标 · 已定位妥协方案','只读当前颜色','此前最佳实测结果未能恢复'])
-        previous=i18n.language
-        try:
-            for language in ('简体中文','繁體中文','English'):
-                i18n.set_language(language)
-                for data in states:
-                    title,body=atlas_result_presentation(data)
-                    rendered=str(i18n.tr(title))+str(i18n.tr(body))
-                    if language=='English':self.assertFalse(any('\u4e00'<=c<='\u9fff' for c in rendered))
-        finally:i18n.set_language(previous)
 
 
 if __name__=='__main__':unittest.main()

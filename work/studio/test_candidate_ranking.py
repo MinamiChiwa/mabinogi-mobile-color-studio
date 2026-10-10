@@ -2,26 +2,10 @@ import unittest
 
 import numpy as np
 
-from candidate_ranking import (candidate_order, candidate_rank, progressive_candidate_rank,
-                               candidate_quality)
+from candidate_ranking import candidate_order, candidate_rank,candidate_quality
 
 
 class CandidateRankingTests(unittest.TestCase):
-    def test_progressive_rank_prioritizes_worst_error_then_hits_then_cost(self):
-        rows=[
-            dict(id=1,maximum=4,average=2,total=6,exact_matches=0,dx=0,dy=0,
-                 action_cost=1,action_risk=1),
-            dict(id=2,maximum=4,average=2,total=6,exact_matches=1,dx=20,dy=0,
-                 action_cost=20,action_risk=1),
-            dict(id=3,maximum=5,average=1,total=3,exact_matches=3,dx=0,dy=0,
-                 action_cost=0,action_risk=0),
-        ]
-        self.assertEqual(min(rows,key=progressive_candidate_rank)['id'],2)
-
-    def test_progressive_rank_unknown_action_risk_is_last_tie_break(self):
-        known=dict(id=1,maximum=2,average=1,total=3,exact_matches=1,action_cost=1,action_risk=2)
-        unknown=dict(id=2,maximum=2,average=1,total=3,exact_matches=1,action_cost=1,action_risk=None)
-        self.assertEqual(min([known,unknown],key=progressive_candidate_rank)['id'],known['id'])
     def test_verified_recovery_uses_observed_acceptance_not_incomplete_route(self):
         recovered=dict(verified=True,accepted=False,observed_accepted=True,
                        maximum=5.,average=4.,landing_safe=False,landing_maximum=80.)

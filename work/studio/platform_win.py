@@ -4,6 +4,8 @@ from ctypes import wintypes as W
 import numpy as np
 from PIL import ImageGrab
 from window_target import resolve_target,valid_target,WindowUnavailable
+from window_dpi import physical_pixel_context,target_pixel_context
+from overlay_native import capture_scope
 from input_gestures import (drag_gesture, grouped_rotation_gesture, rotation_path,
                             wheel_gesture, path_gesture)
 
@@ -14,6 +16,10 @@ except (AttributeError,OSError):
     except Exception:pass
 u.FindWindowW.argtypes=[W.LPCWSTR,W.LPCWSTR]; u.FindWindowW.restype=W.HWND
 u.GetForegroundWindow.restype=W.HWND
+u.GetCursorPos.argtypes=[C.POINTER(W.POINT)];u.GetCursorPos.restype=W.BOOL
+u.GetSystemMetrics.argtypes=[C.c_int];u.GetSystemMetrics.restype=C.c_int
+u.LogicalToPhysicalPointForPerMonitorDPI.argtypes=[W.HWND,C.POINTER(W.POINT)]
+u.LogicalToPhysicalPointForPerMonitorDPI.restype=W.BOOL
 for name in ['GetClientRect','ClientToScreen','SetForegroundWindow','IsIconic','GetDpiForWindow','IsWindow']:
     getattr(u,name).argtypes=[W.HWND]+([C.c_void_p] if name in ['GetClientRect','ClientToScreen'] else [])
 ULONG_PTR=C.c_size_t
@@ -36,9 +42,17 @@ class Game:
     def geometry(self):
         if not valid_target(self.target):raise Interrupted('所选窗口已关闭，请重新选择游戏窗口。')
         if u.IsIconic(self.hwnd):raise RuntimeError('游戏窗口已最小化，请恢复后重试。')
-        r=W.RECT(); p=W.POINT(0,0)
-        if not u.GetClientRect(self.hwnd,C.byref(r)) or not u.ClientToScreen(self.hwnd,C.byref(p)):raise RuntimeError('游戏窗口已关闭。')
-        return p.x,p.y,r.right,r.bottom
+        with target_pixel_context(self.hwnd):
+            r=W.RECT(); p=W.POINT(0,0)
+            if not u.GetClientRect(self.hwnd,C.byref(r)) or not u.ClientToScreen(self.hwnd,C.byref(p)):raise RuntimeError('游戏窗口已关闭。')
+            lower=W.POINT(r.right,r.bottom)
+            if not u.ClientToScreen(self.hwnd,C.byref(lower)):raise RuntimeError('无法读取窗口物理边界。')
+            if (not u.LogicalToPhysicalPointForPerMonitorDPI(self.hwnd,C.byref(p)) or
+                not u.LogicalToPhysicalPointForPerMonitorDPI(self.hwnd,C.byref(lower))):
+                raise RuntimeError('无法转换窗口物理坐标。')
+            width,height=lower.x-p.x,lower.y-p.y
+            if not 0<width<=65536 or not 0<height<=65536:raise RuntimeError('窗口物理尺寸无效。')
+            return p.x,p.y,width,height
     def focus(self):
         if u.IsIconic(self.hwnd):
             u.ShowWindow.argtypes=[W.HWND,C.c_int];u.ShowWindow(self.hwnd,9)
@@ -50,9 +64,11 @@ class Game:
         if u.GetForegroundWindow()!=self.hwnd:raise Interrupted('已暂停：游戏失去焦点。返回游戏后按 F8 重新开始。')
         if self.geometry()!=self.initial:raise Interrupted('窗口位置或尺寸已变化。已停止，请按 F8 重新识别。')
     def capture(self):
-        self.check(); x,y,w,h=self.geometry()
-        self.captured_at=time.monotonic()
-        return np.array(ImageGrab.grab(bbox=(x,y,x+w,y+h),all_screens=True).convert('RGB'))
+        with physical_pixel_context():
+            self.check(); x,y,w,h=self.geometry()
+            self.captured_at=time.monotonic()
+            with capture_scope():
+                return np.array(ImageGrab.grab(bbox=(x,y,x+w,y+h),all_screens=True).convert('RGB'))
     def capture_waiting(self):
         if not valid_target(self.target):
             if self.manual_target is not None:raise WindowUnavailable('所选窗口已关闭，请重新选择游戏窗口。')
@@ -66,9 +82,10 @@ class Game:
         event=Input(type=0,mi=Mouse(dx,dy,data&0xffffffff,flags,0,0))
         if u.SendInput(1,C.byref(event),C.sizeof(Input))!=1:raise RuntimeError('Windows 未接受鼠标输入。请检查游戏与工具是否使用相同权限运行。')
     def move_to(self,p):
-        x,y,w,h=self.geometry(); vx,vy=u.GetSystemMetrics(76),u.GetSystemMetrics(77)
-        vw,vh=u.GetSystemMetrics(78),u.GetSystemMetrics(79)
-        self.send(0x8000|0x4000|1,round((x+p[0]-vx)*65535/max(1,vw-1)),round((y+p[1]-vy)*65535/max(1,vh-1)))
+        with physical_pixel_context():
+            x,y,w,h=self.geometry(); vx,vy=u.GetSystemMetrics(76),u.GetSystemMetrics(77)
+            vw,vh=u.GetSystemMetrics(78),u.GetSystemMetrics(79)
+            self.send(0x8000|0x4000|1,round((x+p[0]-vx)*65535/max(1,vw-1)),round((y+p[1]-vy)*65535/max(1,vh-1)))
     def path(self,points,right=False,absolute=False):
         return self.perform_gesture(path_gesture(points,right,absolute))
     def perform_gesture(self,gesture):
@@ -84,9 +101,10 @@ class Game:
         def observe(slot):
             if trace is None:return
             try:
-                cursor=W.POINT()
-                if not u.GetCursorPos(C.byref(cursor)):raise OSError('GetCursorPos failed')
-                actual=[int(cursor.x-trace_origin[0]),int(cursor.y-trace_origin[1])]
+                with physical_pixel_context():
+                    cursor=W.POINT()
+                    if not u.GetCursorPos(C.byref(cursor)):raise OSError('GetCursorPos failed')
+                    actual=[int(cursor.x-trace_origin[0]),int(cursor.y-trace_origin[1])]
                 error=None
             except Exception as exc:
                 actual=None;error=str(exc)

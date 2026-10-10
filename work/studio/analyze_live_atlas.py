@@ -14,16 +14,6 @@ from vision import error,measure_board_motion
 from atlas_masks import material_masks, mask_parameters, mask_summary, save_mask_overlay
 from atlas_similarity import similarity_candidates, captured_scale_levels
 from candidate_ranking import candidate_rank
-from atlas_stage_budget import StageBudgetExceeded
-
-
-def budgeted_candidate_search(operation,check=None):
-    """Soft CPU expiry stops this pool; F9/hard guards still propagate."""
-    try:
-        if check:check()
-        return operation(),None
-    except StageBudgetExceeded as exc:
-        return [],str(exc)
 
 
 def save_atlas(path, **arrays):
@@ -238,7 +228,7 @@ class CaptureAlignment:
 
 
 def run(source,game_codes=None,example_targets=None,target_rules=None,output=None,check=None,
-        atlas_resolution=768,progress=None,runtime=None,prepared=None,search_check=None):
+        atlas_resolution=768,progress=None,runtime=None,prepared=None):
     progress=progress or (lambda **data:None)
     started=time.perf_counter();timings={}
     source=Path(source);out=Path(output) if output is not None else source/'analysis'
@@ -362,25 +352,22 @@ def run(source,game_codes=None,example_targets=None,target_rules=None,output=Non
     if check:check()
     def cancelled():
         if check:check()
-        if search_check:search_check()
         return False
     progress(stage='search')
-    candidates=[];search_stop_reason=None
-    if rules and report['expanded']['quality_gate']['passed']:
-        candidates,search_stop_reason=budgeted_candidate_search(
-            lambda:translation_candidates(expanded,markers,rules,offsets[-1],cancelled=cancelled,
-                                           landing_radius=1.,integer_moves=True,limit=32),search_check)
+    candidates=(translation_candidates(expanded,markers,rules,offsets[-1],cancelled=cancelled,
+                                       landing_radius=1.,integer_moves=True,limit=32)
+                if rules and report['expanded']['quality_gate']['passed'] else [])
     timings['translation_search_seconds']=time.perf_counter()-stage
     search_diagnostics={}
-    if rules and report['expanded']['quality_gate']['passed'] and search_stop_reason is None:
+    if rules and report['expanded']['quality_gate']['passed']:
         similarity_stage=time.perf_counter()
         progress(stage='similarity')
         levels,tick=captured_scale_levels(log)
         calibration=next((r for r in reversed(log) if r.get('kind')=='zoom_calibration'),{})
-        joint,search_stop_reason=budgeted_candidate_search(lambda:similarity_candidates(expanded,markers,rules,offsets[-1],(h,w),
+        joint=similarity_candidates(expanded,markers,rules,offsets[-1],(h,w),
                                     scale_bounds=(min(levels),1.),scale_levels=levels,
                                     cancelled=cancelled,diagnostics=search_diagnostics,
-                                    include_compromises=True,limit=24),search_check)
+                                    include_compromises=True,limit=24)
         for row in candidates:row['search_space']='periodic_translation'
         for row in joint:
             row['id']+=len(candidates)
@@ -397,7 +384,6 @@ def run(source,game_codes=None,example_targets=None,target_rules=None,output=Non
     else:
         timings['similarity_search_seconds']=0.
     if check:check()
-    search_diagnostics['search_stop_reason']=search_stop_reason
     timings['candidate_seconds']=time.perf_counter()-stage
     timings['candidate_computed']=bool(rules and report['expanded']['quality_gate']['passed'])
     review=dict(schema=1,verified=False,metric='Delta E 76',

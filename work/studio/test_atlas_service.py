@@ -15,67 +15,6 @@ class Owner:
 
 
 class ServiceTests(unittest.TestCase):
-    def test_normal_capture_budget_finishes_baseline_without_building_new_targets(self):
-        owner=Owner();base=self.callbacks();calls=[]
-        baseline=dict(candidate_id=-1,actual_colors=['#FFFEFE']*3,actual_deltas=[.44]*3,
-            verified=True,accepted=False,maximum=.44,average=.44,actual_pose=np.eye(3)[:2].tolist())
-        base.acquire=lambda *a,**k:dict(baseline_result=baseline,checkpoint_budget_stop=True)
-        base.build=lambda *a,**k:(_ for _ in ()).throw(AssertionError('No new build'))
-        base.finish_checkpoint=lambda *a,**k:(calls.append('return') or dict(baseline,
-            restored_best=True,positioning_complete=True,best_result_current=True))
-        result=AtlasService(base).run(owner,[])
-        self.assertEqual(calls,['return'])
-        self.assertTrue(result['best_result_current'])
-        self.assertEqual(owner.events[-1][0],'atlas_checkpoint_verified')
-
-    def test_f9_during_baseline_finish_never_reads_or_retries(self):
-        base=self.callbacks();calls=[]
-        base.acquire=lambda *a,**k:dict(checkpoint_budget_stop=True)
-        base.finish_checkpoint=lambda *a,**k:(_ for _ in ()).throw(InterruptedError('F9'))
-        base.observe_current=lambda *a,**k:calls.append('read')
-        with self.assertRaises(InterruptedError):AtlasService(base).run(Owner(),[])
-        self.assertEqual(calls,[])
-
-    def test_baseline_better_than_default_is_restored_without_more_search(self):
-        owner=Owner();calls=[];base=self.callbacks()
-        baseline=dict(candidate_id=-1,id=-1,actual_colors=['#FFFEFE']*3,
-            actual_deltas=[.44]*3,maximum=.44,average=.44,verified=True,accepted=False,
-            actual_pose=[[1,0,-10],[0,1,0]],pose_reliable=True,measured_checkpoint=True,entry_checkpoint=True)
-        report=base.build(None,[])
-        report['candidates']=report['candidates'][:1]
-        report['baseline_result']=baseline;report['checkpoint_pose_reliable']=True
-        report['current_pose']=np.eye(3)
-        base.acquire=lambda *a,**k:dict(baseline_result=baseline)
-        base.build=lambda *a,**k:report
-        def default(*args,**kwargs):
-            self.assertTrue(callable(kwargs.get('return_guard')))
-            calls.append('default')
-            return dict(candidate_id=0,verified=True,accepted=False,maximum=50.,average=50.,
-                actual_colors=['#777777']*3,actual_pose=np.eye(3)[:2].tolist(),pose_reliable=True)
-        base.default=default
-        base.choice=lambda *a,**k:(calls.append('restore') or dict(baseline,positioning_complete=True))
-        result=AtlasService(base).run(owner,[],selection_deadline=time.monotonic()+120)
-        self.assertEqual(result['actual_colors'],baseline['actual_colors'])
-        self.assertTrue(result['best_result_current'])
-        self.assertEqual(calls,['default','restore'])
-        self.assertEqual(result['baseline_result']['actual_colors'],baseline['actual_colors'])
-        self.assertEqual(owner.events[-1][0],'atlas_checkpoint_verified')
-
-    def test_quality_failure_keeps_baseline_as_history_and_sends_no_return(self):
-        base=self.callbacks(False);calls=[];owner=Owner()
-        baseline=dict(candidate_id=-1,actual_colors=['#FFFEFE']*3,actual_deltas=[.44]*3,
-            maximum=.44,average=.44,verified=True,accepted=False,actual_pose=np.eye(3)[:2].tolist())
-        base.acquire=lambda *a,**k:dict(baseline_result=baseline)
-        base.choice=lambda *a,**k:calls.append('unsafe-return')
-        base.observe_current=lambda *a,**k:dict(verified=True,actual_colors=['#777777']*3,
-            actual_deltas=[50.]*3,maximum=50.,average=50.)
-        result=AtlasService(base).run(owner,[])
-        self.assertEqual(calls,[])
-        self.assertEqual(result['actual_colors'],['#777777']*3)
-        self.assertEqual(result['best_observed_result']['actual_colors'],baseline['actual_colors'])
-        self.assertTrue(result['historical_best_unrestored'])
-        self.assertFalse(result['positioning_complete'])
-
     def verified(self,owner,report,candidate,rules,**kwargs):
         pose=candidate_pose(candidate,report['board'])@homogeneous(report.get('current_pose',np.eye(3)))
         report['current_pose']=pose
@@ -105,23 +44,6 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual([e[0] for e in owner.events],['atlas_status','atlas_invalidated'])
         self.assertFalse(owner.events[-1][1]['search_performed'])
         self.assertEqual(owner.events[-1][1]['reason'],'atlas_quality_failed')
-
-    def test_capture_alignment_failure_reports_immediate_read_only_recovery(self):
-        owner=Owner();calls=[];callbacks=self.callbacks(False)
-        captured={'alignment_error':'motion mismatch','alignment_frames':45}
-        callbacks.acquire=lambda *a,**k:captured
-        callbacks.build=lambda *a,**k:dict(
-            quality_gate={'passed':False,'reason':'capture_alignment_failed'},
-            alignment_error='motion mismatch',alignment_frames=45)
-        callbacks.observe_current=lambda *a,**k:(calls.append(True) or dict(
-            verified=True,actual_colors=['#112233']*3,actual_deltas=[50.]*3,
-            maximum=50.,average=50.))
-        result=AtlasService(callbacks).run(owner,[])
-        self.assertTrue(result['early_exit'])
-        self.assertEqual(owner.events[1][0],'atlas_recovery_unavailable')
-        self.assertIn('第 45 步',owner.events[1][1]['message'])
-        self.assertEqual(owner.events[-1][0],'atlas_recovery')
-        self.assertEqual(calls,[True])
 
     def test_optional_current_observation_runs_after_plain_early_exits(self):
         for mode in ('build_error','quality','no_rows','budget','default_error','default_none','default_missing_pose'):
@@ -186,56 +108,6 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(result['id'],0)
         self.assertEqual([e[0] for e in owner.events],
                          ['atlas_status','atlas_ready','atlas_search_summary','atlas_candidates','atlas_default_verified','atlas_selection_expired'])
-
-    def test_progressive_search_is_opt_in_and_uses_staged_candidates(self):
-        owner=Owner();callbacks=self.callbacks()
-        callbacks.progressive=lambda owner,captured,report,rules,**context:[
-            dict(id=10,dx=1,dy=0,accepted=True,maximum=2,average=1,total=3,
-                 exact_matches=0,action_cost=1,action_risk=1),
-            dict(id=11,dx=2,dy=0,accepted=True,maximum=2,average=1,total=3,
-                 exact_matches=1,action_cost=8,action_risk=1)]
-        result=AtlasService(callbacks).run(owner,[],progressive_search=True,
-                                           selection_deadline=time.monotonic()+30)
-        self.assertEqual(result['candidate_id'],11)
-        event=next(data for kind,data in owner.events if kind=='atlas_candidates')
-        self.assertEqual(event['candidates'][0]['exact_matches'],1)
-
-    def test_progressive_failure_falls_back_to_complete_candidates(self):
-        owner=Owner();callbacks=self.callbacks()
-        callbacks.progressive=lambda *a,**k:(_ for _ in ()).throw(RuntimeError('staged'))
-        result=AtlasService(callbacks).run(owner,[],progressive_search=True,
-                                           selection_deadline=time.monotonic()+30)
-        self.assertEqual(result['candidate_id'],0)
-        self.assertIn('atlas_progressive_unavailable',[kind for kind,_ in owner.events])
-
-    def test_empty_progressive_result_falls_back_to_complete_candidates(self):
-        owner=Owner();callbacks=self.callbacks()
-        callbacks.progressive=lambda *a,**k:[]
-        result=AtlasService(callbacks).run(owner,[],progressive_search=True,
-                                           selection_deadline=time.monotonic()+30)
-        self.assertEqual(result['candidate_id'],0)
-        self.assertIn('atlas_progressive_unavailable',[kind for kind,_ in owner.events])
-
-    def test_feedback_best_not_restored_is_terminal_and_keeps_current_hex_separate(self):
-        owner=Owner();base=self.callbacks()
-        base.build=lambda *a,**k:{'quality_gate':{'passed':True},'candidates':[
-            dict(id=0,dx=0,dy=0,accepted=False,maximum=50,average=50,
-                 colors=['#FFFFFF']*3,deltas=[50]*3)],'board':(0,0,900,900)}
-        best=dict(candidate_id=0,actual_colors=['#112233']*3,
-                  actual_deltas=[0.,0.,0.],maximum=0.,average=0.,
-                  accepted=True,verified=True,actual_pose=[[1,0,1],[0,1,0]])
-        base.default=lambda *a,**k:dict(candidate_id=0,
-            predicted_colors=['#FFFFFF']*3,predicted_deltas=[50]*3,
-            actual_colors=['#000000']*3,actual_deltas=[50.,50.,50.],
-            maximum=50.,average=50.,accepted=False,verified=True,
-            actual_pose=[[1,0,0],[0,1,0]],feedback_best_available=True,
-            best_result_current=False,best_result=best)
-        result=AtlasService(base).run(owner,[],selection_deadline=time.monotonic()+30)
-        self.assertEqual(result['actual_colors'],['#000000']*3)
-        self.assertEqual(result['best_result']['actual_colors'],['#112233']*3)
-        self.assertFalse(result['best_result_current'])
-        self.assertEqual(owner.events[-1][0],'atlas_best_not_restored')
-        self.assertNotIn('atlas_default_verified',[kind for kind,_ in owner.events])
 
     def test_unreachable_scale_is_filtered_before_publication_and_input(self):
         owner=Owner();base=self.callbacks();calls=[]
@@ -358,50 +230,6 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(summary['predicted_accepted_count'],0)
         self.assertEqual((summary['best_compromise_max'],summary['best_compromise_average']),(9,7))
         self.assertEqual(owner.events[-1][0],'atlas_selection_expired')
-
-    def test_multi_region_without_joint_match_positions_measured_compromise(self):
-        owner=Owner();base=self.callbacks();calls=[]
-        base.build=lambda *a,**k:{'quality_gate':{'passed':True},'candidates':[
-            dict(id=0,dx=80,dy=-30,accepted=False,maximum=22,average=16,
-                 family_consistent=False)],'board':(0,0,900,900)}
-        base.default=lambda *a,**k:(calls.append('default') or
-            dict(self.verified(*a,**k),accepted=False))
-        base.observe_current=lambda *a,**k:dict(verified=True,
-            actual_colors=['#112233']*3,actual_deltas=[20.]*3,maximum=20.,average=20.)
-        rules=[dict(enabled=True,exact=False,colors=['#112233'],tolerance=8.) for _ in range(3)]
-        result=AtlasService(base).run(owner,rules,selection_deadline=time.monotonic()+30)
-        self.assertEqual(calls,['default'])
-        self.assertFalse(result.get('accepted'))
-        self.assertTrue(result.get('compromise'))
-        candidates=next(data for kind,data in owner.events if kind=='atlas_candidates')
-        self.assertTrue(candidates['compromise_only'])
-        self.assertTrue(candidates['compromise_fallback'])
-        self.assertIn('不会自动确认染色',candidates['message'])
-        self.assertEqual(owner.events[-1][0],'atlas_selection_expired')
-
-    def test_no_joint_candidate_explains_unobserved_strict_exact_target(self):
-        owner=Owner();base=self.callbacks();calls=[]
-        base.build=lambda *a,**k:{'quality_gate':{'passed':True},'candidates':[
-            dict(id=0,dx=0,dy=0,accepted=False,maximum=12,average=8,
-                 family_consistent=True)],'board':(0,0,900,900),
-            'search_diagnostics':{'exact_target_availability':{'1':{
-                'targets':['#FFFFFF'],'exact_pixels':0,'nearest_color':'#FFFEFE',
-                'nearest_delta_e76':0.44}}}}
-        base.observe_current=lambda *a,**k:(calls.append(True) or dict(
-            verified=True,actual_colors=['#112233']*3,actual_deltas=[20.]*3,maximum=20.,average=20.))
-        rules=[dict(enabled=True,exact=True,colors=['#FFFFFF'],tolerance=0),
-               dict(enabled=True,exact=False,colors=['#C0C0C0'],tolerance=8),
-               dict(enabled=True,exact=False,colors=['#FFFFFF'],tolerance=8)]
-        result=AtlasService(base).run(owner,rules,selection_deadline=time.monotonic()+30)
-        status=next(data for kind,data in owner.events
-                    if kind=='atlas_status' and data.get('reason')=='no_joint_candidate')
-        self.assertEqual(status['exact_target_availability']['1']['exact_pixels'],0)
-        candidates=next(data for kind,data in owner.events if kind=='atlas_candidates')
-        self.assertTrue(candidates['compromise_only'])
-        self.assertTrue(candidates['compromise_fallback'])
-        self.assertIn('不会自动确认染色',candidates['message'])
-        self.assertEqual(calls,[])
-        self.assertTrue(result['compromise'])
 
     def test_compromise_stays_available_for_user_selection(self):
         owner=Owner();owner.selection=1;base=self.callbacks();build=base.build

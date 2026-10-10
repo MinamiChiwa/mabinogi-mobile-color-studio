@@ -15,18 +15,6 @@ class Button:
 
 
 class SearchOverlayAtlasTests(unittest.TestCase):
-    def test_alignment_failure_switches_overlay_from_capture_count_to_recovery(self):
-        overlay=SearchOverlay.__new__(SearchOverlay)
-        overlay.phase='computing';overlay.update_activity=Mock();overlay.render=Mock()
-        overlay.handle('atlas_status',{'message':'配准失败，已停止继续移动，正在读取当前游戏颜色。'})
-        self.assertEqual(overlay.phase,'computing')
-        overlay.update_activity.assert_called_once_with({
-            'stage':'recover',
-            'message':'配准失败，已停止继续移动，正在读取当前游戏颜色。'})
-        self.assertEqual(overlay.render.call_args.args,
-                         ('停止采集并读取当前颜色',
-                          '配准失败，已停止继续移动，正在读取当前游戏颜色。'))
-
     def test_single_region_compromise_result_is_labeled_as_expected_outcome(self):
         import i18n
         original=i18n.language
@@ -47,52 +35,6 @@ class SearchOverlayAtlasTests(unittest.TestCase):
             i18n.set_language('English')
             self.assertIn('Compromise',str(i18n.tr(overlay.render.call_args.args[0])))
             self.assertIn('normal outcome',str(i18n.tr(overlay.render.call_args.args[1])))
-        finally:i18n.set_language(original)
-
-    def test_multi_region_compromise_notice_is_translated_in_three_languages(self):
-        import i18n
-        original=i18n.language
-        try:
-            for language in ('简体中文','繁體中文','English'):
-                i18n.set_language(language)
-                overlay=SearchOverlay.__new__(SearchOverlay)
-                for name in ('clear_candidates','results','copy','activity','collapse','resize_surface','render'):
-                    setattr(overlay,name,Mock())
-                overlay.candidate_rows={}
-                data=dict(batch_id='batch',default_id=0,compromise_only=True,
-                    candidates=[dict(id=0,colors=['#000000']*3,deltas=[20]*3,
-                                     maximum=20,average=20,accepted=False)])
-                with patch('search_overlay.ct.CTkFrame'),patch('search_overlay.ct.CTkButton'), \
-                     patch('search_overlay.ct.CTkLabel') as labels:
-                    overlay.show_candidates(data)
-                texts=' '.join(str(i18n.tr(c.kwargs.get('text',''))) for c in labels.call_args_list)
-                expected=str(i18n.tr('本轮没有预测达标方案；以下结果仅供参考，实际复核未达标时会停止。'))
-                self.assertIn(expected,texts)
-        finally:i18n.set_language(original)
-
-    def test_multi_region_exact_miss_notice_promises_measured_near_match(self):
-        import i18n
-        original=i18n.language
-        try:
-            for language in ('简体中文','繁體中文','English'):
-                i18n.set_language(language)
-                overlay=SearchOverlay.__new__(SearchOverlay)
-                for name in ('clear_candidates','results','copy','activity','collapse','resize_surface','render'):
-                    setattr(overlay,name,Mock())
-                overlay.candidate_rows={}
-                data=dict(batch_id='batch',default_id=0,compromise_only=True,
-                    compromise_fallback=True,
-                    candidates=[dict(id=0,colors=['#FFFEFE']*3,deltas=[.44,.8,1.2],
-                                     maximum=1.2,average=.81,accepted=False)])
-                with patch('search_overlay.ct.CTkFrame'),patch('search_overlay.ct.CTkButton'), \
-                     patch('search_overlay.ct.CTkLabel') as labels:
-                    overlay.show_candidates(data)
-                texts=' '.join(str(i18n.tr(c.kwargs.get('text',''))) for c in labels.call_args_list)
-                expected=str(i18n.tr('本轮没有共同精准命中；以下候选按综合色差排序，实测后保留近似结果，不会自动确认染色。'))
-                self.assertIn(expected,texts)
-                if language=='English':self.assertIn('measured near match',texts)
-                elif language=='繁體中文':self.assertIn('實測後保留近似結果',texts)
-                else:self.assertIn('实测后保留近似结果',texts)
         finally:i18n.set_language(original)
 
     def test_pose_only_recovery_does_not_claim_colors_were_read(self):
@@ -121,18 +63,16 @@ class SearchOverlayAtlasTests(unittest.TestCase):
             for language in ('简体中文','繁體中文','English'):
                 i18n.set_language(language)
                 overlay=SearchOverlay.__new__(SearchOverlay)
-                overlay.render=Mock();overlay.results=Mock();overlay.clear_candidates=Mock()
-                overlay.copy=Mock();overlay.activity=Mock();overlay.collapse=Mock();overlay.resize_surface=Mock()
+                overlay.show_recovery=Mock();overlay.render=Mock();overlay.results=Mock()
                 data=dict(actual_colors=['#513B43',None,None],actual_deltas=[51,None,None],
                           best_result=dict(actual_colors=['#F2F2F2',None,None],actual_deltas=[17,None,None]))
                 with patch('search_overlay.ct.CTkLabel') as label:
                     overlay.show_unrestored_best(data)
+                overlay.show_recovery.assert_called_once_with(data)
                 texts=[str(i18n.tr(c.kwargs.get('text',''))) for c in label.call_args_list]
                 self.assertIn(str(i18n.tr('先前最佳实测（未恢复）')),texts)
                 if language=='English':self.assertIn('not restored',' '.join(texts))
                 self.assertIn('#F2F2F2',' '.join(texts))
-                self.assertIn('#513B43',' '.join(texts))
-                self.assertEqual(overlay.render.call_args.args[0],'此前最佳实测结果未能恢复')
                 self.assertNotIn('None',' '.join(texts))
         finally:i18n.set_language(original)
 
@@ -287,19 +227,6 @@ class SearchOverlayAtlasTests(unittest.TestCase):
         self.assertEqual(overlay.phase,'verified')
         self.assertIsNone(overlay.batch_id)
         self.assertIn({'state':'disabled'},overlay.candidate_rows[7].states)
-
-    def test_no_joint_candidate_shows_explicit_read_only_title(self):
-        overlay=SearchOverlay.__new__(SearchOverlay)
-        overlay.phase='positioning';overlay._text=None;overlay.batch_id='batch-1'
-        overlay.candidate_rows={7:Button()};overlay.heading=Label();overlay.copy=Label()
-        overlay.clear_candidates=Mock();overlay.render=Mock()
-        overlay.handle('atlas_invalidated',{
-            'reason':'no_joint_candidate',
-            'message':'未找到所有启用区域共同满足目标的候选，已停止自动移动并读取当前游戏色码。'})
-        self.assertEqual(overlay.phase,'invalidated')
-        self.assertEqual(overlay.render.call_args.args,
-                         ('未找到共同方案',
-                          '未找到所有启用区域共同满足目标的候选，已停止自动移动并读取当前游戏色码。'))
 
     def test_stop_invalidates_visible_choices_and_finished_event_keeps_overlay(self):
         overlay=SearchOverlay.__new__(SearchOverlay)

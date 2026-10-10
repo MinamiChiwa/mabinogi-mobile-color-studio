@@ -82,23 +82,9 @@ class AdaptiveFeedbackTests(unittest.TestCase):
         )
         return result, events
 
-    def test_probe_budget_can_stop_after_first_miss(self):
-        # A caller with an explicitly tiny budget still gets the old bounded
-        # behaviour: the first (+1, 0) sample is measured and then restored.
-        adapter = _FeedbackAdapter({
-            (0, 0): ["#000000"] * 3,
-            (1, 0): ["#ffffff"] * 3,
-            (-1, 0): ["#112233"] * 3,
-        })
-        result, events = self._run(adapter, max_probes=1)
-        feedback = [data for kind, data in events if kind == "atlas_hex_feedback"]
-        self.assertEqual([row["step"] for row in feedback], [1])
-        self.assertEqual(adapter.moves, [(1, 0), (-1, 0)])
-        self.assertTrue(result[4])
-
-    def test_default_probe_checks_later_axis_after_first_miss(self):
-        # The first (+1, 0) sample is worse, while a later (-1, 0) sample is
-        # the best result.  A miss must not terminate the whole neighbourhood.
+    def test_first_probe_miss_stops_before_second_probe(self):
+        # The first (+1, 0) sample is worse.  The historical best is restored,
+        # but the next axis is never probed.
         adapter = _FeedbackAdapter({
             (0, 0): ["#000000"] * 3,
             (1, 0): ["#ffffff"] * 3,
@@ -106,15 +92,11 @@ class AdaptiveFeedbackTests(unittest.TestCase):
         })
         result, events = self._run(adapter)
         feedback = [data for kind, data in events if kind == "atlas_hex_feedback"]
-        self.assertGreaterEqual(len(feedback), 2)
-        self.assertEqual(feedback[0]["offset"], [1, 0])
-        self.assertEqual(feedback[1]["offset"], [-2, 0])
-        self.assertIn((1, 0), adapter.moves)
-        self.assertIn((-2, 0), adapter.moves)
-        self.assertTrue(result[4])
-        np.testing.assert_allclose(adapter.pose, [-1, 0])
+        self.assertEqual([row["step"] for row in feedback], [1])
+        self.assertEqual(adapter.moves, [(1, 0), (-1, 0)])
+        self.assertEqual(result[-1], "no_improvement")
 
-    def test_default_neighborhood_continues_after_first_improvement(self):
+    def test_second_probe_is_used_only_after_first_improvement(self):
         adapter = _FeedbackAdapter({
             (0, 0): ["#000000"] * 3,
             (1, 0): ["#102030"] * 3,
@@ -122,8 +104,8 @@ class AdaptiveFeedbackTests(unittest.TestCase):
         })
         result, events = self._run(adapter)
         feedback = [data for kind, data in events if kind == "atlas_hex_feedback"]
-        self.assertGreaterEqual(len(feedback), 2)
-        self.assertEqual(adapter.moves[:2], [(1, 0), (-2, 0)])
+        self.assertEqual([row["step"] for row in feedback], [1, 2])
+        self.assertEqual(adapter.moves, [(1, 0), (-2, 0)])
         self.assertTrue(result[4])
 
     def test_max_probes_can_be_lowered_without_disabling_restore(self):

@@ -5,17 +5,20 @@ import json
 from pathlib import Path
 import sys
 
-APP_VERSION = '0.3.6'
-POLICY_REVISION = 'balanced-landing-single-zoom-v3'
+APP_VERSION = '0.4.0'
+POLICY_REVISION = 'native-priority-similar-fine-scale-v15'
 
 
 def source_identity(root):
     """Hash production Python sources only; never include settings or captures."""
     digest = hashlib.sha256()
-    for path in sorted(Path(root).glob('*.py')):
+    root=Path(root)
+    files=list(root.glob('*.py'))+list((root/'native_live').rglob('*.py'))
+    files+=list((root/'native_live/assets').glob('*'))
+    for path in sorted(p for p in files if p.is_file()):
         if path.name.startswith('test_'):
             continue
-        digest.update(path.name.encode('utf-8') + b'\0')
+        digest.update(path.relative_to(root).as_posix().encode('utf-8') + b'\0')
         digest.update(path.read_bytes())
     return dict(app_version=APP_VERSION, policy_revision=POLICY_REVISION,
                 source_sha256=digest.hexdigest())

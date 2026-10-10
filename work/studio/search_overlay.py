@@ -1,15 +1,17 @@
 """Non-activating search status surface; never issues game input."""
 import ctypes as C
 from ctypes import wintypes as W
+from tkinter import TclError
 import customtkinter as ct
 import time
 from ui_settings import read_settings,save_settings
-from ui_progress import progress_text,single_result_presentation,atlas_result_presentation
+from ui_progress import progress_text,single_result_presentation
 from ui_performance import DeliberateSlider
 from i18n import tr,on_language
 from display_geometry import work_area,clamp_position
 from vision import accepted
 from ui_typography import SECTION_FONT,BODY_FONT,SMALL_FONT
+from overlay_native import configure_overlay,unregister_overlay
 
 
 def candidate_display(row, result=None):
@@ -88,7 +90,7 @@ class SearchOverlay(ct.CTkToplevel):
         self.default_candidate_id=None
         self.settings_path=settings_path;self.preferences=read_settings(settings_path) if settings_path else {}
         self._collapsed=False;self._has_results=False;self._heartbeat_job=None;self._alpha_job=None
-        self._surface_job=None
+        self._surface_job=None;self._native_job=None;self._passive_input=False
         self._started=time.monotonic();self._stage_started=self._started;self._stage=None;self._deadline=None
         self.geometry('410x280+20+100')
         self.attributes('-alpha',max(.65,min(1.,float(self.preferences.get('overlay_alpha',.92)))))
@@ -121,6 +123,8 @@ class SearchOverlay(ct.CTkToplevel):
         self.heading.bind('<ButtonRelease-1>',self.save_position)
         self.update_idletasks()
         self._prepare_native()
+        self.bind('<Map>',self._native_mapped,add='+')
+        self.bind('<Destroy>',self._native_destroyed,add='+')
         on_language(self,self.schedule_surface_resize)
     def schedule_surface_resize(self):
         if self._surface_job is None:self._surface_job=self.after_idle(self.resize_surface)
@@ -133,13 +137,27 @@ class SearchOverlay(ct.CTkToplevel):
     def _prepare_native(self):
         user=C.windll.user32
         user.GetAncestor.argtypes=[W.HWND,W.UINT];user.GetAncestor.restype=W.HWND
-        self.native=user.GetAncestor(self.winfo_id(),2)
-        user.GetWindowLongPtrW.argtypes=[W.HWND,C.c_int];user.GetWindowLongPtrW.restype=C.c_ssize_t
-        user.SetWindowLongPtrW.argtypes=[W.HWND,C.c_int,C.c_ssize_t];user.SetWindowLongPtrW.restype=C.c_ssize_t
-        style=user.GetWindowLongPtrW(self.native,-20)
-        user.SetWindowLongPtrW(self.native,-20,style|0x08000000|0x80) # NOACTIVATE, TOOLWINDOW
-        user.SetWindowDisplayAffinity.argtypes=[W.HWND,W.DWORD]
-        user.SetWindowDisplayAffinity(self.native,0x11) # exclude status surface from capture where supported
+        native=user.GetAncestor(self.winfo_id(),2)
+        previous=getattr(self,'native',None)
+        if previous is not None and previous!=native:unregister_overlay(previous)
+        self.native=native
+        try:self._native_policy=configure_overlay(native,passive=getattr(self,'_passive_input',False))
+        except (OSError,TclError):unregister_overlay(native);self.withdraw();raise
+    def _native_mapped(self,event):
+        if event.widget is self and not getattr(self,'_dismissed',True):
+            if getattr(self,'_native_job',None) is not None:self.after_cancel(self._native_job)
+            self._native_job=self.after_idle(self._refresh_native)
+    def _refresh_native(self):
+        self._native_job=None
+        if getattr(self,'_dismissed',True):return
+        try:self._prepare_native()
+        except (OSError,TclError) as exc:
+            self._native_error=str(exc);self.withdraw()
+    def _native_destroyed(self,event):
+        if event.widget is self and getattr(self,'native',None) is not None:unregister_overlay(self.native)
+    def set_passive_input(self,enabled):
+        self._passive_input=bool(enabled)
+        if getattr(self,'native',None) is not None and not getattr(self,'_dismissed',True):self._prepare_native()
     def _drag_start(self,event):
         self._drag_offset=(event.x_root-self.winfo_x(),event.y_root-self.winfo_y())
     def _drag(self,event):
@@ -186,13 +204,18 @@ class SearchOverlay(ct.CTkToplevel):
     def heartbeat(self):
         self._heartbeat_job=None
         if getattr(self,'_dismissed',True):return
+        try:self._prepare_native()
+        except (OSError,TclError) as exc:
+            self._native_error=str(exc);self.withdraw();return
         now=time.monotonic()
         text=f'已用 {int(now-self._started)} 秒 · 本阶段 {int(now-self._stage_started)} 秒'
         if self._deadline is not None:text+=f' · 游戏剩余 {max(0,int(self._deadline-now))} 秒'
         self.elapsed.configure(text=text)
         self._heartbeat_job=self.after(1000,self.heartbeat)
-    def begin(self,rules):
+    def begin(self,rules,*,passive=False):
         self._dismissed=False
+        self._native_run=False
+        self._passive_input=bool(passive)
         self._started=time.monotonic();self._stage_started=self._started;self._stage=None;self._deadline=None
         position=self.preferences.get('overlay_position',[20,100])
         # Width/height returned by winfo are native physical pixels.  Using
@@ -204,7 +227,8 @@ class SearchOverlay(ct.CTkToplevel):
         self.geometry(f'+{x}+{y}')
         self.clear_candidates()
         self.rules=rules;self.phase='waiting';self.render('等待染色界面','可从任意游戏界面进入普通染色并完成教学。\n识别成功后自动寻色；F9 取消等待。')
-        self._prepare_native();self.deiconify()
+        self._prepare_native();self.deiconify();self._prepare_native()
+        self._native_job=self.after_idle(self._refresh_native)
         self.schedule_surface_resize()
         self.update_activity({'stage':'waiting'})
         if self._heartbeat_job:self.after_cancel(self._heartbeat_job)
@@ -219,6 +243,8 @@ class SearchOverlay(ct.CTkToplevel):
         for button in self.candidate_rows.values():button.configure(state='disabled')
         if hasattr(self,'activity'):self.activity.stop()
         if getattr(self,'_heartbeat_job',None):self.after_cancel(self._heartbeat_job);self._heartbeat_job=None
+        if getattr(self,'_native_job',None):self.after_cancel(self._native_job);self._native_job=None
+        if getattr(self,'native',None) is not None:unregister_overlay(self.native)
         self.withdraw()
     def render(self,title,body):
         value=(title,body)
@@ -247,13 +273,8 @@ class SearchOverlay(ct.CTkToplevel):
         if not rows:
             ct.CTkLabel(self.candidate_container,text='有效覆盖不足，暂无可计算方案。').pack(padx=8,pady=12)
         if data.get('compromise_only'):
-            notice=(('本轮没有共同精准命中；以下候选按综合色差排序，实测后保留近似结果，不会自动确认染色。'
-                     if data.get('strict_exact',True) else
-                     '本轮没有共同达标方案；以下候选按综合色差排序，实测后保留近似结果，不会自动确认染色。')
-                    if data.get('compromise_fallback') else
-                    '本轮没有预测达标方案；以下结果仅供参考，实际复核未达标时会停止。')
             ct.CTkLabel(self.candidate_container,
-                        text=tr(notice),
+                        text=tr('本轮没有预测达标方案；以下结果仅供参考，实际复核未达标时会停止。'),
                         font=SMALL_FONT,text_color='#F2C879',wraplength=520,
                         anchor='w',justify='left').pack(fill='x',padx=6,pady=(0,5))
         for row in rows:
@@ -301,7 +322,8 @@ class SearchOverlay(ct.CTkToplevel):
     def show_verification(self,data):
         self.clear_candidates();self.phase='verified'
         self.results.grid(row=4,column=0,padx=2,pady=(0,10),sticky='ew');self._has_results=True;self._collapsed=False;self.copy.grid();self.activity.grid();self.collapse.configure(text='收起');self.resize_surface()
-        self.render(*atlas_result_presentation(data))
+        self.render('游戏色码已复核','部分区域与目标色系不符。' if data.get('family_consistent') is False else
+                    '全部目标达标，请在游戏内手动确认是否套用。' if data['accepted'] else '本轮候选实测未达标；当前颜色如下，尚不能判断色板无解。')
         for i in range(3):
             if data['actual_deltas'][i] is None:continue
             predicted=data.get('predicted_colors',[None]*3)[i]
@@ -323,7 +345,9 @@ class SearchOverlay(ct.CTkToplevel):
         self.results.grid(row=4,column=0,padx=2,pady=(0,10),sticky='ew');self._has_results=True;self._collapsed=False;self.copy.grid();self.activity.grid();self.collapse.configure(text='收起');self.resize_surface()
         actual=data.get('actual_colors') or [None]*3
         deltas=data.get('actual_deltas') or [None]*3
-        self.render(*atlas_result_presentation(dict(data,positioning_complete=False)))
+        self.render('已停止自动移动',
+                    '本次调整未完成，已读取当前游戏颜色。' if data.get('verified') and any(actual)
+                    else '未能读取当前色码，请以游戏内显示为准。')
         for i,(color,delta) in enumerate(zip(actual,deltas)):
             if color is None and delta is None:continue
             text=f"区域 {i+1}\n实测 {color or '—'}"+(f" · ΔE {delta:.2f}" if delta is not None else '')
@@ -331,13 +355,11 @@ class SearchOverlay(ct.CTkToplevel):
         maximum=data.get('maximum');average=data.get('average')
         if maximum is not None and average is not None:
             ct.CTkLabel(self.results,text=tr(f"最大 {maximum:.2f} / 平均 {average:.2f}")).pack(pady=8)
-        if data.get('historical_best_unrestored'):self.show_historical_colors(data)
 
     def show_unrestored_best(self,data):
-        self.show_recovery(dict(data,historical_best_unrestored=True))
-
-    def show_historical_colors(self,data):
-        best=data.get('best_observed_result') or data.get('best_result') or {}
+        self.show_recovery(data)
+        self.render('已停止自动移动','未能恢复先前最佳结果，请以游戏当前颜色为准。')
+        best=data.get('best_result') or {}
         ct.CTkLabel(self.results,text=tr('先前最佳实测（未恢复）'),anchor='w').pack(fill='x',padx=8,pady=8)
         for i,(color,delta) in enumerate(zip(best.get('actual_colors') or [],best.get('actual_deltas') or [])):
             if color is None or delta is None:continue
@@ -356,10 +378,17 @@ class SearchOverlay(ct.CTkToplevel):
             text=f"区域 {i+1}\n"+tr('当前颜色  ')+(color or tr('读取失败'))
             if delta is not None:text+=f" · ΔE {delta:.2f}"
             ct.CTkLabel(self.results,text=tr(text),justify='left',anchor='w').pack(fill='x',padx=8,pady=8)
-        if data.get('historical_best_unrestored'):self.show_historical_colors(data)
     def handle(self,kind,data):
         if getattr(self,'_dismissed',False):return
-        if kind in ('atlas_progress','single_progress'):
+        if kind in ('native_progress','native_result'):
+            self._native_run=True
+            if not getattr(self,'_passive_input',False):self.set_passive_input(True)
+        if kind=='finished' and getattr(self,'_native_run',False):
+            # Native results remain in the main window and history. Its
+            # topmost surface must release the underlying controls when the
+            # worker ends; atlas candidate/result surfaces keep their policy.
+            self.dismiss();return
+        if kind in ('atlas_progress','single_progress','native_progress'):
             self.phase='waiting' if data.get('stage')=='waiting' else 'computing'
             self.update_activity(data);self.render(*progress_text(data));return
         if kind=='single_action':
@@ -367,10 +396,15 @@ class SearchOverlay(ct.CTkToplevel):
             self.render(*progress_text({'stage':'restore' if data.get('restoring') else 'position'}));return
         if kind=='single_verified':
             self.activity.stop();self.activity.set(1);self.show_single_result(data);return
+        if kind=='native_result':
+            from native_status import result_text
+            self.activity.stop();self.activity.set(1)
+            self.show_recovery(data)
+            self.render(*result_text(data));return
         if kind=='atlas_command':
             self.phase='positioning';self.update_activity({'stage':'position'})
             self.render('移动到目标位置',f"步骤 {data.get('step',1)} · 根据图像实测位移校正；F9随时停止。");return
-        if kind in ('atlas_default_verified','atlas_verified','atlas_checkpoint_verified','atlas_recovery','atlas_best_not_restored','atlas_recovery_unavailable','atlas_invalidated','atlas_default_unavailable','error','interrupted','finished') and hasattr(self,'activity'):
+        if kind in ('atlas_default_verified','atlas_verified','atlas_recovery','atlas_best_not_restored','atlas_recovery_unavailable','atlas_invalidated','atlas_default_unavailable','error','interrupted','finished') and hasattr(self,'activity'):
             self.activity.stop();self.activity.set(1)
         if kind=='interrupted' and self.phase in ('choosing','positioning','verified'):
             self.batch_id=None
@@ -384,9 +418,7 @@ class SearchOverlay(ct.CTkToplevel):
             self.show_candidates(updated)
         elif kind=='atlas_invalidated':
             self.clear_candidates();self.phase='invalidated'
-            title=('未找到共同方案' if data.get('reason')=='no_joint_candidate' else
-                   '大图重建校验未通过' if data.get('reason')=='atlas_quality_failed' else
-                   '当前搜索未得到可执行方案')
+            title='大图重建校验未通过' if data.get('reason')=='atlas_quality_failed' else '当前搜索未得到可执行方案'
             self.render(title,data['message'])
         elif kind=='atlas_default_unavailable':
             self.clear_candidates();self.phase='unavailable';self.render('剩余时间不足',data.get('message','无法安全定位并复核自动最佳方案。'))
@@ -401,7 +433,12 @@ class SearchOverlay(ct.CTkToplevel):
                 self.show_candidates(update_candidate_display(self._candidate_data,data['candidate_id'],result=data,current=True))
             self.default_candidate_id=data.get('candidate_id',self.default_candidate_id)
             self.phase='choosing'
-            self.render(*atlas_result_presentation(data))
+            if data.get('family_consistent') is False:
+                self.render('存在色系偏离','部分区域与目标色系不符。')
+            elif data.get('compromise') or not data.get('accepted',True):
+                self.render('已到达最接近方案','这是当前可测量的妥协方案；可选择其他方案，实际染色须在游戏内手动确认。')
+            else:
+                self.render('已到达自动最佳方案','可选择其他方案；剩余时间不足时将保持当前自动方案。')
             self.show_default_verification(data)
             for candidate_id,button in self.candidate_rows.items():
                 button.configure(text='自动方案（当前）' if candidate_id==self.default_candidate_id else '选择此方案',
@@ -414,24 +451,14 @@ class SearchOverlay(ct.CTkToplevel):
             self.batch_id=None
             for button in self.candidate_rows.values():button.configure(state='disabled')
             self.phase='verified';self.render('未选择其他方案','已保持自动最佳方案。')
-        elif kind in ('atlas_verified','atlas_checkpoint_verified'):
+        elif kind=='atlas_verified':
             self.show_verification(data)
         elif kind=='atlas_recovery':
             self.show_recovery(data)
         elif kind=='atlas_best_not_restored':
             self.show_unrestored_best(data)
         elif kind=='atlas_status':
-            message=data.get('message','')
-            # Capture alignment errors are published before the read-only
-            # recovery result. Treat this status as a terminal capture stage
-            # so the last N/48 progress value cannot look stalled.
-            if message=='配准失败，已停止继续移动，正在读取当前游戏颜色。':
-                self.phase='computing'
-                recovery=dict(stage='recover',message=message)
-                self.update_activity(recovery)
-                self.render(*progress_text(recovery))
-            else:
-                self.render('自动染色',message)
+            self.render('自动染色',data.get('message',''))
         elif kind=='atlas_recovery_unavailable':
             self.clear_candidates();self.phase='verified'
             self.render('已保留当前画面',data.get('message','当前动作未能可靠复核，已停止自动移动。'))

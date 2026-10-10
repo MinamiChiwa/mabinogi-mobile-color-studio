@@ -8,6 +8,16 @@ import build_info
 
 
 class BuildIdentityTests(unittest.TestCase):
+    def test_native_package_and_assets_change_the_build_fingerprint(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);package=root/'native_live';package.mkdir()
+            source=package/'controller.py';source.write_text('value=1\n')
+            first=build_info.source_identity(root)['source_sha256']
+            source.write_text('value=2\n')
+            second=build_info.source_identity(root)['source_sha256']
+            self.assertNotEqual(first,second)
+            assets=package/'assets';assets.mkdir();(assets/'template.png').write_bytes(b'asset')
+            self.assertNotEqual(second,build_info.source_identity(root)['source_sha256'])
     def test_identity_tracks_code_but_excludes_personal_and_test_data(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder)

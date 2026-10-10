@@ -5,7 +5,8 @@ root=Path(__file__).resolve().parent
 workspace=root.parent.parent
 identity=source_identity(root)
 try:
-    identity['git_commit']=subprocess.check_output(['git','rev-parse','HEAD'],cwd=workspace,
+    git_root=Path(__import__('os').environ.get('COLOR_STUDIO_GIT_ROOT',str(workspace)))
+    identity['git_commit']=subprocess.check_output(['git','rev-parse','HEAD'],cwd=git_root,
         text=True,stderr=subprocess.DEVNULL).strip()
 except (OSError,subprocess.SubprocessError):identity['git_commit']=None
 build_info=root/'bundle/build-info.json';build_info.parent.mkdir(parents=True,exist_ok=True)
@@ -35,19 +36,21 @@ if saved.exists():
     # profiles or screenshots into a distributable package.
     shutil.copytree(saved,root/'release-test-data',dirs_exist_ok=True)
     shutil.rmtree(saved)
-subprocess.run([sys.executable,'-m','PyInstaller','--noconfirm','--onedir','--windowed','--name','ColorStudio','--distpath',str(out),'--workpath',str(root/'build'),'--specpath',str(root),'--collect-data','customtkinter','--collect-data','opencc','--add-data',str(ocr)+';ocr','--add-data',str(build_info)+';.','--exclude-module','PySide6','--exclude-module','pandas','--exclude-module','matplotlib',str(root/'app.py')],check=True)
+subprocess.run([sys.executable,'-m','PyInstaller','--noconfirm','--onedir','--windowed','--name','ColorStudio','--distpath',str(out),'--workpath',str(root/'build'),'--specpath',str(root),'--collect-data','customtkinter','--collect-data','opencc','--add-data',str(ocr)+';ocr','--add-data',str(build_info)+';.','--add-data',str(root/'native_live/assets')+';native_live/assets','--exclude-module','PySide6','--exclude-module','pandas','--exclude-module','matplotlib',str(root/'app.py')],check=True)
 # PyInstaller does not create application data. If a previous build left it in
 # the target, remove it after preserving the backup above as well.
 packaged_data=out/'ColorStudio/data'
 if packaged_data.exists():shutil.rmtree(packaged_data)
 licenses=out/'ColorStudio/THIRD_PARTY';licenses.mkdir(exist_ok=True)
 if (source/'doc').exists():shutil.copytree(source/'doc',licenses/'tesseract',dirs_exist_ok=True)
-for name in ('README.md','README.zh-TW.md','README.en.md'):
+for name in ('README.md','README.zh-TW.md','README.en.md','TESTING.md'):
  p=workspace/name
  if p.exists():shutil.copy2(p,out/'ColorStudio'/name)
 verification=out/'ColorStudio/work/studio/VERIFICATION.md'
 verification.parent.mkdir(parents=True,exist_ok=True)
 shutil.copy2(root/'VERIFICATION.md',verification)
+shutil.copy2(root/'native-window-check.ps1',out/'ColorStudio/native-window-check.ps1')
+shutil.copy2(root/'WINDOW_CHECK.zh-CN.md',out/'ColorStudio/WINDOW_CHECK.zh-CN.md')
 # Development validation reports remain in the workspace. Distributions
 # contain current user documentation and one current verification summary.
 print('RELEASE',out/'ColorStudio/ColorStudio.exe')

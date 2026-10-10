@@ -9,6 +9,7 @@ from atlas_pose import homogeneous, pose_fields
 from atlas_similarity import _distances
 from candidate_ranking import exact_priority, exact_fields
 from color_family import family_penalties, family_priority, family_fields
+from region_priority import priority_fields
 
 
 def score_pose(atlas, capture_offset, pose, markers, board, rules, *,
@@ -55,6 +56,7 @@ def score_pose(atlas, capture_offset, pose, markers, board, rules, *,
                 maximum=float(maximum[0]),average=float(average[0]),accepted=bool(passed[0]),
                 **exact_fields(hits,exact_max,exact_average,exact_total,0))
     result.update(family_fields(family_max,family_avg,family_losses,0))
+    result.update(priority_fields(result['colors'],result['deltas'],rules))
     # A compromise may be outside the user's configured Delta-E tolerance and
     # still be a safe landing when its small landing neighbourhood remains in
     # the same colour family. Keep this separate from ``accepted`` so the
@@ -91,7 +93,7 @@ def rescore_candidate(atlas, capture_offset, candidate, final_pose, markers,
     for name in ('landing_safe','landing_maximum','landing_radius','phase',
                  'remaining_translation','planned_route','input_route',
                  'execution_budget','landing_family_safe','landing_family_maximum',
-                 'route_stability','landing_uncertain','cross_family_fallback'):
+                 'route_stability','landing_uncertain','cross_family_fallback','region_priority'):
         row.pop(name,None)
     row.update(score)
     row.update(pose_fields(pose,board))

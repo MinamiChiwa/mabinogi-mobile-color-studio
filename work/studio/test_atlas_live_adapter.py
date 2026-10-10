@@ -8,55 +8,13 @@ from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import patch,MagicMock
 from PIL import Image
-from atlas_live_adapter import (acquire_current,_execute_recorded,observe_current,
-                                 callbacks,_candidate_is_no_worse,
-                                 _automatic_route_allowed)
+from atlas_live_adapter import acquire_current,_execute_recorded,observe_current,callbacks,_candidate_is_no_worse
 from atlas_pose import homogeneous
 from platform_win import Interrupted
 from atlas_service import AtlasService
 
 
 class LiveAdapterTests(unittest.TestCase):
-    def test_entry_return_binds_only_translation_from_real_double_frame_evidence(self):
-        from atlas_live_adapter import bind_entry_checkpoint
-        baseline=dict(candidate_id=-1,verified=True,pose_reliable=True,frame_ids=['entry-a','entry-b'],
-            actual_colors=['#FFFEFE']*3,actual_deltas=[.44]*3,maximum=.44,average=.44,accepted=False)
-        report=dict(baseline_result=baseline,board=(0,0,300,300),markers=[(50,150),(150,150),(250,150)])
-        candidate=dict(baseline,entry_checkpoint=True,dx=-40,dy=0)
-        row,budget=bind_entry_checkpoint(candidate,report,[],time.monotonic()+30)
-        self.assertTrue(budget['allowed'])
-        self.assertTrue(row['restore_checkpoint'])
-        self.assertEqual(row['route_stability']['support_source'],'entry_double_frame_hex')
-        self.assertEqual(budget['actions']['rotate'],0);self.assertEqual(budget['actions']['wheel'],0)
-        self.assertFalse(row['verified'])
-        # A flag cannot authorize another colour or an unobserved scale change.
-        for bad in (dict(candidate,actual_colors=['#FFFFFF']*3),dict(candidate,scale=.99)):
-            self.assertIsNone(bind_entry_checkpoint(bad,report,[],time.monotonic()+30)[0])
-
-    def test_automatic_route_gate_allows_translation_without_profile(self):
-        row=dict(execution_budget={'actions':{'drag':2}},
-                 route_stability={'passed':True,'samples_complete':True,
-                                  'response_profile_verified':False},
-                 planned_route={'game_response_verified':False})
-        self.assertTrue(_automatic_route_allowed(row))
-
-    def test_automatic_route_gate_rejects_unverified_rotation_and_wheel(self):
-        for action in ('rotate','wheel'):
-            row=dict(execution_budget={'actions':{action:1}},
-                     route_stability={'passed':True,'landing_safe':True,
-                                      'response_profile_verified':False},
-                     planned_route={'game_response_verified':False})
-            self.assertFalse(_automatic_route_allowed(row))
-
-    def test_automatic_route_gate_requires_both_certificates_for_transforms(self):
-        row=dict(execution_budget={'actions':{'rotate':1}},
-                 route_stability={'passed':True,'landing_safe':True,
-                                  'response_profile_verified':True},
-                 planned_route={'game_response_verified':False})
-        self.assertFalse(_automatic_route_allowed(row))
-        row['planned_route']['game_response_verified']=True
-        self.assertTrue(_automatic_route_allowed(row))
-
     def test_replan_candidate_quality_is_monotonic_within_tier(self):
         # A measured-pose fallback may differ by a small resampling amount,
         # but must not silently replace a good route with a materially worse

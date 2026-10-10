@@ -11,6 +11,7 @@ import numpy as np
 import cv2
 from vision import lab, rgb
 from candidate_ranking import candidate_rank,candidate_order,exact_priority,exact_fields
+from region_priority import vector_priority_components, priority_fields, priority_indices
 from color_family import family_penalties,family_priority,family_fields
 
 
@@ -29,25 +30,6 @@ def select_color_candidates(rows, rules, limit, *, preserve_routes=False):
         # The live builder applies the normal colour de-duplication again after
         # binding and rescoring, so this only widens the pre-bind evidence pool.
         best_colors=select_color_candidates(rows,rules,limit)
-        # The balanced top-N list can contain only cross-family compromises
-        # when the joint target is difficult.  Keep a bounded set of the best
-        # family-consistent colour tuples as well, otherwise route binding
-        # permanently discards evidence that all regions can at least remain
-        # in their intended colour families.  This is especially important
-        # for the diagnostic/explicit-choice path; the service still refuses
-        # blind automatic movement when no candidate is accepted.
-        selected_colors={tuple(row.get('colors',())) for row in best_colors}
-        family_rows=sorted((row for row in rows if row.get('family_consistent')),
-                           key=lambda row:(float(row.get('family_maximum',np.inf)),
-                                           float(row.get('family_average',np.inf)),
-                                           candidate_rank(row)))
-        family_limit=max(1,int(limit))
-        for row in family_rows:
-            colors=tuple(row.get('colors',()))
-            if colors in selected_colors:continue
-            best_colors.append(row);selected_colors.add(colors)
-            if len(selected_colors)>=len(set(tuple(r.get('colors',())) for r in best_colors[:limit]))+family_limit:
-                break
         by_color={tuple(row['colors']):[] for row in best_colors}
         for row in sorted(rows,key=candidate_rank):
             colors=tuple(row.get('colors',()))
@@ -80,11 +62,17 @@ def select_color_candidates(rows, rules, limit, *, preserve_routes=False):
     selected=ranked[:limit]
     exact=[i for i,r in enumerate(rules) if r.get('enabled') and r.get('exact')]
     if len(selected)<2 or not exact:return selected
-
     all_exact=any(all(row['colors'][i] is not None and
         row['colors'][i].upper() in [c.upper() for c in rules[i]['colors']]
         for i in exact) for row in ranked)
     if all_exact:return selected
+    # With explicit region priorities, the lexicographic candidate rank is the
+    # user's requested compromise policy. The historical per-exact-region tail
+    # slot can replace a lower-ranked row with a lower-priority hit and thereby
+    # violate that policy. Keep the ranked shortlist intact; the legacy path
+    # below remains unchanged for profiles without priority metadata.
+    if priority_indices(rules) is not None:
+        return selected
     reserved=set();slot=len(selected)-1
     for region in exact:
         options=[row for row in ranked if row.get('deltas',[None]*3)[region] is not None]
@@ -110,32 +98,6 @@ def _distances(values, rule):
         exact |= (values==target).all(axis=1)
     passed=exact if rule.get('exact') else distances<=float(rule['tolerance'])
     return distances,passed
-
-
-def _exact_target_availability(atlas, region, rule):
-    """Summarize strict RGB availability for an exact target.
-
-    An exact rule is intentionally byte-for-byte.  A dense atlas can still
-    have a very close colour without containing the requested RGB triplet;
-    exposing that distinction in diagnostics prevents a strict no-match from
-    being mistaken for a candidate-ranking or route-binding failure.
-    """
-    colors, valid, _ = atlas.maps(region=region)
-    values = colors[valid]
-    targets = np.asarray([rgb(value) for value in rule.get('colors', [])],
-                         dtype=np.uint8)
-    result = dict(targets=[str(value).upper() for value in rule.get('colors', [])],
-                  valid_pixels=int(len(values)), exact_pixels=0,
-                  nearest_color=None, nearest_delta_e76=None)
-    if not len(values) or not len(targets):
-        return result
-    exact = np.any(np.all(values[:, None, :] == targets[None, :, :], axis=2), axis=1)
-    distances, _ = _distances(values, rule)
-    nearest = int(np.argmin(distances))
-    result.update(exact_pixels=int(exact.sum()),
-                  nearest_color='#%02X%02X%02X' % tuple(int(v) for v in values[nearest]),
-                  nearest_delta_e76=float(distances[nearest]))
-    return result
 
 
 def _seeds(atlas, region, rule, limit, source_radius, include_compromises=False):
@@ -242,13 +204,9 @@ def similarity_candidates(atlas, markers, rules, current_translation, board_shap
     diag['scale_levels']=None if levels is None else levels.tolist()
     diag['include_compromises']=bool(include_compromises)
     diag['exact_fallback_pool']=0
-    diag['exact_target_availability']={}
     points={}; source_risk={}
     for region in enabled:
         if cancelled():raise InterruptedError('Calculation cancelled')
-        if rules[region].get('exact'):
-            diag['exact_target_availability'][str(region+1)] = _exact_target_availability(
-                atlas, region, rules[region])
         points[region],source_risk[region],hits=_seeds(atlas,region,rules[region],seed_limit,
                                                      landing_radius/bounds[0],include_compromises)
         diag['hit_counts'][str(region+1)]=hits
@@ -259,7 +217,9 @@ def similarity_candidates(atlas, markers, rules, current_translation, board_shap
     # separations and prevent all other proposals from being considered.
     center=complex(shape[1]/2,shape[0]/2); current_z=complex(*current)
     inverse=np.linalg.inv(atlas.basis); pool=[]
-    ordered=sorted(enabled,key=lambda i:(not rules[i].get('exact'),len(points[i])))
+    prioritized=priority_indices(rules)
+    ordered=(sorted(enabled,key=lambda i:(not rules[i].get('exact'),len(points[i])))
+             if prioritized is None else prioritized)
     diag['pair_evaluated_transforms']={}
     for first,second in itertools.combinations(ordered,2):
         pair_key=f'{first+1}-{second+1}'
@@ -319,16 +279,19 @@ def similarity_candidates(atlas, markers, rules, current_translation, board_shap
             risk=pair_risk[ii,jj]
             hits,exact_max,exact_avg,exact_total=exact_priority(colors,distances,rules)
             family_max,family_avg,_=family_priority(colors,rules)
+            priority=vector_priority_components(colors,distances,rules)
             ids=ids[candidate_order(hits[ids],maximum[ids],average[ids],passed[ids],False,
                                     risk[ids],best[ids],exact_maximum=exact_max[ids],
                                     exact_average=exact_avg[ids],family_maximum=family_max[ids],
-                                    family_average=family_avg[ids])][:256]
+                                    family_average=family_avg[ids],
+                                    region_priority=None if priority is None else priority[ids])][:256]
             if include_compromises:
                 rejected=np.flatnonzero(usable&~passed)
                 rejected=rejected[candidate_order(hits[rejected],maximum[rejected],average[rejected],
                                     passed[rejected],False,risk[rejected],best[rejected],
                                     exact_maximum=exact_max[rejected],exact_average=exact_avg[rejected],
-                                    family_maximum=family_max[rejected],family_average=family_avg[rejected])][:256]
+                                    family_maximum=family_max[rejected],family_average=family_avg[rejected],
+                                    region_priority=None if priority is None else priority[rejected])][:256]
                 ids=np.r_[ids,rejected]
                 # If no candidate in this transform batch contains any exact
                 # hit, keep a separate nearest-exact slice before the bounded
@@ -380,6 +343,7 @@ def similarity_candidates(atlas, markers, rules, current_translation, board_shap
             search_space='periodic_similarity',execution_verified=False))
         rows[-1].update(exact_fields(hits,exact_max,exact_avg,exact_total,k))
         rows[-1].update(family_fields(family_max,family_avg,family_losses,k))
+        rows[-1].update(priority_fields(hexes,rows[-1]['deltas'],rules))
     result=[]
     # Keep the normal balanced ranking first so the automatic default is not
     # replaced by a single-region compromise.  When no exact transform exists

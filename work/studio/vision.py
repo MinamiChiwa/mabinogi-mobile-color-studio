@@ -193,7 +193,7 @@ def _swatch_distance(value,samples):
 
 
 def read_codes(image,cards,markers=None,enabled=None, *,
-               deadline=None,clock=time.monotonic,check=lambda:None):
+               deadline=None,clock=time.monotonic,check=lambda:None,text_fallback=None,fallback_diagnostics=None):
     """Read actual HEX values within an optional shared observation deadline."""
     _check_ocr_deadline(deadline,clock,check)
     def read_text(reader,*args,**kwargs):
@@ -227,6 +227,18 @@ def read_codes(image,cards,markers=None,enabled=None, *,
             value='#'+m.group(1); distance=_swatch_distance(value,samples)
             candidates.append((distance,value))
             if samples is not None and distance<3:break
+        if text_fallback is not None and (not candidates or min(c[0] for c in candidates)>=3):
+            # Optional research text reader sees screenshot pixels only. Never
+            # pass native expected HEX or use swatch RGB to generate characters.
+            _check_ocr_deadline(deadline,clock,check)
+            result=text_fallback(image,[x,y,w,h],deadline=deadline,clock=clock,check=check)
+            _check_ocr_deadline(deadline,clock,check)
+            value=result.get('hex')
+            distance=_swatch_distance(value,samples) if isinstance(value,str) and re.fullmatch('#[0-9A-F]{6}',value) else None
+            close=result.get('glyphs_unambiguous') is True and distance is not None and distance<3
+            if fallback_diagnostics is not None:
+                fallback_diagnostics.append(dict(card_index=index,**result,swatch_distance=distance,swatch_accepted=close))
+            if close:candidates.append((distance,value))
         if not candidates or min(c[0] for c in candidates)>=3:
             # Small antialiased glyphs may merge before enlargement (6/E,
             # missing 0). Threshold AFTER enlarging as a bounded fallback.

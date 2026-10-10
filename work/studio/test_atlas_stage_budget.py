@@ -7,9 +7,7 @@ from unittest.mock import patch
 import numpy as np
 
 from atlas_bound_route import bind_candidate
-from atlas_execution import (CandidateBatch, Context, execute_candidate,
-                             reposition_budget, _check_attempt_budget)
-from input_gestures import planned_gesture
+from atlas_execution import CandidateBatch, Context, execute_candidate, reposition_budget
 from atlas_runtime import Adapter
 from atlas_stage_budget import ExecutionStageBudget, StageBudgetExceeded
 from atlas_live_adapter import choice_current
@@ -84,33 +82,10 @@ class TimedAdapter(Adapter):
 
 
 class StageBudgetTests(unittest.TestCase):
-    def test_return_cost_is_reserved_once_and_can_increase_the_tail(self):
-        clock=Clock();clock.now=100.
-        budget=ExecutionStageBudget.for_attempt(120.,120.,clock=clock)
-        # 2.5s action/read + max(15s, 10s return + 3.5s final read + 2s margin).
-        self.assertTrue(budget.can_start_attempt(action_seconds=1.,registration_seconds=.5,
-            verification_seconds=1.,return_seconds=10.))
-        self.assertFalse(budget.can_start_attempt(action_seconds=1.,registration_seconds=.5,
-            verification_seconds=1.,return_seconds=20.))
-
     rules=[dict(enabled=True,exact=False,colors=['#112233'],tolerance=8)]*3
 
     def row(self,dx=20,dy=0):
         return dict(id=0,dx=dx,dy=dy,angle=0.,scale=1.,colors=['#112233']*3,deltas=[0]*3)
-
-    def test_each_live_gesture_reserves_observation_and_return_before_input(self):
-        clock=Clock()
-        budget=ExecutionStageBudget.for_attempt(20.,20.,clock=clock)
-        gesture=planned_gesture('drag',(0,0,900,900),(10,0))
-        events=[]
-        clock.now=4.0
-        with self.assertRaises(StageBudgetExceeded):
-            _check_attempt_budget(budget,gesture,return_seconds=1.0,
-                                  emit=lambda kind,data:events.append((kind,data)),
-                                  step=1,action='drag')
-        self.assertEqual(len(events),1)
-        self.assertEqual(events[0][0],'atlas_attempt_budget_blocked')
-        self.assertEqual(events[0][1]['action'],'drag')
 
     def test_diagonal_rounding_retains_a_reachable_endpoint_and_rescores_it(self):
         board=(0,0,100,100);markers=((12,20),(14,40),(16,60))
@@ -191,25 +166,6 @@ class StageBudgetTests(unittest.TestCase):
         self.assertEqual(game.until,20.)
         self.assertTrue(all(at<1.5 for flags,at in game.sent if flags not in (4,16)))
         self.assertIsNone(adapter._stage_budget)
-
-    def test_for_attempt_reserves_hard_deadline_for_final_return(self):
-        clock=Clock()
-        budget=ExecutionStageBudget.for_attempt(20.,20.,clock=clock)
-        # 20s hard cutoff minus the default 15s finalization reserve.
-        self.assertEqual(budget.input_deadline,5.)
-        self.assertEqual(budget.exploration_deadline,5.)
-        self.assertFalse(budget.can_start_attempt(action_seconds=4.5,
-                                                   registration_seconds=.5,
-                                                   verification_seconds=.25,
-                                                   return_seconds=.5))
-        clock.now=2.
-        self.assertTrue(budget.can_start_attempt(action_seconds=.5,
-                                                  registration_seconds=.5,
-                                                  verification_seconds=.5,
-                                                  return_seconds=.5))
-        with self.assertRaises(StageBudgetExceeded):
-            budget.check_attempt(action_seconds=2.,registration_seconds=1.,
-                                 verification_seconds=1.,return_seconds=1.)
 
     def test_live_ocr_deadline_is_converted_to_soft_stage_outcome(self):
         clock=Clock();game=TimedGame(clock)

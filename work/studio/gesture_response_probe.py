@@ -8,7 +8,7 @@ from dataclasses import dataclass
 import time
 import numpy as np
 from atlas_pose import homogeneous, marker_errors, pose_fields
-from input_gestures import drag_gesture, rotation_gesture, wheel_gesture
+from input_gestures import rotation_gesture, wheel_gesture
 
 
 @dataclass(frozen=True)
@@ -118,37 +118,6 @@ def rotation_comparison_plan(board):
     return tuple(result)
 
 
-def translation_shared_plan(board, cycles=1):
-    """Short, bounded plan for the remaining mechanism evidence.
-
-    It deliberately mixes small translations with a repeated shared pose and
-    one wheel pair so the same-session log can compare pose reuse costs without
-    spending the whole round on a full rotation matrix sweep.
-    """
-    l, t, r, b = map(int, board)
-    center = (round((l + r) / 2), round((t + b) / 2))
-    offset = (round(l + (r - l) * .22), round(t + (b - t) * .72))
-    actions = []
-    for repeat in range(max(1, int(cycles))):
-        for name, anchor in (('center', center), ('offset', offset)):
-            for dx, dy in ((8, 0), (-8, 0), (0, 8), (0, -8)):
-                actions.append(ProbeAction(
-                    f'{name}_r{repeat}_t{dx:+d}_{dy:+d}', name, repeat,
-                    # ``drag_gesture`` derives a safe in-board path from the
-                    # displacement.  The anchor label is retained as probe
-                    # metadata so the same response can be compared at the
-                    # two sampling locations; it is not a fourth gesture
-                    # argument.
-                    drag_gesture(board, dx, dy)))
-        actions.extend((
-            ProbeAction(f'center_r{repeat}_w-1', 'center', repeat,
-                        wheel_gesture(board, -1, center)),
-            ProbeAction(f'center_r{repeat}_w+1', 'center', repeat,
-                        wheel_gesture(board, 1, center)),
-        ))
-    return tuple(actions)
-
-
 def _probe_hex(image, scene, check=lambda: None):
     """Best-effort card HEX read for diagnostics; OCR failure is recorded as null."""
     try:
@@ -171,8 +140,7 @@ def _probe_cursor_trace(game):
 
 def run_zoom_reversibility_probe(game, scene, reference, snap, log, *,
                                  register=None, clock=time.monotonic,
-                                 cycles=3, anchors=None,
-                                 mechanism_recorder=None, dye_consumed=None):
+                                 cycles=3, anchors=None):
     """Measure one-notch zoom pairs without installing a response model.
 
     The diagnostic sends only ``+1`` and ``-1`` wheel notches.  Every input
@@ -198,26 +166,6 @@ def run_zoom_reversibility_probe(game, scene, reference, snap, log, *,
         board=list(scene.board), markers=[list(v) for v in scene.markers],
         geometry=list(geometry), dpi=getattr(game, 'response_probe_dpi', None),
         reference='max_sampling', response_model_installed=False)
-    recorder_bridge = None
-    # This is the HEX read belonging to ``current``.  Keep it alongside the
-    # frame so every action can report a true before/after pair.  Unknown OCR
-    # remains None and is never reconstructed from a later sample.
-    current_hex = None
-    if mechanism_recorder is not None:
-        from mechanism_experiment import record_probe_event
-        recorder_bridge = record_probe_event
-        if dye_consumed is not None:
-            mechanism_recorder.set_consumption(dye_consumed)
-        baseline_hex = _probe_hex(reference, scene, check=game.check)
-        current_hex = baseline_hex
-        recorder_bridge(mechanism_recorder, 'response_probe_plan',
-                        dict(protocol='zoom_reversibility',
-                             actions=[dict(name=p.name) for p in plan],
-                             markers=[list(v) for v in scene.markers],
-                             hex_before=baseline_hex), clock=clock)
-        mechanism_recorder.events[-1]['hex_before'] = baseline_hex
-        mechanism_recorder.events[-1]['countdown_seconds'] = max(
-            0., float(game.until) - float(clock()))
     current = reference
     current_name = 'max_sampling'
     pose = np.eye(3)
@@ -244,8 +192,6 @@ def run_zoom_reversibility_probe(game, scene, reference, snap, log, *,
                 pair_baseline, pair_baseline_name = current, current_name
                 pair_forward = pair_forward_name = None
             before, before_name = current, current_name
-            hex_before = current_hex
-            countdown_before = max(0., float(game.until) - float(clock()))
             log('zoom_reversibility_command', step=index, name=action.name,
                 anchor_name=action.anchor_name, cycle=action.cycle, pair=action.pair,
                 phase=action.phase, direction=action.direction,
@@ -265,9 +211,7 @@ def run_zoom_reversibility_probe(game, scene, reference, snap, log, *,
             current = snap(frame_name, scene)
             current_name = frame_name
             hexes = _probe_hex(current, scene, check=game.check)
-            current_hex = hexes
             details = {}
-            registration_started = clock()
             try:
                 measured = register(before, current, scene, details)
             except Exception as exc:
@@ -275,38 +219,14 @@ def run_zoom_reversibility_probe(game, scene, reference, snap, log, *,
                     raise
                 measured = None
                 details['error'] = str(exc)
-            registration_seconds = max(0., float(clock()) -
-                                       float(registration_started))
             record = dict(step=index, name=action.name, anchor_name=action.anchor_name,
                           cycle=action.cycle, pair=action.pair, phase=action.phase,
                           direction=action.direction, reference=before_name,
                           pair_baseline=pair_baseline_name, frame=frame_name,
-                           gesture=gesture.record(), input_elapsed_seconds=input_seconds,
-                           input_trace=input_trace, hex=hexes,
-                           hex_before=hex_before, hex_after=hexes,
-                           hex_first=None, hex_settled=hexes,
-                           countdown_before=countdown_before,
-                           countdown_after=max(0., float(game.until) - float(clock())),
-                           registration_seconds=registration_seconds,
-                           measurements=measured,
+                          gesture=gesture.record(), input_elapsed_seconds=input_seconds,
+                          input_trace=input_trace, hex=hexes, measurements=measured,
                           diagnostics=details,
                           registration_complete=measured is not None)
-            if recorder_bridge is not None:
-                mechanism_recorder.action(
-                    name=action.name, direction=action.direction,
-                    step=action.direction, frame_before=before_name,
-                    frame_after=frame_name, hex_before=hex_before,
-                    hex_after=hexes, hex_first=None, hex_settled=hexes,
-                    countdown_before=countdown_before,
-                    countdown_after=max(0., float(game.until) - float(clock())),
-                    input_seconds=input_seconds, pose=pose[:2].tolist(),
-                    residual=details.get('residual'),
-                    registration_seconds=registration_seconds,
-                    registration_complete=measured is not None,
-                    registration_diagnostics=details,
-                    protocol='zoom_reversibility', cycle=action.cycle,
-                    pair=action.pair, phase=action.phase,
-                    measurements=measured)
             if measured is None:
                 log('zoom_reversibility_measurement', **record)
                 status = 'registration_incomplete'
@@ -347,11 +267,6 @@ def run_zoom_reversibility_probe(game, scene, reference, snap, log, *,
         if status == 'registration_incomplete':
             outcome['measured_pose'] = None
         log('zoom_reversibility_complete', **outcome)
-        if recorder_bridge is not None:
-            recorder_bridge(mechanism_recorder, 'response_probe_complete',
-                            dict(outcome, countdown_seconds=max(
-                                0., float(game.until) - float(clock()))),
-                            clock=clock)
         return current, outcome
     except Exception as exc:
         log('zoom_reversibility_interrupted', completed=completed,
@@ -365,11 +280,6 @@ def run_zoom_reversibility_probe(game, scene, reference, snap, log, *,
                        measured_pose=None, response_model_installed=False,
                        error=str(exc))
         log('zoom_reversibility_complete', **outcome)
-        if recorder_bridge is not None:
-            recorder_bridge(mechanism_recorder, 'response_probe_complete',
-                            dict(outcome, countdown_seconds=max(
-                                0., float(game.until) - float(clock())),
-                                 status=outcome['status']), clock=clock)
         return current, outcome
     finally:
         game.capture_input_trace = previous_trace
@@ -381,8 +291,7 @@ def run_zoom_reversibility_probe(game, scene, reference, snap, log, *,
 
 def run_response_probe(game,scene,reference,snap,log,*,register=None,
                        clock=time.monotonic,protocol='baseline',probe_cycles=3,
-                       probe_anchors=None, mechanism_recorder=None,
-                       dye_consumed=None, probe_plan='default'):
+                       probe_anchors=None):
     """Run a bounded plan; return the last frame and a structured outcome.
 
     snap(name, scene) preserves original frames. log(kind, **data) journals
@@ -391,25 +300,14 @@ def run_response_probe(game,scene,reference,snap,log,*,register=None,
     """
     if register is None:
         from atlas_runtime import motion as register
-    # The recorder is an explicit diagnostic opt-in.  It journals evidence
-    # only; it never changes the input plan or decides whether dye was used.
-    record_probe_event = None
-    if mechanism_recorder is not None:
-        from mechanism_experiment import record_probe_event
-        if dye_consumed is not None:
-            mechanism_recorder.set_consumption(dye_consumed)
     game.check()
     if protocol not in ('baseline','rotation_compare','zoom_reversibility'):
         raise ValueError('Unknown response measurement protocol')
     if protocol == 'zoom_reversibility':
         return run_zoom_reversibility_probe(
             game, scene, reference, snap, log, register=register, clock=clock,
-            cycles=probe_cycles, anchors=probe_anchors,
-            mechanism_recorder=mechanism_recorder, dye_consumed=dye_consumed)
-    if probe_plan == 'translation_shared':
-        plan = translation_shared_plan(scene.board, cycles=probe_cycles)
-    else:
-        plan=(rotation_comparison_plan if protocol=='rotation_compare' else response_probe_plan)(scene.board)
+            cycles=probe_cycles, anchors=probe_anchors)
+    plan=(rotation_comparison_plan if protocol=='rotation_compare' else response_probe_plan)(scene.board)
     local=np.asarray(scene.markers,float)-scene.board[:2]
     geometry=tuple(game.geometry())
     park=(int(geometry[2]*.5),int(geometry[3]*.15))
@@ -421,23 +319,6 @@ def run_response_probe(game,scene,reference,snap,log,*,register=None,
         board=list(scene.board),markers=[list(v) for v in scene.markers],
         geometry=list(geometry),dpi=getattr(game,'response_probe_dpi',None),
         reference='max_sampling',response_model_installed=False)
-    baseline_hex = None
-    if record_probe_event is not None:
-        baseline_hex = _probe_hex(reference, scene, check=game.check)
-        current_hex = baseline_hex
-        record_probe_event(mechanism_recorder, 'response_probe_plan',
-                           dict(protocol=protocol,
-                                actions=[dict(name=p.name) for p in plan],
-                                markers=[list(v) for v in scene.markers],
-                                hex_before=baseline_hex), clock=clock)
-        # Keep the authoritative baseline HEX on the baseline event.  The
-        # bridge deliberately does not synthesize values when OCR fails.
-        mechanism_recorder.events[-1]['hex_before'] = baseline_hex
-        mechanism_recorder.events[-1]['countdown_seconds'] = max(
-            0., float(game.until) - float(clock()))
-    # Keep the last settled HEX with its corresponding frame.  Without an
-    # OCR result, leave it as None rather than borrowing a later sample.
-    current_hex = baseline_hex if record_probe_event is not None else None
     current=reference;current_name='max_sampling';pose=np.eye(3);completed=0;skipped=0
     status='complete'
     previous_trace=getattr(game,'capture_input_trace',False)
@@ -459,8 +340,6 @@ def run_response_probe(game,scene,reference,snap,log,*,register=None,
             if deadline-clock()<gesture.duration+.3+2.:
                 status='game_time_remaining';break
             before=current;before_name=current_name
-            hex_before=current_hex
-            countdown_before=max(0., float(game.until)-float(clock()))
             log('response_probe_command',step=index,name=action.name,
                 anchor_name=action.anchor_name,repeat=action.repeat,variant=action.variant,
                 reference=before_name,pose_before=pose[:2].tolist(),gesture=gesture.record())
@@ -473,14 +352,10 @@ def run_response_probe(game,scene,reference,snap,log,*,register=None,
             game.pause(.15);game.check();game.move_to(park)
             first_name=f'response_{index:02d}_first'
             first=snap(first_name,scene)
-            hex_first = _probe_hex(first, scene, check=game.check) if record_probe_event else None
             game.pause(.15)
             current_name=f'response_{index:02d}_settled'
             current=snap(current_name,scene)
-            hex_settled = _probe_hex(current, scene, check=game.check) if record_probe_event else None
-            current_hex = hex_settled
             measurements={};diagnostics={}
-            registration_started=clock()
             for name,a,z in (('forward',before,current),('reverse',current,before),
                              ('settling',first,current)):
                 game.check()
@@ -493,24 +368,13 @@ def run_response_probe(game,scene,reference,snap,log,*,register=None,
                     measurements[name]=None
                     details['error']=str(exc)
                 diagnostics[name]=details
-            registration_seconds = max(0., float(clock())-float(registration_started))
             record=dict(step=index,name=action.name,anchor_name=action.anchor_name,
                 repeat=action.repeat,variant=action.variant,reference=before_name,first=first_name,
                 settled=current_name,gesture=gesture.record(),
                 input_elapsed_seconds=input_seconds,measurements=measurements,
                 input_trace=input_trace,
                 diagnostics=diagnostics,pose_before=pose[:2].tolist(),
-                hex_before=hex_before,hex_after=hex_settled,
-                hex_first=hex_first,hex_settled=hex_settled,
-                countdown_before=countdown_before,
-                countdown_after=max(0., float(game.until)-float(clock())),
-                registration_seconds=registration_seconds,
                 registration_complete=all(v is not None for v in measurements.values()))
-            # Persist the attempted action even when one registration direction
-            # fails; missing motion fields remain absent evidence in the report.
-            if record_probe_event is not None:
-                record_probe_event(mechanism_recorder, 'response_probe_measurement',
-                                   record, clock=clock)
             if not record['registration_complete']:
                 log('response_probe_measurement',**record)
                 status='registration_incomplete';break
@@ -531,10 +395,6 @@ def run_response_probe(game,scene,reference,snap,log,*,register=None,
                      response_model_installed=False)
         if status=='registration_incomplete':outcome['measured_pose']=None
         log('response_probe_complete',**outcome)
-        if record_probe_event is not None:
-            record_probe_event(mechanism_recorder, 'response_probe_complete',
-                               dict(outcome, countdown_seconds=max(
-                                   0., float(game.until)-float(clock()))), clock=clock)
         return current,outcome
     except Exception as exc:
         log('response_probe_interrupted',completed=completed,skipped=skipped,
@@ -545,11 +405,6 @@ def run_response_probe(game,scene,reference,snap,log,*,register=None,
                      skipped=skipped,last_frame=current_name,measured_pose=None,
                      response_model_installed=False,error=str(exc))
         log('response_probe_complete',**outcome)
-        if record_probe_event is not None:
-            record_probe_event(mechanism_recorder, 'response_probe_complete',
-                               dict(outcome, countdown_seconds=max(
-                                   0., float(game.until)-float(clock()))),
-                               clock=clock)
         return current,outcome
     finally:
         game.capture_input_trace=previous_trace

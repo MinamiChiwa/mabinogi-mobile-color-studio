@@ -44,12 +44,12 @@ class AppAtlasWiringTests(unittest.TestCase):
         self.assertIsNotNone(runner.atlas_runner)
         capture.assert_not_called()
 
-    def test_build_runner_uses_latest_atlas_by_default(self):
+    def test_build_runner_uses_native_user_rules_by_default(self):
         emit=lambda *_:None
         with tempfile.TemporaryDirectory() as folder, patch.object(app,'Runner') as runner:
             result=app.build_runner(emit,folder)
         self.assertEqual(runner.call_args.args,(emit,folder))
-        self.assertTrue(callable(runner.call_args.kwargs['atlas_runner']))
+        self.assertTrue(callable(runner.call_args.kwargs['native_runner']))
         self.assertIs(result,runner.return_value)
 
     def test_atlas_is_opt_in_and_waits_for_manual_entry(self):

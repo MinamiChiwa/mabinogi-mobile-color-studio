@@ -2,45 +2,14 @@ import unittest
 import json
 import tempfile
 from pathlib import Path
-from unittest.mock import patch
 import numpy as np
 from PIL import Image
 from atlas_review import review
 from analyze_live_atlas import quality_gate, frame_sequence, scene_record
-from periodic_atlas import (PeriodicAtlas, translation_candidates,
-                            progressive_translation_candidates)
+from periodic_atlas import PeriodicAtlas, translation_candidates
 
 
 class AtlasTests(unittest.TestCase):
-    def test_progressive_translation_candidates_uses_anchor_then_local_refinement(self):
-        atlas=PeriodicAtlas([[16,0],[0,16]],resolution=16)
-        image=np.full((16,16,3),64,np.uint8)
-        image[:8,:8]=32
-        masks=np.ones((3,16,16),bool)
-        atlas.add(image,masks)
-        rules=[dict(enabled=True,exact=True,colors=['#202020'],tolerance=0) for _ in range(3)]
-        diagnostics={}
-        rows=progressive_translation_candidates(atlas,[[4,4],[8,4],[12,4]],rules,
-            anchor_limit=4,refine_radius=2,limit=4,landing_radius=0,diagnostics=diagnostics)
-        self.assertEqual(diagnostics['mode'],'anchor_refinement')
-        self.assertGreaterEqual(diagnostics['anchor_count'],1)
-        self.assertTrue(all(r['search_space']=='anchor_refinement' for r in rows))
-
-    def test_progressive_search_keeps_same_colour_rows_with_different_costs(self):
-        atlas=PeriodicAtlas([[16,0],[0,16]],resolution=16)
-        rules=[dict(enabled=True,exact=True,colors=['#202020'],tolerance=0) for _ in range(3)]
-        anchor=dict(id=0,dx=0.,dy=0.,maximum=0.,average=0.,total=0.,
-                    exact_matches=1,colors=['#202020']*3)
-        rows=[dict(id=1,dx=1.,dy=0.,maximum=0.,average=0.,total=0.,
-                   exact_matches=1,colors=['#202020']*3,landing_maximum=1.),
-              dict(id=2,dx=2.,dy=0.,maximum=0.,average=0.,total=0.,
-                   exact_matches=1,colors=['#202020']*3,landing_maximum=2.)]
-        with patch('periodic_atlas.translation_candidates',side_effect=[[anchor],rows]):
-            result=progressive_translation_candidates(atlas,[[4,4],[8,4],[12,4]],rules,
-                anchor_limit=1,refine_radius=2,limit=4,landing_radius=0)
-        self.assertEqual(len(result),2)
-        self.assertEqual({row['dx'] for row in result},{1.,2.})
-
     def test_scene_record_prefers_sampling_geometry(self):
         log=[dict(kind='ready',board=(1,1,2,2)),
              dict(kind='sampling_ready',board=(3,3,4,4))]

@@ -1,27 +1,113 @@
 # Current verification scope
-> **Release status: validation-in-progress technical candidate.** 0.3.6 has code-regression evidence and a published build, but game-mechanism acceptance is incomplete. The published/latest label must not be read as proof of cross-board, cross-device or multi-region precision. See GAME_MECHANISM_VALIDATION_GATE.md before changing code or release status.
 
-Version: 0.3.6. Policy revision: balanced-landing-single-zoom-v3. Date: 2026-10-08. This tool was developed with AI assistance.
+## Release 0.4.0 (2026-10-11)
+
+Policy: `native-priority-similar-fine-scale-v15`. Current UI settings autosave; named presets support independent editing/loading/deletion and retain unique three-region priorities. Both native and fallback visual paths prefer all enabled targets, then ordered satisfaction and Delta-E. Exact HEX rules, disabled regions and alternatives retain their original acceptance semantics.
+
+Fixed per-pixel card redraw and an inner scroll-frame grid ownership error. A single own-window bitmap during native sizing reduced a 16-step isolated geometry/update mean from 313.5ms to 11.98ms (maximum 16.14ms). A user screenshot exposed real CTk scaling transients; captured single-window 100%/150% reproductions drove an additional atomic scaling cover, cached page-manager protection and safe gesture/scaling ownership. Screen captures after that repair show complete old/new frames. No WndProc replacement is shipped; the rejected prototype crashed in testing.
+
+The actual rc16 Similar-white failure was a local five-second visual timeout while about 53 seconds remained. Completed OCR/native colors now survive local advisory timer failure with explicit sources. The original palette also had accepted targets but route compilation could not finish rotation/fine scale. Complete replayed opposite wheel legs now find an accepted 17-action route in about1.656s; a charged-IO controller simulation finishes within90s with at least10s left. These are offline results, not a new live dye round. Full action/readback allowances are checked before beginning target, approach and compromise routes.
+
+Default quick after source freeze:449 tests,448 passed,1 optional private OCR fixture skipped,zero failures/errors;28.953s test time,29.724s total. Final frozen release profile:482 tests,481 passed,1 optional private OCR fixture skipped,zero failures/errors;140.667s execution,146.897s total. Eight atomic-scale/ownership and six lifecycle fault checks also passed. Historical/full profiles remain explicit and do not change production search budgets. Missing private evidence skips specifically; corrupted existing evidence fails.
+
+Current scope and actual screenshot reasoning are documented in `docs/research/finalization-2026-10-11.md`. No new game inputs or dye items were used for this delivery. Multiple exact colors, global optimality and every display configuration remain unguaranteed.
+
+
+## Native Candidate 0.4.0rc16 (2026-10-10)
+
+Policy: `native-reader-cursor-diagnostic-v14`. The two remote experiments show that window/175% mapping and four original screenshot HEX reads succeed, then an optional tool-process cursor equality check prevents the native post-input checkpoint. The one actual drag delivers all 25 requested physical points exactly; its game endpoint is unobserved. The maximized window fails the same reader-only comparison before input. This does not establish that the independently measured HWND pixel axes are invalid.
+
+The reader comparison is now diagnostic while window/native identity, extent, corners, separability, repeated full axes, monotonicity, mapping fingerprints, focus, F9, deadline and input-completion guards remain. Diagnostic-only API failures do not discard verified axes; cancellation/deadline still propagate. Preparation and checkpoint files retain actual raw cursor routes/deltas and a build-bound repeated legacy cache observation explicitly marked freshness-unverified. Diagnostics are outside the window/session binding and never choose a model or relax exact HEX acceptance.
+
+Thirty-eight focused mapping/diagnostic/backend checks passed; the actual remote 175% lattice is a fixed regression and is preserved while a controlled reader mismatch is recorded. Four unmodified remote screenshots independently reproduce all same-checkpoint HEX values. The lack of a post-action game pose/HEX in the uploaded data remains a live verification limitation. No new game input or item was used. Details: `docs/research/rc16-remote-window-experiments-2026-10-10.md` and `outputs/native-integration/verification/rc16-window-experiments`.
+
+Complete source suite after fixture stabilization: 1303 tests, 1285 passed, 18 optional local-fixture checks skipped, zero failures, 391.948 seconds. Source compilation passed. The isolated desktop fixture waits for the independently known background pixel before testing overlay transparency/capture; its 18 affected checks also passed without weakening subsequent assertions.
+
+## Native Candidate 0.4.0rc15 (2026-10-10)
+
+Policy: `native-dpi-pixel-map-v13`. Uploaded rc14 preflight files confirm that installation/build selection succeeds, then physical-client extent comparison fails before recording its measurements. The reader now measures client corners in the target HWND's awareness context and explicitly converts them through Windows' physical-coordinate APIs. Original reader/API, target-context and physical dimensions remain distinct; partial failures retain all available values. The capture/input adapter uses the same target-aware endpoint chain, and preflight preserves the chosen HWND/native Screen HWND binding.
+
+For differing physical/native extents, exact integer-axis Windows conversion tables are collected, checked for separability, repeated, fingerprinted and refreshed against window/native bindings. The model applies the recovered float32 viewport floor and H-y-1 order to those tables; all controller/planner/seed/compile/replay/refinement paths retain the lattice. Continuous screenshot board bounds remain separate. Mapped rotation arcs select the next distinct native pixel, so fractional DPI plateaus cannot silently eliminate tiny-angle search. Full endpoint and prefix-return audits, strict HEX checks, deadlines and F9 remain intact.
+
+Sixty-one focused regressions passed, including target-reader physical dimensions, four DPI staircases, independent logical-coordinate controller replay, mapping cache mutation/window movement and context restoration. Saved-palette simulations at 125%, 150%, 175% and 200% all found fully audited protected targets in about two seconds. Those tables are synthetic oracle fixtures, not remote hardware measurements. Local ordinary-screen read-only preflight passed with zero input. The shipped diagnostic script can now collect the other PC's complete mapped coordinate record without entering dye. Details: `docs/research/rc15-dpi-coordinate-2026-10-10.md` and `outputs/native-integration/verification/rc15-dpi-input`.
+
+Complete source suite after repairs: 1291 tests, 1273 passed, 18 optional local-fixture checks skipped, zero failures, 430.618 seconds. Source compilation passed. The suite covers high-DPI measurement/mapping/replay, protected recovery, overlay capture/input and translated runtime errors.
+
+## Native Candidate 0.4.0rc14 (2026-10-10)
+
+Policy: `native-portable-window-v12`. The uploaded other-PC archive has three identical failures in fixed-path UnityPlayer resolution before any DPI/window measurements. Module selection now follows the selected process's verified installation, including different drives, Unicode and filesystem aliases. Preparation records retain the failing layer, actual paths, build hashes, physical/native dimensions, DPI and input viewport. Error presentation distinguishes module, build and coordinate failures.
+
+Physical window geometry, screenshots, absolute mouse coordinates and input traces use scoped PMv2 thread contexts and restore caller context. Visual preparation no longer requires a proportional 1280x960 client: card/marker recognition is anchored to the measured native board in screenshot pixels, retaining independent text/swatch and native HEX agreement. Twelve variable-layout regressions cover 4:3, widescreen, portrait and 4K with small UI; eight recorded raster simulations independently read all three screenshot HEX values.
+
+Running native overlays reapply nonactivating topmost policy after mapping and on heartbeat, pass mouse input through, and verify capture affinity. Unsupported capture exclusion uses hide/capture/show-without-activation fallback. Separate UI/capture locks avoid worker/Tk deadlock; dismissed/error-withdrawn surfaces are not restored. Real Windows dummy-window tests verify underlying hit regions, unchanged capture pixels and foreground focus; native completion still dismisses the surface. F9 and main Stop remain available during passive display.
+
+Fifty-five focused checks passed, including real Tk completion/hit/capture and DPI/module/variable-layout tests. A local current-game read-only preflight passed with zero inputs. These do not certify the other PC's unrecorded 4K/DPI state. Physical/client and native rendering extents must agree for the current precise mouse model; a DPI-unaware game enlarged by Windows to a different physical extent requires explicit floor/pixel-lattice mapping, not guessed DPI multiplication. The release includes `native-window-check.ps1` for ordinary-screen read-only diagnostics without dye/item use. Details: `docs/research/rc14-portable-window-2026-10-10.md`.
+
+Complete source suite: 1240 tests, 1222 passed, 18 optional local-fixture checks skipped, zero failures, 436.023 seconds. Source compilation and PowerShell diagnostic-script parsing passed. Independent module/DPI/visual/overlay review findings were repaired and rechecked before this suite.
+
+## Native Candidate 0.4.0rc13 (2026-10-10)
+
+Policy: `native-adaptive-refinement-v11`. Three actual rc12 trials were audited: triple-black ended at maximum Delta-E .43356 after its three-second local family published no improvement; double-black ended at .54932 when a found refinement could not fit its complete return budget; single-black had already matched exactly. Neither multi-region result proves infeasibility. The new-session engineering cap is 110 seconds, while already-active sessions of unknown age retain a maximum 90-second cap. The startup 30-second countdown advisory policy is unchanged, including erroneous 117-to-17 reads.
+
+Local search now has up to ten seconds after reserving its full protected transaction. It explores finer angles, integer pivot changes and zero-net rotation pairs, using palette-guided pivot proposals and native event scoring before independent full descriptor replay. The old 2048 route and twelve-return-audit truncations were removed. All published candidates still require per-prefix replay, scalar color acceptance and 81-point return neighborhoods. Cold initial OCR latency does not inflate all future verification phases; phase checks now enforce their own deadlines. UI/results distinguish search time, finite local-family exhaustion and return-time limits from infeasibility.
+
+All 31 focused module/recorded-controller checks passed, including the prior rc11 protected-return scenarios and the two new multi-region fixtures. Independently executed latest recorded-fixture searches found exact three-black and two-black routes in about 2.1 seconds; charged-IO controller simulations reached both targets and retained the original compromise after injected landing errors. These are conditional offline results, not new game certification. No new game input or item was used. Details: `docs/research/rc13-three-user-tests-2026-10-10.md` and `outputs/native-integration/verification/rc13-user-tests`.
+
+Complete source suite: 1183 tests, 1165 passed, 18 optional local-fixture checks skipped, zero failures, 435.289 seconds. `compileall` passed. The final diagnostic-only family-size upper-bound adjustment was independently checked; it is metadata and does not constrain search generation or execution.
+
+## Native Candidate 0.4.0rc12 (2026-10-10)
+
+Policy: `native-protected-refinement-v10`. After a screenshot/native-verified compromise, bounded local refinement is admitted only with audited returns for every trial prefix and enough time/actions for measured IO, two return opportunities, an extra correction gesture and final visual checks. Trial and recovery phases have separate IO deadlines. Actual feedback revalidates remaining return feasibility without a model-error magnitude cutoff. Worse or visually unconfirmed trial outcomes trigger the reserved recovery from measured state; partial returns reuse their uncompleted suffix and prepared prefix alternatives. Exact target HEX acceptance is unchanged.
+
+Complete source suite: 1160 tests, 1142 passed, 18 optional local-fixture checks skipped, zero failures. The new protected IO and recorded controller checks cover no-input low allowance, better promotion, worse measured landing, visual timeout, partially completed return, F9 and unknown input completion. The saved rc11 three-black endpoint has actual maximum Delta-E 1.58338; offline refinement predicts .576408 in two small rotations. Charged-IO simulations finish within the recorded 51-second allowance and restore the original HEX after injected disturbances; a 20-second allowance sends no input. These are offline conditional model tests, not a live-game precision or universal recovery guarantee. No new game input or item was used. Details: `docs/research/rc12-protected-refinement-2026-10-10.md` and `outputs/native-integration/verification/rc12-protected-refinement`.
+
+## Native Candidate 0.4.0rc11 (2026-10-10)
+
+Policy: `native-measured-continuation-v9`. Actual rc10 sessions abandoned their compromise route after tiny measured rotation residuals, spent another 23 seconds planning, then stopped before completing the dark endpoint. Response residuals now update every next gesture's measured reference and suffix prediction for all route purposes; they do not cancel the route or trigger full search. Target acceptance still requires final/early-hit visual verification.
+
+The post-run UI fault was reproduced in real Windows Tk: the completed topmost result overlay intercepted main-window controls. Native completion now withdraws it, with result/history retained. Stale resize tasks, scaling-dependent embedded canvas width, and double-counted scrollbar geometry were also fixed. A bounded per-session cache reuses validated screenshot text only for identical full-card RGB pixels and shape; every frame is still captured, localized and compared with native color. Native-filled OCR omissions never enter it.
+
+Complete suite: 1118 tests, 1100 passed, 18 optional local-fixture checks skipped, zero failures. Real UI tests cover 100% and 150% widget scaling and fail when the old overlay behavior is restored. Eleven packaged modules match source. Replays of two recorded rc10 routes include the real second-action residual and observed IO costs: both finish eight gestures with one plan, at maximum Delta-E 1.50 and 3.46. No new game input occurred. Original scalar angle/acos arithmetic matches 1056 input-pair checks; actual frame-visible samples and the AVX/FMA branch remain unverified, so live zero-error prediction is not claimed. Details: `docs/research/rc11-route-and-ui-audit-2026-10-10.md` and `outputs/native-integration/verification/rc10-runtime-audit`.
+
+## Native Candidate 0.4.0rc10 (2026-10-10)
+
+Policy: `native-triple-balanced-v8`. The rc9 double-black session has actual game and screenshot success. Its separate triple-black compromise does not demonstrate infeasibility: third-region acceptance occurred after movement-cost pruning, and low-error periodic poses were not input route seeds. The current search screens all enabled pickers before cost retention, enumerates all three region pairs, compiles/refines the resulting routes, and ranks native compromises by balanced center Delta-E before uncalibrated neighborhood risk.
+
+Source suite: 1103 tests, 1085 passed, 18 optional local fixtures skipped, zero failures. Fourteen EXE/PYZ modules match source and manifest. Saved-session replay retains double-black exactness and improves triple-black maximum Delta-E from the actual rc9 result of 60.74 to a simulated 2.28. An independently constructed eight-gesture conditional route has an exact triple-black CPU endpoint and allowed descriptors, but its live event sampling, inertia and narrow precision remain unverified; that recorded route is not hardcoded into the tool. No new game input or item was used. Full evidence and limitations: `docs/research/rc10-triple-black-audit-2026-10-10.md` and `outputs/native-integration/verification/rc9-three-black-audit`.
+
+## Native Candidate 0.4.0rc9 (2026-10-10)
+
+Policy: `native-periodic-streamed-v7`. Actual rc8 session auditing found the periodic substage consumed its 2.5-second allowance before verifying any mathematical target, then selected a compromise. The modules were connected and package/source fingerprints matched. Batched streaming pair verification now retains solutions before full enumeration finishes. Intermediate route steps use stable native feedback; visual target/endpoint checks remain separate. A measured small response deviation retains the suffix only after replaying it from the actual pose and rescoring it as exact.
+
+Complete source suite: 1097 tests, 1079 passed, 18 optional fixture checks skipped, zero failures. Ten executable/PYZ modules match current source bytecode and manifest. Packaged-code simulations of the latest rc8 board, that board with a small rotation perturbation, and the previous rc7 board all reach two exact blacks with one planner call. These are saved-data conditional simulations, not live input or game certification. New runtime speed and precision still await real-game validation. The audit is in `docs/research/rc9-double-black-failure-audit-2026-10-10.md`; detailed checks are in `outputs/native-integration/verification/rc9`.
+
+UI event handling now continues through presentation exceptions and restores completed controls. The old reported lock's actual trigger is unproved; large payload size alone was not demonstrated as its cause.
+
+## Native Candidate 0.4.0rc6 (2026-10-10)
+
+Policy: `native-periodic-joint-v4`. The native target search now scans a complete canonical texture period and jointly solves target sites for game-permitted scales and full rotation angles. Global mathematical candidates are independent of the former micro-input filter. Standard larger drags, rotations and multiple wheel notches use modeled route compilation, one-gesture-at-a-time feedback, and renewed validation of exact route suffixes.
+
+Complete regression:1084 tests,1066 passed,18 optional local-fixture checks skipped,0 failures. Compilation and packaged bytecode comparison are recorded in the rc6 delivery evidence.
+
+The actual two-black palette from session `20261010-111934-22c4c07e` is a fixed regression fixture. Wall-clock-budgeted idealized replay reached `#000000 / #000000` in seven simulated gestures, approximately16.5 seconds, with no game access or actual input. New larger-input behavior still awaits real-game validation. Finite sample lattice and retained-candidate completion are not proofs of continuous-space exhaustion, globally optimal colors or guaranteed mouse reachability. See `docs/research/periodic-joint-search-2026-10-10.md` and `outputs/native-integration/verification/rc6-delivery.json` for final checks.
+
+## Native Candidate 0.4.0rc5 (2026-10-10)
+
+Policy: `native-recovery-v3`. The current native candidate fixes action-event argument collisions and adds bounded recovery for transient visual reads, pre-input focus loss and small measured pose differences. New searches discard stale compromise suffixes. OCR omissions retain raw screenshot values and explicit native-checkpoint sources; supplemented values are not independent screenshot verification.
+
+The complete source suite ran 1073 tests: 1055 passed, 18 optional local-fixture cases skipped, no failures. Tests include actual Runner event routing and saved-result integration using simulated IO. See `outputs/native-integration/verification/rc5-stop-policy-and-crash-fix.md` and `rc5-delivery.json` for exact scope. No new game session or live input was used for this revision. The new recovery behavior is not yet certified by a real game session. The sections below describe the older 0.3.6 scope.
+
+> 发布状态：验证中技术候选。0.3.6 的代码回归和构建检查已完成，但游戏机制验收尚未完成；Latest 标签不代表跨画板、跨设备或多区域精准率已经得到证明。发布前请先阅读 GAME_MECHANISM_VALIDATION_GATE.md。
+
+Version: 0.3.6. Policy revision: balanced-landing-single-zoom-v3. Date: 2026-10-05. This tool was developed with AI assistance.
 
 ## Automated checks
 
-The 2026-10-09 Task 2 full run (`python -m pytest -q -rs --test-profile=all`) reported 880 passed, 19 skipped and 326 passed subtests in 33.90 seconds. Production contains 719 cases; diagnostic 105, legacy 56 and private fixtures 19 are separate. Counts reflect added behavioral checks, not increased game-mechanism confidence. Compilation and whitespace checks are recorded per implementation checkpoint.
+The current source regression suite contains 823 tests: 805 passed, 18 skipped because optional local capture archives were unavailable, and no failures or errors. `compileall` passed. The skipped count depends on private game screenshots/OCR fixtures that are not distributed with the snapshot; earlier 794/795/797/803 figures are historical. Coverage includes candidate-route diversity, projected return budgets, countdown correction, read-only early-exit observations, single-region zoom limits, safe stop after an unmeasured pose, wheel geometry fallback (including the direct `SingleRegionIO` fallback path), adjacent-frame feature caching, separate exploration and finalization budgets, measured-best recovery, multilingual UI, display geometry and session retention. The new single-region zoom behavior and its recovery paths still await independent real-game validation.
 
-Task 2 establishes an entry checkpoint from two real game HEX reads and a stationary-frame registration before any board-changing input. Formal multi-region acquisition currently skips unverified entry zoom/calibration to keep that checkpoint at the entry scale; diagnostic protocols retain their original calibration route. A normal scan budget or return-step limit ends exploration and may execute a bounded measured translation return without building more targets. Alignment/quality failures and F9/focus/geometry/hard-time interruptions do not authorize return input. All changes remain unverified in a new live game round.
+The 2026-10-05 test audit found no unconditional skips, duplicate test methods, or core tests that can be safely removed. The 18 skipped cases are all optional fixture/integration checks for private screenshots, OCR data, or archived failures. Probe, replay, and review modules remain useful for offline diagnostics and input-safety evidence, but their results are not game-mechanism validation. Shared deterministic fixtures used by the return and single-region suites now live in `test_support.py`, so those tests no longer import helpers from one another.
 
-The first candidate must have a payable return to the entry checkpoint; a worse measured result is not silently treated as the automatic best. Return is independently checked with fresh HEX and does not run another local search. A different/worse returned HEX stays current while the original best remains historical. Initial-baseline, current-read and best-observed fields are separate; UI translations distinguish positioned compromises, read-only current colors and an unrestored historical best. Offline simulations exercise the production capture seam and bound return inputs but do not certify game accuracy or performance.
-
-Task 1 adds per-round stage durations, conservative estimates, real capture/read frame IDs and separate current versus best observations. Insufficient independent frames or unreadable enabled HEX cannot become verified evidence. Final remaining time is explicitly derived from the monotonic game deadline, not an independently read final countdown. Final runner metadata is recorded after a safety interruption without accessing the game.
-
-Search and route binding now reserve positioning and finalization time by default. A soft search cutoff retains already-computed translation candidates, while F9 and hard game interrupts propagate. Slow binding stops subsequent work without erasing already-bound candidates. Return cost is charged once inside the protected tail and increases the tail when necessary. CPU/slow-OCR/long-return checks were performed offline; no new game input or dye round occurred.
-
-Stage components and the two-frame verification envelope are separately labeled; verification duration overlaps capture/OCR/registration and must not be added again to wall time. Sparse timing estimates use the observed maximum and a default floor; with at least 20 samples they use P95 with the floor. This remains a conservative scheduling model, not a realtime guarantee. Native calls may overrun a CPU checkpoint; input guards remain independent.
-
-The inherited test cleanup retains all original tests in the all profile. ECC assertions reject an incorrect finite matrix, anchor replay tests validate the complete continuous reference route without claiming shorter acquisition, and fixture availability is checked per visual case. See [test scopes](TESTING.md).
-
-The controlled mechanism entry is `run_response_probe.ps1`. It is opt-in, records only observed frames/HEX/timing and never confirms, applies or cancels dye. Each timed game session must run one protocol only; outputs include mechanism_experiment.json, and an early stop preserves a partial report. These records are evidence collection, not a production response model.
-
-The measured HEX feedback path now carries a retained local best separately from the live pose. If a better sample cannot be restored before the deadline, the service emits `atlas_best_not_restored` and the overlay labels the historical sample as not restored; it never reuses that HEX as the current game colour. Multi-region compromise notices are translated in Simplified Chinese, Traditional Chinese and English.
+Command: `python -m unittest discover -s work/studio -p "test_*.py"`.
 
 ## Game observation
 
@@ -33,75 +119,9 @@ The single-region runs use direct board exploration and do not build a full atla
 
 ## Saved-capture replay
 
-The 2026-10-05 `translation_shared` mechanism probe completed 10 recorded
-actions without sending a formal multi-region dye search. The run measured
-about 3.595 seconds of input time, 4.720 seconds of registration time, and a
-registration P95 of about 0.509 seconds; about 79.3 seconds remained at the
-end. Four center/offset pairs of ±8-pixel translations measured approximately
-±8 pixels and returned to the initial three-region HEX combination after the
-reverse move. One down/up wheel pair measured scales of about 0.99013 and
-1.00988 and also returned close to the initial combination. This is same-game
-mechanism evidence only; it contains no target ΔE, precise-hit count, or
-multi-region candidate result, and does not establish cross-session or
-cross-device behavior.
-
-A follow-up offline replay correction was committed as `9bfb00d`. The
-progressive replay report now selects its best row with
-`progressive_candidate_rank`, records accepted and landing-safe counts, and
-labels the ranking used. This aligns diagnostic metadata with the opt-in
-progressive service without changing the production route. On the current
-contiguous replay source, both `full48` and `anchor_progressive` still fail
-the quality gate and produce no strict three-region candidate; the complete
-48-step route therefore remains the production baseline.
-
 A separate 1280 × 960 capture previously stopped because an adjacent image pair had only 18 default feature inliers. Denser feature extraction found 43 inliers without reducing the existing matching, geometry or atlas-quality thresholds. Reconstruction of all 48 steps passed the original checks and retained eight candidates after integer-route binding. This replay sent no game input.
 
 Three additional saved atlases from a 1920 × 1009 client retained eight bound candidates each. Their best central maximum ΔE76 predictions were 8.39 / 10.81 / 10.80. These values are offline predictions, not measurements from new game sessions.
-
-## Historical formal multi-region regression: 2026-10-05 17:16
-
-The 2026-10-05 session `20261005-171605-c8f7403e` was an explicitly authorized one-dye formal regression on 0.3.6 with three enabled rules (Exact `#FFFFFF`, Similar `#C0C0C0`, Similar `#FFFFFF`). It did not apply dye (`auto_apply=false`). The full 48/48 atlas completed from a 120-second start; capture took about 55.4 seconds and stitch/quality/search about 7.1 seconds. Atlas quality passed (coverage about 99.6% / 99.8% / 99.6%, held-out coverage about 98.0% / 98.9% / 97.3%, RGB RMSE about 6.36 / 4.18 / 6.36).
-
-The search produced 63 candidates and none met the configured thresholds. The best predicted candidate had maximum ΔE76 about 10.28 and average about 8.11, while all candidates failed `landing_safe`; the run nevertheless attempted the first candidate, which is a safety gap to close before treating this route as production-ready. The first execution attempted roughly 15 rotations and 3 wheel steps while `game_response_verified=false`; recovery read `#7B523C / #9A6C4A / #8EC09F` (ΔE76 about 65.97 / 41.09 / 36.98), so it was recorded as a failed unverified route. A second execution used three measured translations after re-registration (marker errors about 0.04 px). Its stable game result was `#FCECDE / #E2CFAA / #CADAF1` (ΔE76 about 10.94 / 21.64 / 18.82; maximum 21.64; average 17.14; exact hits 0/1). One `(1, 0)` pixel feedback move did not improve the result; the measured baseline was restored and stably re-registered.
-
-This run separates atlas quality from action-response reliability: a passing map did not make unverified rotation/zoom routes safe, while measured translation produced a small pose error but still did not make the three target colors jointly reachable in this sample. It is one board and one target combination, so it does not authorize a production route change, progressive capture, or a mechanism guarantee. The session has no standalone final countdown value and contains no dye-confirmation event; remaining time and application success are therefore unverified. Full evidence and the observed/inferred/unverified split are in `GAME_MECHANISM_VALIDATION_GATE.md`.
-
-Until response profiles are independently verified, production must treat rotation/zoom predictions as untrusted, prefer measured translation only when the pose can be re-registered, and use the read-only two-frame fallback on quality, candidate, or budget failure.
-
-## Historical capture failure after the route safety gate: 2026-10-05 19:27
-
-The 2026-10-05 session `20261005-192718-bba9bfe1` reran the same three-region configuration after the route safety changes (Exact `#FFFFFF`, Similar `#C0C0C0`, Similar `#FFFFFF`). The run remained `auto_apply=false`; it sent neither a dye-confirmation click nor a cancel click. The user has confirmed that entering the formal timed dye round consumes one dye, so this round counts as one dye regardless of confirmation clicks. Inventory before/after values were not captured; the software log cannot independently audit the deduction.
-
-The initial countdown was read as 120 seconds. Acquisition performed the existing 48-step grid after the measured one-notch zoom calibration. Grid capture reached 48/48 frames, but adjacent-frame alignment failed at `grid_045` with `Measured motion disagrees with capture command`; capture processing took about 3.83 seconds. No atlas quality report, candidate list, route binding, or candidate execution was produced after that failure.
-
-The service stopped automatic movement and performed the read-only two-frame observation. It recorded `actual_colors` `#EC879E / #B2A860 / #2BA5B4`, ΔE76 `52.38 / 40.12 / 49.59`, maximum `52.38`, average `47.36`, and `exact_matches=0/1`. The observation was marked `verified=true` only for the two-frame HEX reading; `pose_reliable=false`, `positioning_complete=false`, `candidate_id=null`, and `compromise=true`. The UI therefore reports the current measured colors as a compromise and does not present them as a located candidate or restored best result.
-
-The visible 45/48 pause was a real feedback defect: the background registration worker could fail between foreground actions, while the UI still showed the last capture count and shutdown waited on pending work. The worker now applies a bounded per-frame wait, exposes failure immediately, prevents further movement after an alignment error, and bounds close time. The capture log and overlay switch to a dedicated recovery stage (“stopping capture and reading the current colors”), so the user can distinguish an early stop from an active scan.
-
-This run confirms the build-failure fallback and its compromise labeling. It does not exercise `transform_routes_suppressed` because the failure occurred before candidate binding, so it cannot be used as evidence that an unverified rotation/zoom candidate would have been blocked. The zoom calibration and sampling inputs belong to the atlas acquisition phase; their game response remains unverified for production use. The next mechanism or target-combination experiment must be separately authorized and must keep the one-run dye budget.
-
-## Production route safety gate added after the regression
-
-The live builder now suppresses any bound route containing rotation or wheel
-actions unless both the real-game response profile and the sampled landing
-neighbourhood are verified. Suppressed routes remain in route diagnostics with
-their reason; they are never sent as the default automatic candidate. A
-translation-only route may remain as a measured compromise, and binding,
-rebind and replan apply the same gate. If no safe route remains, the service
-uses the read-only two-frame current-HEX observation path. This closes the
-specific safety gap observed in session `20261005-171605-c8f7403e`; it does not
-validate the suppressed game mechanisms or improve the measured colour
-reachability of the three-region target.
-
-## Latest formal multi-region regression: strict target availability
-
-The 2026-10-06 session `20261006-000545-e0f0f997` ran the same three-region configuration (Exact `#FFFFFF`, Similar `#C0C0C0`, Similar `#FFFFFF`) with `auto_apply=false`. It completed all 48/48 capture steps and passed the atlas quality gate: atlas coverage was approximately `99.44% / 99.85% / 99.40%`, held-out coverage `96.61% / 99.11% / 97.60%`, and held-out RGB RMSE `6.67 / 4.01 / 6.11`. No dye-confirmation or cancel click was sent.
-
-The search produced 14 candidates, 12 of which were family-consistent, but none satisfied all enabled region rules. The service emitted `no_joint_candidate` before route execution and performed only the read-only two-frame observation. The recovered current game colors were `#79714A / #B7CBC1 / #968C78`, with ΔE76 about `57.49 / 9.31 / 43.20`, maximum `57.49`, average `36.67`, and exact hits `0/1`. The result was `candidate_id=null`, `pose_reliable=false`, `positioning_complete=false`, `compromise=true`, and `early_exit=true`.
-
-Offline inspection records a strict miss in the reconstructed atlas: region 1 had about 1,042,697 valid samples and zero exact `#FFFFFF` pixels; its nearest sample was `#FFFEFE` with ΔE76 about `0.44`. Region 3 contained an exact white atlas sample. These maps undergo interpolation, averaging and rounding; absence in this finite reconstruction does not establish absence in the game or mathematical infeasibility. The observed failure was an old no-joint-candidate stop, not an executed-route failure; limited-search omissions remain possible. The current source adds `exact_target_availability` diagnostics and a message naming the missing region, target, nearest sample and ΔE; that field was added after this session and is not claimed to have been present in its saved log.
-
-This run confirms that strict exact mode must preserve the byte-for-byte rule. In response, the current service treats exact mode as a priority for candidate ranking: if no joint exact candidate exists but a safe route remains, it positions and measures the closest compromise instead of ending with a read-only result. The compromise is explicitly labeled and never auto-applied. Build, alignment, route-safety, return-budget and two-frame verification failures still use the read-only fallback. A later experiment may test a similar rule for region 1 or another target combination, but it requires separate authorization and must remain a new one-run dye-budget experiment. This session counts as one started dye round under the user-confirmed rule. It did not independently capture inventory changes, establish cross-board availability, or record successful dye application.
 
 ## Distribution checks
 
@@ -114,4 +134,3 @@ A finite search does not guarantee an exact match, every configured tolerance, o
 Automated display checks cover 1024 × 768 through 5120 × 2880 and 100% through 250% scaling, including negative multi-monitor coordinates. These checks do not establish full game validation on every 4K or mixed-DPI setup. The recommended game window remains 1280 × 960.
 
 When one region is enabled, this test candidate explores the current board directly instead of building a full atlas. Exact mode prioritizes an identical HEX during its main exploration phase; Similar mode stops after two consecutive in-tolerance readings. Limited translation and small, measured zoom steps include one optional relative-range expansion. The entry scale is not known absolutely; the tool cannot guarantee never reaching a game scale limit. Unknown zoom responses end that route, and repeated limit attempts are avoided. The new zoom behavior has not yet received independent real-game validation. Multi-region searches still use the complete atlas route. Progressive multi-region capture remains experimental; no fixed scan reduction or guaranteed time saving is enabled.
-

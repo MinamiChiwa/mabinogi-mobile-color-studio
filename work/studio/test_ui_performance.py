@@ -40,10 +40,10 @@ class ResizeTests(unittest.TestCase):
         # The page fills the native window at every size. Only its centered,
         # fixed-width scroll content changes at a card breakpoint.
         window.page.configure.assert_not_called()
-        scroll.set_fixed_content_width.assert_called_once_with(2*(CARD_WIDTH+2*CARD_GAP))
+        scroll.set_fixed_content_width.assert_called_once_with(2*(CARD_WIDTH+2*CARD_GAP),None)
         self.assertEqual(body.grid_columnconfigure.call_count,3)
         self.assertEqual([card.grid_configure.call_args.kwargs for card in cards],[
-            dict(row=0,column=0,columnspan=1,sticky='ew'),dict(row=0,column=1,columnspan=1,sticky='ew'),dict(row=1,column=0,columnspan=2,sticky='ew')])
+            dict(row=0,column=0,columnspan=1,sticky=''),dict(row=0,column=1,columnspan=1,sticky=''),dict(row=1,column=0,columnspan=2,sticky='')])
         for index in range(3):
             args=body.grid_columnconfigure.call_args_list[index].args
             self.assertEqual(args[0],index)
@@ -56,10 +56,11 @@ class ResizeTests(unittest.TestCase):
         from app import FixedContentScrollableFrame
         frame=SimpleNamespace(configure=MagicMock(),_parent_canvas=SimpleNamespace(itemconfigure=MagicMock()),
                               _set_outer_viewport_size=MagicMock(),
+                              _center_content=MagicMock(),
                               _create_window_id='content-window',_apply_widget_scaling=lambda width:width*1.25)
         FixedContentScrollableFrame.set_fixed_content_width(frame,712)
         frame.configure.assert_called_once_with(width=712)
-        frame._set_outer_viewport_size.assert_called_once_with(712)
+        frame._set_outer_viewport_size.assert_called_once_with(712,None)
         frame._parent_canvas.itemconfigure.assert_called_once_with('content-window',width=890)
 
     def test_scroll_outer_frame_is_fixed_and_does_not_propagate_inner_content_height(self):
@@ -79,7 +80,7 @@ class ResizeTests(unittest.TestCase):
         FixedContentScrollableFrame._set_outer_viewport_size(frame,356)
         outer.configure.assert_called_once_with(width=356+17,height=SCROLL_VIEWPORT_HEIGHT)
 
-    def test_resize_handler_debounces_width_changes_inside_current_breakpoint(self):
+    def test_resize_handler_coalesces_latest_width_without_postponing_frame(self):
         from app import App
         window=SimpleNamespace(winfo_width=lambda:900,page=SimpleNamespace(_get_widget_scaling=lambda:1),
                                _layout_columns=2,_topbars_compact=False,_controls_compact=False,_layout_width=900,
@@ -87,9 +88,9 @@ class ResizeTests(unittest.TestCase):
         App.schedule_layout(window,SimpleNamespace(widget=window,width=850))
         App.schedule_layout(window,SimpleNamespace(widget=window,width=735))
         window.reflow.assert_not_called()
-        window.after_cancel.assert_called_once_with('job-1')
+        window.after_cancel.assert_not_called()
         self.assertEqual(window._pending_layout_width,735)
-        self.assertEqual(window.after.call_count,2)
+        window.after.assert_called_once_with(16,window._run_scheduled_reflow)
 
     def test_wheel_never_changes_slider_or_invokes_callback(self):
         slider=SimpleNamespace(_update_value=MagicMock())

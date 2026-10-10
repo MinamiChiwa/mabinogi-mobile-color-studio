@@ -1,75 +1,62 @@
 # Color Studio · Mabinogi Mobile
 
-By **南千和 (MinamiChiwa)** · [Afdian](https://afdian.com/a/minamichiwa) · [Patreon](https://patreon.com/chiwaminami?utm_medium=unknown&utm_source=join_link&utm_campaign=creatorshare_creator&utm_content=copyLink)
+By **MinamiChiwa** · [Afdian](https://afdian.com/a/minamichiwa) · [Patreon](https://patreon.com/chiwaminami)
+
+A Windows color search tool for the Hong Kong/Macau/Taiwan service of Mabinogi Mobile. Precise Search reads the current round’s palette, plans translation, zoom and rotation, and verifies game HEX values. Visual Search is a fallback if Precise Search fails.
+
+Using tools in-game may carry risk; use with care. Donations are optional and do not affect features. Developed with AI assistance.
 
 [简体中文](README.md) · [繁體中文](README.zh-TW.md) · [English](README.en.md)
 
-An automatic dyeing tool for **Mabinogi Mobile, Hong Kong / Macau / Taiwan service**, running on Windows. It reads the game screen and uses mouse gestures to search for the selected dye colors across three regions.
+## Use
 
-> Please note that using this tool in-game may carry some risk.
+Extract the entire release and run `ColorStudio.exe`. Keep `_internal` beside it. Python and Tesseract do not need separate installation. Exit the old app before upgrading into a new folder; copy its `data` folder to retain settings.
 
-Sponsorship is entirely voluntary and does not affect access to the tool: [Afdian](https://afdian.com/a/minamichiwa) · [Patreon](https://patreon.com/chiwaminami?utm_medium=unknown&utm_source=join_link&utm_campaign=creatorshare_creator&utm_content=copyLink)
+1. Select the game window, or use automatic detection for a single window. No fixed game resolution is required; window sizes and Windows scaling have explicit coordinate mapping.
+2. Enable the regions to match. Enter HEX codes, choose colors, or use the eyedropper. Alternative colors are also accepted targets.
+3. Choose Exact HEX or Similar per region. Exact requires the identical six-digit code; Similar uses the region’s ΔE tolerance.
+4. Set priorities; 1 is highest. Meeting all enabled targets always comes first. Otherwise, targets are favored in priority order, followed by color differences. Changing a priority swaps it with the other region.
+5. Press **F8** or Start, then open dyeing after the waiting message. Starting after opening the dye screen is also supported. Use Precise Search by default; Visual Search is for failures of Precise Search.
+6. Keep the game in front. Avoid mouse use or moving/resizing the game window during execution. **F9** stops and releases the mouse. Confirm application manually in the game.
 
-This tool was developed with AI assistance.
+Each palette is bound to its game session. Regions share transformations; mathematical palette candidates still need an executable route and game HEX verification. Predicted colors do not prove a match. If all targets cannot be met, the tool tries to retain the best measured compromise in priority order.
 
-## Getting started
+When leather, wood or another material’s base palette lacks pure black or white, `#000000` or `#FFFFFF` cannot be matched exactly. Refer to the game’s actual HEX values. Multiple exact matches and finding a globally optimal result within the time limit are not guaranteed.
 
-The current release is `ColorStudio-v0.3.6`. Extract the complete package and run `ColorStudio.exe`, keeping the `_internal` folder beside it. OCR and English recognition data are included; Python and a separate Tesseract installation are not required. Close older copies before upgrading and extract this release into a separate folder.
+## Settings and presets
 
-1. Set the game window to 1280 × 960. All three regions are enabled by default; turn off any not required. Enter HEX colors, use the color picker or screen eyedropper, and optionally add alternatives.
-2. Choose Exact HEX or Similar independently for each region. Exact mode requires identical HEX codes; Similar mode uses the configured tolerance. Combinations are compared using all regions’ color differences and nearby color variation, favoring stable combinations that meet every setting. Compromises balance closeness across regions; Exact hits take priority when overall quality is equal, without sacrificing another region for one exact match. The overlay identifies measured results outside the targets and color-family mismatches.
-3. Similar regions use their individual Delta E tolerances. If no candidate meets every setting, the tool selects an executable compromise that balances differences across regions and nearby color variation.
-4. Select the game window, then click Start or press **F8**. Open the timed dye screen after the overlay appears. With one region enabled, the tool searches the current board directly and leaves time for manual adjustment. With multiple regions enabled, it first builds this round’s stitched board, then searches, positions and verifies in-game HEX. Press **F9** to stop.
+- Current colors, alternatives, enabled regions, matching modes, tolerances, priorities and search strategy save automatically and restore next time.
+- Save preset manages named configurations: save current settings, edit or rename independently, load, and delete. Editing a preset changes the main configuration only when loaded.
+- Results retain the last 50 color combinations and their measured ΔE. Presets and result history are stored separately.
+- Simplified Chinese, Traditional Chinese and English are supported. The resizable window rearranges cards into one, two or three columns. The topmost overlay passes game mouse input through.
+- Data defaults to `data` beside the app. A nonwritable folder falls back to `%LOCALAPPDATA%\MabinogiMobileColorStudio\data`, then to the temporary directory.
+- Diagnostics retain the latest three sessions while protecting active records. Temporary data may be cleared by Windows.
 
-**Single-region tip:** Exact mode prioritizes an identical HEX during the main search phase, about 60 seconds after board detection. If no exact match is found, the tool attempts to position the best measured compromise; finalization may take a few extra seconds. Similar mode stops after two consecutive readings meet the configured tolerance. Search uses limited translation and measured zoom steps. Unverified zoom responses end that route, and scale limits are not repeatedly pressed. The remaining game time is available for manual adjustment. If no target is met, the overlay labels the result “Target not reached · Compromise.” This is the closest verified result from the search, not a tool failure.
+## Diagnostics
 
-Auto-detection accepts spacing variations in the title and recognizes the game executable. Select manually if multiple candidates exist; select again if that window closes. Borderless fullscreen is supported. Keep the game in the foreground and its geometry unchanged during active searching.
+`native-window-check.ps1` performs a passive preflight on an ordinary game screen, with no input or dye item required. The accompanying `WINDOW_CHECK.zh-CN.md` provides instructions.
 
-After positioning, the tool shows the in-game HEX. Check the result in the game before applying the dye manually.
+Preflight checks the current build, modules, physical client area and game coordinates. A passing preflight does not prove live dye accuracy. Several display/scaling configurations were tested; universal size, mixed-DPI or game-version support is not claimed. Stop and restart after changing the game window during a run.
 
-With one region enabled, Exact and Similar modes skip full-board stitching and explore the board directly using translation and limited zoom. With multiple regions enabled, they use this round’s stitched board and calculate rotation, zoom and translation for each candidate. Avoid moving the mouse during automatic operation. Moving or resizing the game window during a search stops it; press F8 to detect the new layout.
+Report problems at [GitHub Issues](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/issues) with the session log. Extra dye items are not needed just to report a problem. The game’s current HEX values determine the final result.
 
-Choose Simplified Chinese, Traditional Chinese or English in the upper-right selector. The main window, overlay and open information dialogs switch immediately without restarting. The main layout adapts from three columns to two or one; the help button opens the tutorial, and Support offers Afdian and Patreon.
+## Development and tests
 
-## Preview and history
-
-- Click the ordered color overview to open the complete allowed-color atlas.
-- Use +/− to zoom, drag to pan, and hover to inspect individual HEX values without pagination.
-- The last 50 results retain the three colors, per-region ΔE, maximum and mean differences.
-- The normal search workflow verifies the in-game HEX values and shows the result in the overlay. Exact mode disables the tolerance slider.
-- Settings, results and diagnostic screenshots are stored in the adjacent `data` folder by default. If the install directory is not writable, the tool uses `%LOCALAPPDATA%\MabinogiMobileColorStudio\data`, then the system temporary directory as a last resort.
-- Diagnostic records are cleaned automatically in the background, retaining the latest three runs. Active records and records updated within the last five minutes are temporarily protected. Cleanup has no aggregate size cap. Data in the system temporary directory may be removed by the operating system.
-
-## Development
-
-Windows 10/11 and Python 3.12. Sources are in `work/studio`.
+Windows 10/11, Python 3.12; production source is in `work/studio`.
 
 ```powershell
 python -m pip install -r requirements-build.txt
 python work/studio/app.py
-python run_tests.py
+python scripts/run_tests.py
+python scripts/run_tests.py --suite release
 ```
 
-The default profile covers current production behavior. Use `python run_tests.py --profile all` for the complete suite; diagnostics, legacy paths and private fixtures have separate profiles. See [test scopes](work/studio/TESTING.md).
+The default quick profile covers current product contracts. Release adds recorded palette search and recovery checks. Historical experiments and large search matrices remain available with `--suite research` or `--suite full`. See [TESTING.md](TESTING.md) for counts, timings and skipped-fixture limits. Test profiles do not change production search capability or game budgets.
 
-Install Tesseract OCR with `eng.traineddata` to run from source or build. Default location: `C:/Program Files/Tesseract-OCR`. Set `TESSERACT_HOME` for a different build location.
+Source and packaging require Tesseract with `eng.traineddata`, normally in `C:/Program Files/Tesseract-OCR`; override with `TESSERACT_HOME`. OCR language is independent of the interface language.
 
 ```powershell
 python work/studio/build_release.py
 ```
 
-Output: `outputs/release/ColorStudio`. Previous release data is backed up locally to `work/studio/release-test-data`. Private game captures and personal settings are not published; capture-based tests are skipped when their fixtures are absent.
-
-## Validation
-
-A timed search cannot guarantee an exact match, satisfaction of every tolerance or a global optimum. The layout calculation matrix covers 1024×768, 1920×1080, 3840×2160 and 5120×2880 at 100%, 125%, 150%, 200% and 250% DPI. Separate tests cover physical-pixel coordinate mapping and monitors with negative desktop coordinates. These checks do not establish real-game validation for every 4K, multi-monitor or mixed-DPI configuration.
-
-The main window, overlay, tutorial, support dialog and runtime messages switch between all three languages immediately. OCR uses fixed `eng` data independently of the interface language and handles non-UTF-8 output from Windows installation paths. Tool windows size to the monitor work area. On a 4K display, keep the game in 1280 × 960 windowed mode; the desktop resolution does not need to change.
-
-After starting, keep the game in the foreground and wait on the timed dye screen until the tool finishes. Press F9 to stop. If the game window is moved or resized, stop and start again. If Windows prevents game activation, activate the game window manually and let detection continue. Hotkey registration status appears at the bottom; close other tool copies or use the buttons if a key is unavailable.
-
-The color cards retain fixed dimensions and rearrange into columns as the window width changes. Enabled cards have a teal border and background; disabled cards show an explicit label. The overlay can be moved, collapsed and adjusted for opacity while showing the current step and elapsed time. Long content scrolls while the title and F9 stop button remain visible. Click or drag to adjust color values. If positioning or color reading remains incomplete, the overlay shows a recovery status and any result currently available.
-
-Screenshot color predictions can still differ from actual in-game HEX values. The tool reads and displays those values after positioning; applying the dye remains a manual action in the game. See the [validation report](work/studio/VERIFICATION.md) for the current scope, results and limitations. Version changes are documented on the release page.
-
-In a source environment, `run_preflight.bat` performs a read-only check of game capture, physical client size and DPI. Protection checks are simulated and send no game input. This script requires the source environment and is not a prerequisite for the release ZIP.
+Distribute the entire `outputs/release/ColorStudio` directory. Personal profiles, sessions and screenshots are excluded from releases and Git. Current scope is in [VERIFICATION.md](work/studio/VERIFICATION.md); changes are described on GitHub Releases.

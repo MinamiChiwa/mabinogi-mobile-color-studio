@@ -2,7 +2,6 @@ import unittest
 from atlas_budget_review import subset_indices
 from live_atlas_capture import grid_scan_plan
 from micro_return_review import audit_geometry
-from progressive_atlas_replay import anchor_first_indices
 
 
 class BudgetReviewTests(unittest.TestCase):
@@ -26,22 +25,6 @@ class BudgetReviewTests(unittest.TestCase):
         self.assertEqual(result['rows'][1]['maximum_translation_model_residual'],0)
         self.assertGreater(result['rows'][2]['maximum_translation_model_residual'],.035)
         self.assertFalse(result['return_validated'])
-
-    def test_anchor_replay_retains_complete_contiguous_route_without_claiming_capture_savings(self):
-        log=[dict(kind='frame',name='max_sampling')]
-        for i,action in enumerate(grid_scan_plan((0,0,500,500)),1):
-            log.extend([dict(kind='frame',name=f'grid_{i:03d}'),dict(kind='command',**action)])
-        training,holdout,retained=anchor_first_indices(log)
-        self.assertEqual(holdout,[9,16,24,33,39,45])
-        self.assertFalse(set(training)&set(holdout))
-        self.assertEqual(sorted(training+holdout),retained)
-        # Current replay needs every intermediate registration frame and the
-        # return tail. It is a full-route reference, not a shorter live scan.
-        self.assertEqual(retained, list(range(49)))
-        self.assertEqual(training, subset_indices(log, 'full')[0])
-        commands = [row for row in log if row['kind'] == 'command']
-        self.assertTrue(all(abs(row['dx']) <= 100 and abs(row['dy']) <= 200
-                            for row in commands))
 
 
 if __name__=='__main__':unittest.main()

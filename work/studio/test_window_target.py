@@ -40,11 +40,14 @@ class WindowTargetTests(unittest.TestCase):
 
     def test_borderless_client_geometry_preserves_screen_origin(self):
         import platform_win as win
+        from contextlib import nullcontext
         game=Game.__new__(Game);game.target=WindowTarget(1,2,'Game');game.hwnd=1
         def client(hwnd,p):
             p._obj.left=0;p._obj.top=0;p._obj.right=1920;p._obj.bottom=1080;return True
-        def origin(hwnd,p):p._obj.x=-1920;p._obj.y=0;return True
-        with patch('platform_win.valid_target',return_value=True),patch.object(win.u,'IsIconic',return_value=False),patch.object(win.u,'GetClientRect',side_effect=client),patch.object(win.u,'ClientToScreen',side_effect=origin):
+        def origin(hwnd,p):p._obj.x-=1920;return True
+        with patch('platform_win.valid_target',return_value=True),patch('platform_win.target_pixel_context',return_value=nullcontext()), \
+            patch.object(win.u,'IsIconic',return_value=False),patch.object(win.u,'GetClientRect',side_effect=client), \
+            patch.object(win.u,'ClientToScreen',side_effect=origin),patch.object(win.u,'LogicalToPhysicalPointForPerMonitorDPI',return_value=True):
             self.assertEqual(game.geometry(),(-1920,0,1920,1080))
 
     def test_active_ui_messages_have_english_translations(self):

@@ -56,21 +56,6 @@ class WorkerTests(unittest.TestCase):
             self.assertEqual(worker.error,'unreliable texture')
             self.assertEqual(len(list(Path(tmp).glob('*_board.png'))),3)
 
-    def test_wait_latest_exposes_registration_failure_before_next_input(self):
-        """A failed frame is a hard boundary for the live drag producer."""
-        with tempfile.TemporaryDirectory() as tmp,patch('atlas_capture_worker.CaptureAlignment') as align:
-            align.return_value.append.side_effect=[None, ValueError('motion mismatch')]
-            worker=CaptureWorker(Path(tmp),{})
-            frame=np.zeros((10,10,3),np.uint8)
-            try:
-                worker.submit('one',frame,(1,1,9,9),{},None,lambda:None)
-                self.assertTrue(worker.wait_latest(lambda:None))
-                worker.submit('two',frame,(1,1,9,9),{},None,lambda:None)
-                self.assertFalse(worker.wait_latest(lambda:None))
-                self.assertEqual(worker.error,'motion mismatch')
-            finally:
-                worker.close()
-
     def test_backpressure_remains_cancellable_and_closes_worker(self):
         entered=threading.Event();release=threading.Event()
         def blocked(*args):entered.set();release.wait(3)

@@ -6,7 +6,7 @@ import uuid
 from pathlib import Path
 
 
-PERSISTENT_FILES = ('settings.json', 'profile.json', 'history.json')
+PERSISTENT_FILES = ('settings.json', 'profile.json', 'presets.json', 'history.json')
 APP_DATA_NAME = 'MabinogiMobileColorStudio'
 
 

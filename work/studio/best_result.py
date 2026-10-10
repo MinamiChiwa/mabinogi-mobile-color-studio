@@ -13,7 +13,9 @@ def proximity(colors,rules):
 
 def ranking(colors,rules):
     """Feasible combinations first, then minimax actual Delta E and mean."""
-    return (0 if accepted(colors,rules) else 1,*proximity(colors,rules))
+    from region_priority import priority_components
+    ordered=priority_components(colors,rules)
+    return (0 if accepted(colors,rules) else 1,*(ordered or ()),*proximity(colors,rules))
 
 
 def global_matrix(motion):
@@ -99,7 +101,7 @@ class BestResult:
         return self.records[self.target_index]['rank'] if self.target_index is not None else self.rank
 
     def next_target(self):
-        options=[i for i in self.frames if np.isfinite(self.records[i]['rank'][1]) and i!=self.target_index
+        options=[i for i in self.frames if np.isfinite(self.records[i]['rank']).all() and i!=self.target_index
                  and i not in getattr(self,'attempted_targets',set())]
         if not hasattr(self,'attempted_targets'):self.attempted_targets=set()
         self.attempted_targets.add(self.target_index)

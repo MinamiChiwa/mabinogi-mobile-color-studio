@@ -51,18 +51,6 @@ class CandidateDiversityTests(unittest.TestCase):
         result=select_color_candidates(rows,self.rules(),3,preserve_routes=True)
         self.assertEqual(len(result),4)
 
-    def test_prebind_pool_retains_family_consistent_tuple_outside_balanced_top_n(self):
-        balanced=self.row(0,[8,8,8])
-        family=self.row(1,[20,20,20])
-        family.update(family_consistent=True,family_maximum=0.,family_average=0.,
-                      angle=0.,scale=1.,search_space='periodic_translation')
-        balanced.update(family_consistent=False,family_maximum=.4,family_average=.2,
-                        angle=0.,scale=1.,search_space='periodic_translation')
-        result=select_color_candidates([balanced,family],self.rules(),1,
-                                       preserve_routes=True)
-        self.assertEqual({tuple(row['colors']) for row in result},
-                         {tuple(balanced['colors']),tuple(family['colors'])})
-
     def test_unstable_micro_rotation_does_not_hide_bound_same_colour_translation(self):
         from atlas_bound_route import bind_candidate
         from test_atlas_bound_route import ConstantAtlas,IntegerGame

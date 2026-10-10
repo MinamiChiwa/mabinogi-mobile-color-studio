@@ -1,4 +1,8 @@
 import platform_win  # Set physical-pixel awareness before Tk or capture initializes.
+import sys
+if __name__=='__main__' and '--native-preflight' in sys.argv:
+    from native_preflight import main as native_preflight_main
+    raise SystemExit(native_preflight_main([arg for arg in sys.argv[1:] if arg!='--native-preflight']))
 import customtkinter as ct
 import tkinter as tk
 from tkinter import colorchooser,messagebox
@@ -28,14 +32,16 @@ from ui_performance import DeliberateSlider
 from customtkinter.windows.widgets.scaling.scaling_base_class import CTkScalingBaseClass
 from ui_dialogs import support_dialog,tutorial_dialog,GITHUB
 from ui_settings import read_settings,save_settings
+from profile_store import read_profile,write_profile,canonical_profile,PresetStore
 from session_store import new_session_path,start_session_cleanup
 from ui_typography import FONT_FAMILY,TITLE_FONT,SECTION_FONT,BODY_FONT,SMALL_FONT,ICON_FONT,HEX_FONT
 from resize_rendering import TopLevelResizeRedrawOptimization
+from resize_surface import NativeResizeSurface
 from display_geometry import logical_size,work_area
 
 from build_info import APP_VERSION
 CARD_WIDTH=344
-CARD_HEIGHT=340
+CARD_HEIGHT=372
 CARD_GAP=6
 BODY_SIDE_PADDING=12
 SCROLLBAR_WIDTH=17
@@ -45,7 +51,7 @@ COMPACT_HEADER_EXTRA_HEIGHT=80
 # fixed during native window resizing; extra cards remain vertically scrollable.
 # The scroll viewport contains the 40-DIP intro and exactly one fixed card row.
 # Keeping only that height prevents a large dead area beneath the cards.
-INTRO_HEIGHT=40
+INTRO_HEIGHT=72
 SCROLL_VIEWPORT_HEIGHT=INTRO_HEIGHT+10+CARD_HEIGHT+2*CARD_GAP
 
 
@@ -80,6 +86,9 @@ class FixedContentScrollableFrame(ct.CTkScrollableFrame):
         # layout cannot fit, in which case horizontal clipping/scrolling is
         # preferable to forcing the native window wider than requested.
         outer_width=width if viewport_width is None else max(1,int(viewport_width))
+        size=(outer_width+SCROLLBAR_WIDTH,self._studio_viewport_height)
+        if size==getattr(self,'_studio_outer_size',None):return
+        self._studio_outer_size=size
         self._parent_frame.configure(width=outer_width+SCROLLBAR_WIDTH,height=self._studio_viewport_height)
         self._parent_frame.grid_propagate(False)
 
@@ -89,23 +98,48 @@ class FixedContentScrollableFrame(ct.CTkScrollableFrame):
         # Its width is explicitly updated only when the card breakpoint changes.
         if self._orientation=='horizontal':
             super()._fit_frame_dimensions_to_canvas(event)
+        else:self._center_content(event.width)
+
+    def _center_content(self,viewport_width=None):
+        if viewport_width is None:viewport_width=self._parent_canvas.winfo_width()
+        content_width=self._apply_widget_scaling(self._desired_width)
+        x=max(0,round((viewport_width-content_width)/2))
+        self._parent_canvas.coords(self._create_window_id,x,0)
+
+    def _set_scaling(self,new_widget_scaling,new_window_scaling):
+        super()._set_scaling(new_widget_scaling,new_window_scaling)
+        if self._orientation=='vertical':
+            self._parent_canvas.itemconfigure(
+                self._create_window_id,width=self._apply_widget_scaling(self._desired_width))
 
     def set_fixed_content_width(self,width,viewport_width=None):
+        """Set the embedded content width at a layout breakpoint.
+
+        The outer viewport has an independent width and may follow every
+        resize event. Keeping this operation separate prevents all children
+        from negotiating geometry while the native window is being dragged.
+        """
         self.configure(width=width)
-        if viewport_width is None:self._set_outer_viewport_size(width)
-        else:self._set_outer_viewport_size(width,viewport_width)
+        self._set_outer_viewport_size(width,viewport_width)
         self._parent_canvas.itemconfigure(
             self._create_window_id,
             width=self._apply_widget_scaling(width),
         )
+        self._center_content()
+
+    def set_viewport_width(self,viewport_width):
+        """Resize only the visible outer viewport, preserving inner content."""
+        self._set_outer_viewport_size(self._desired_width,viewport_width)
 
 def build_preview(target,tolerance):
     pixels=allowed_colors(target,tolerance)
     return pixels,overview(pixels)
 
-def build_runner(emit,folder,strategy='atlas',entry=None,entry_size=None):
-    # Runner uses current-board search for one region and the shared atlas
-    # service for multiple regions. Legacy is reserved for diagnostics.
+def build_runner(emit,folder,strategy='native',entry=None,entry_size=None):
+    # Native owns user-goal execution; existing visual strategies remain explicit.
+    if strategy=='native':
+        from native_live.service import run_native_search
+        return Runner(emit,folder,native_runner=run_native_search)
     if strategy not in ('atlas','legacy'):raise ValueError('Unknown search strategy')
     service=AtlasService(atlas_callbacks(Path(folder)/'atlas_capture',strategy='grid'))
     return Runner(emit,folder,atlas_runner=service.run)
@@ -132,6 +166,13 @@ class Card(ct.CTkFrame):
         ct.CTkLabel(heading,text=f'0{index+1}  /  颜色区域',font=SECTION_FONT,text_color=INK,height=22).pack(side='left')
         self.enable_switch=ct.CTkSwitch(heading,text='已启用' if self.enabled.get() else '未启用',width=95,variable=self.enabled,progress_color=ACCENT,font=SMALL_FONT)
         self.enable_switch.pack(side='right')
+        self.priority=tk.IntVar(value=index+1)
+        priority_bar=ct.CTkFrame(self,fg_color='transparent')
+        priority_bar.grid(row=1,column=0,padx=16,pady=(0,2),sticky='ew')
+        ct.CTkLabel(priority_bar,text='优先级',font=SMALL_FONT,text_color=MUTED,height=22).pack(side='left')
+        self.priority_menu=ct.CTkOptionMenu(priority_bar,values=['1','2','3'],width=66,height=24,font=SMALL_FONT,
+            command=lambda value:self.winfo_toplevel().set_card_priority(self.index,int(value)))
+        self.priority_menu.set(str(index+1));self.priority_menu.pack(side='right')
         self.preview_frame=ct.CTkFrame(self,fg_color='transparent')
         self.preview_frame.grid(row=2,column=0,padx=16,pady=(4,3),sticky='ew')
         self.swatch=ct.CTkButton(self.preview_frame,text='点击选色',height=30,corner_radius=10,command=self.pick,font=BODY_FONT,fg_color='#202020',hover_color='#35445B')
@@ -246,7 +287,6 @@ class App(ct.CTk):
     def __init__(self):
         super().__init__();self.title(f"{tr('染色工坊 · 瑪奇 Mobile')}  v{APP_VERSION}");self.geometry('1120x800');self.minsize(MIN_WINDOW_WIDTH,560);self.configure(fg_color=BG)
         self._resize_redraw=TopLevelResizeRedrawOptimization()
-        self._resize_redraw.disable_for(self.winfo_id())
         self.after(100,self.fit_screen)
         self.selected_window=None;self.overlay=None;self.active_rules=None;self.history=read_history(DATA/'history.json');self.best_summary=None
         self.q=queue.Queue();self.runner=None;self.busy=False;self.picking=False;self.keys={};self.cards=[]
@@ -309,15 +349,28 @@ class App(ct.CTk):
         self.start=ct.CTkButton(controls,text='开始寻色   F8',height=44,width=165,font=(FONT,13,'bold'),fg_color=ACCENT,text_color='#102A27',hover_color='#80E5CF',command=lambda:self.go(activate=True));self.start.grid(row=0,column=0,padx=(0,8),pady=4,sticky='w')
         self.stop_button=ct.CTkButton(controls,text='停止   F9',height=44,width=100,font=BODY_FONT,fg_color='#2B384C',command=self.stop);self.stop_button.grid(row=0,column=1,padx=(0,8),pady=4,sticky='w')
         self.controls=controls;controls.grid_columnconfigure(2,weight=1)
+        selected=read_settings(DATA/'settings.json').get('search_strategy','native')
+        self.search_strategy=tk.StringVar(value=selected if selected in ('native','atlas') else 'native')
+        self.strategy_menu=ct.CTkOptionMenu(controls,values=[str(tr('精准寻色')),str(tr('图像寻色'))],
+            width=220,height=30,font=BODY_FONT,command=self.change_search_strategy)
+        self.strategy_menu.grid(row=1,column=0,columnspan=2,sticky='w',pady=(4,2))
+        self.strategy_menu.set(str(tr('精准寻色' if self.search_strategy.get()=='native' else '图像寻色')))
+        self.strategy_note=ct.CTkLabel(controls,text='图像寻色：精准寻色故障时使用。',font=SMALL_FONT,
+            text_color=MUTED,anchor='w',justify='left',wraplength=340,height=18)
+        self.strategy_note.grid(row=2,column=0,columnspan=3,sticky='w',pady=(2,0))
         status=ct.CTkFrame(self.page,fg_color=PANEL,corner_radius=14);status.grid(row=4,column=0,padx=BODY_SIDE_PADDING,pady=(4,8),sticky='ew');status.grid_columnconfigure(0,weight=1)
-        self.status=ct.CTkLabel(status,text='就绪 · 请先选择游戏窗口和目标颜色',font=BODY_FONT,anchor='w',wraplength=720,text_color=INK);self.status.grid(row=0,column=0,padx=18,pady=(12,5),sticky='ew')
-        self.detail=ct.CTkLabel(status,text='',font=SMALL_FONT,text_color=MUTED,wraplength=720,anchor='w')
+        self.status=ct.CTkLabel(status,text='就绪 · 请先选择游戏窗口和目标颜色',font=BODY_FONT,anchor='w',justify='left',wraplength=720,text_color=INK);self.status.grid(row=0,column=0,padx=18,pady=(12,5),sticky='ew')
+        self.detail=ct.CTkLabel(status,text='',font=SMALL_FONT,text_color=MUTED,wraplength=720,anchor='w',justify='left')
         self.detail.grid(row=1,column=0,padx=18,pady=(0,8),sticky='ew');self.detail.grid_remove()
         label=ct.CTkLabel(intro,text='适用于港澳台服瑪奇Mobile。游戏中使用本工具可能存在风险，建议谨慎使用。',font=SMALL_FONT,text_color=MUTED,wraplength=320,justify='left',anchor='w');label.pack(fill='x',pady=(0,8));self.intro_labels.append(label)
         self.footer=ct.CTkLabel(self.page,text='F9 随时停止并释放鼠标  ·  切换窗口停止寻色  ·  不自动开启下一瓶染色剂',font=SMALL_FONT,text_color=MUTED,wraplength=340,justify='right');self.footer.grid(row=5,column=0,padx=BODY_SIDE_PADDING,pady=(0,8),sticky='e')
         self._layout_columns=None;self._layout_content_width=None;self._layout_width=None;self._pending_layout_width=None;self._resize_layout_job=None;self._topbars_compact=None
         self.apply_card_layout(3);self.apply_topbar_layout(False)
+        self._autosave_job=None;self._loading_profile=False
         self.load()
+        for card in self.cards:
+            for key in ('enabled','target','alt','mode','tolerance','priority'):
+                getattr(card,key).trace_add('write',self.schedule_autosave)
         if self.history:self.display_best(self.history[0])
         self._hotkeys_stop=threading.Event()
         self._hotkey_thread=threading.Thread(target=self.hotkey_loop,daemon=True)
@@ -326,28 +379,41 @@ class App(ct.CTk):
         self.bind('<Configure>',self.schedule_layout,add='+')
         i18n.on_language(self,self.refresh_language)
         self.after(150,self.reflow)
+        self._resize_surface=NativeResizeSurface(self)
     def schedule_layout(self,event):
         if event.widget!=self:return
         try:scaling=self.page._get_widget_scaling()
         except (AttributeError,tk.TclError):return
         width=int(event.width/scaling)
-        if width==getattr(self,'_layout_width',None):return
+        if getattr(getattr(self,'_resize_surface',None),'active',False):
+            self._pending_layout_width=width
+            return
+        if width==getattr(self,'_layout_width',None):
+            if self._resize_layout_job is not None:
+                try:self.after_cancel(self._resize_layout_job)
+                except tk.TclError:pass
+                self._resize_layout_job=None
+            self._pending_layout_width=None
+            return
         self._pending_layout_width=width
-        if self._resize_layout_job is not None:
-            try:self.after_cancel(self._resize_layout_job)
-            except tk.TclError:pass
-        self._resize_layout_job=self.after(45,self._run_scheduled_reflow)
+        # A pending frame always uses the newest width. Do not postpone it
+        # repeatedly while the user is still dragging the window edge.
+        if self._resize_layout_job is None:
+            self._resize_layout_job=self.after(16,self._run_scheduled_reflow)
     def _run_scheduled_reflow(self):
         self._resize_layout_job=None
         width=self._pending_layout_width
         self._pending_layout_width=None
         if width is not None:self.reflow(width)
     def apply_card_layout(self,columns,content_width=None,viewport_width=None):
-        minimum_content_width=columns*(CARD_WIDTH+2*CARD_GAP)
-        content_width=minimum_content_width if content_width is None else max(minimum_content_width,int(content_width))
-        if columns==self._layout_columns and content_width==getattr(self,'_layout_content_width',None):return
-        if viewport_width is None:self.body_scroll.set_fixed_content_width(content_width)
-        else:self.body_scroll.set_fixed_content_width(content_width,viewport_width)
+        # Cards are deliberately fixed-size.  Only a 1/2/3-column breakpoint
+        # changes their grid; the outer viewport may resize independently.
+        content_width=columns*(CARD_WIDTH+2*CARD_GAP)
+        layout_changed=(columns!=self._layout_columns or
+                        content_width!=getattr(self,'_layout_content_width',None))
+        if viewport_width is not None:self.body_scroll.set_viewport_width(viewport_width)
+        if not layout_changed:return
+        self.body_scroll.set_fixed_content_width(content_width,viewport_width)
         self.intro.configure(width=content_width)
         for label in self.intro_labels:label.configure(wraplength=max(280,content_width-24))
         self.card_body.configure(width=content_width,height=((3+columns-1)//columns)*(CARD_HEIGHT+2*CARD_GAP))
@@ -362,9 +428,8 @@ class App(ct.CTk):
         for i,card in enumerate(self.cards):
             column=i%columns
             columnspan=columns if columns==2 and i==2 else 1
-            card_width=max(CARD_WIDTH,int(content_width*columnspan/columns)-2*CARD_GAP)
-            if hasattr(card,'configure'):card.configure(width=card_width)
-            card.grid_configure(row=i//columns,column=column,columnspan=columnspan,sticky='ew')
+            if hasattr(card,'configure'):card.configure(width=CARD_WIDTH,height=CARD_HEIGHT)
+            card.grid_configure(row=i//columns,column=column,columnspan=columnspan,sticky='')
         self._layout_columns=columns
         self._layout_content_width=content_width
     def apply_topbar_layout(self,compact):
@@ -393,9 +458,17 @@ class App(ct.CTk):
         if width is None:width=int(self.winfo_width()/self.page._get_widget_scaling())
         columns=columns_for_width(width)
         usable=max(0,int(width)-BODY_SIDE_PADDING*2-SCROLLBAR_WIDTH)
-        viewport_width=max(usable,int(width)-2*BODY_SIDE_PADDING)
-        self.apply_card_layout(columns,usable,viewport_width)
+        viewport_width=max(1,usable)
+        self.apply_card_layout(columns,viewport_width=viewport_width)
         self.apply_topbar_layout(columns==1)
+        # Keep dynamic text inside the actual window.  Fixed 720-DIP wrap
+        # lengths overflow narrow windows and leave Tk labels wider than their
+        # visible cells, which looks like clipped or broken line wrapping.
+        text_wrap=max(180,int(width)-2*BODY_SIDE_PADDING-36)
+        if text_wrap!=getattr(self,'_text_wrap_width',None):
+            self._text_wrap_width=text_wrap
+            for label in (self.status,self.detail):label.configure(wraplength=text_wrap)
+            self.footer.configure(wraplength=min(340,text_wrap))
         # Keep the fixed card viewport centered in the responsive page while
         # allowing the header, controls, status and footer to span the window.
         self.page.grid_columnconfigure(0,weight=1)
@@ -403,11 +476,26 @@ class App(ct.CTk):
         # than the current card breakpoint; at narrow widths it remains
         # flush with the normal page padding and scrolls horizontally only
         # through the vertical viewport.
-        self.body_scroll.grid_configure(padx=BODY_SIDE_PADDING)
+        # CTkScrollableFrame.grid() delegates to its outer frame, but Tk's
+        # inherited grid_configure() targets the inner canvas-window frame.
+        # Regridding that inner frame detaches it from the canvas and breaks
+        # scrolling, clipping and redraws. Configure only the outer viewport.
+        self.body_scroll._parent_frame.grid_configure(padx=BODY_SIDE_PADDING)
         self._layout_width=int(width)
     def refresh_language(self):
         self.title(f"{tr('染色工坊 · 瑪奇 Mobile')}  v{APP_VERSION}")
+        if hasattr(self,'toolbar_buttons'):self.toolbar_buttons[-1].set(i18n.language)
         self.refresh_window_label()
+        if hasattr(self,'strategy_menu'):
+            self.strategy_menu.configure(values=[str(tr('精准寻色')),str(tr('图像寻色'))])
+            self.strategy_menu.set(str(tr('精准寻色' if self.search_strategy.get()=='native' else '图像寻色')))
+    def change_search_strategy(self,value):
+        if self.busy:
+            self.strategy_menu.set(str(tr('精准寻色' if self.search_strategy.get()=='native' else '图像寻色')))
+            return
+        strategy='native' if value==str(tr('精准寻色')) else 'atlas'
+        self.search_strategy.set(strategy);save_settings(DATA/'settings.json',search_strategy=strategy)
+        self.schedule_autosave()
     def show_support(self):self._show_dialog('support',support_dialog)
     def show_tutorial(self):self._show_dialog('tutorial',tutorial_dialog)
     def _show_dialog(self,key,factory):
@@ -463,7 +551,7 @@ class App(ct.CTk):
         area=ct.CTkScrollableFrame(win,fg_color=BG);area.pack(fill='both',expand=True,padx=16,pady=(0,16))
         win.after_idle(lambda:win.geometry(f'{width}x{height}') if win.winfo_exists() else None)
         if not self.history:ct.CTkLabel(area,text='完成一次寻色后，颜色组合会自动保存在这里。',font=BODY_FONT).pack(pady=40)
-        names={'matched':'目标达标','compromise':'妥协结果','applied':'已套用'}
+        names={'matched':'目标达标','compromise':'妥协结果','applied':'已套用','observed':'当前色码记录'}
         for row in self.history:
             box=ct.CTkFrame(area,fg_color=PANEL,corner_radius=12);box.pack(fill='x',pady=6)
             title=f'{row["time"]}  ·  {names.get(row.get("outcome"),"寻色结果")}'
@@ -476,6 +564,8 @@ class App(ct.CTk):
                 text+=f'\n色差 ΔE {delta:.2f}' if delta is not None else '\n未参与匹配'
                 ct.CTkLabel(line,text=text,font=SMALL_FONT,width=150,height=52,corner_radius=8,fg_color=color or '#28364A',text_color='#17202B' if color and sum(rgb(color))>430 else 'white').grid(row=0,column=index,sticky='ew',padx=3)
     def _set_scaling(self,new_widget_scaling,new_window_scaling):
+        surface=getattr(self,'_resize_surface',None)
+        if surface is not None:surface.hold_scaling()
         # CTk otherwise pins min/max size for one second even when only font /
         # widget scaling changes. Never re-enter window geometry for that case.
         if abs(new_window_scaling-self._get_window_scaling())<.001:
@@ -510,28 +600,74 @@ class App(ct.CTk):
         # a large empty area below the controls. The user can still resize freely.
         height=min(available_height,minimum_height)
         self.geometry(f'{width}x{height}+20+20')
+    def current_profile(self):
+        return dict(schema=1,regions=[{key:getattr(c,key).get() for key in
+            ('enabled','target','alt','mode','tolerance')} for c in self.cards],
+            priority_order=sorted(range(3),key=lambda i:self.cards[i].priority.get()),
+            search_strategy=self.search_strategy.get())
+    def apply_profile(self,profile,*,persist=True):
+        if self.busy:raise ValueError('请先停止寻色，再载入方案。')
+        profile=canonical_profile(profile)
+        self._loading_profile=True
+        try:
+            for card,row in zip(self.cards,profile['regions']):
+                for key in ('enabled','target','alt','mode','tolerance'):getattr(card,key).set(row[key])
+                card.change_mode()
+            for rank,index in enumerate(profile['priority_order'],1):
+                self.cards[index].priority.set(rank);self.cards[index].priority_menu.set(str(rank))
+            self.search_strategy.set(profile['search_strategy'])
+            self.refresh_language()
+        finally:self._loading_profile=False
+        if persist and not self.flush_autosave():raise OSError('设置未能自动保存，请检查数据目录是否可写。')
+    def set_card_priority(self,index,rank):
+        if self.busy:
+            self.cards[index].priority_menu.set(str(self.cards[index].priority.get()));return
+        previous=self.cards[index].priority.get()
+        for card in self.cards:
+            if card.index!=index and card.priority.get()==rank:
+                card.priority.set(previous);card.priority_menu.set(str(previous))
+        self.cards[index].priority.set(rank);self.cards[index].priority_menu.set(str(rank))
+        self.schedule_autosave()
+    def schedule_autosave(self,*_):
+        if getattr(self,'_loading_profile',False):return
+        job=getattr(self,'_autosave_job',None)
+        if job is not None:
+            try:self.after_cancel(job)
+            except tk.TclError:pass
+        self._autosave_job=self.after(300,self.flush_autosave)
+    def flush_autosave(self):
+        job=getattr(self,'_autosave_job',None)
+        if job is not None:
+            try:self.after_cancel(job)
+            except tk.TclError:pass
+        self._autosave_job=None
+        try:
+            write_profile(DATA/'profile.json',self.current_profile());self._profile_read_failed=False;return True
+        except (OSError,ValueError):
+            self.set_detail(tr('设置未能自动保存，请检查数据目录是否可写。'));return False
     def save(self):
-        try:
-            data=[{'enabled':c.enabled.get(),'target':c.target.get(),'alt':c.alt.get(),'mode':c.mode.get(),'tolerance':c.tolerance.get()} for c in self.cards]
-            for c in self.cards:c.rule()
-            (DATA/'profile.json').write_text(json.dumps(data,ensure_ascii=False,indent=2),encoding='utf-8');self.status.configure(text='方案已保存，下次启动自动恢复。')
-        except Exception as e:self.status.configure(text=str(e))
+        from ui_presets import PresetDialog
+        self._show_dialog('presets',lambda parent:PresetDialog(parent,PresetStore(DATA/'presets.json'),
+            self.current_profile,self.apply_profile))
     def load(self):
-        try:
-            for c,d in zip(self.cards,json.loads((DATA/'profile.json').read_text(encoding='utf-8'))):
-                for key in ['enabled','target','alt','mode','tolerance']:getattr(c,key).set(d[key])
-                c.change_mode()
-        except (OSError,ValueError,KeyError):pass
+        try:profile=read_profile(DATA/'profile.json',search_strategy=self.search_strategy.get())
+        except (OSError,ValueError):
+            from profile_store import default_profile
+            profile=default_profile();profile['search_strategy']=self.search_strategy.get()
+            self._profile_read_failed=True
+            self.set_detail(tr('当前设置无法读取，原文件已保留。'))
+        self.apply_profile(profile,persist=False)
     def go(self,mode='search',activate=False):
         if self.busy:
             self.status.configure(text='任务已启动，正在等待或寻色；按 F9 停止。');return
         if self.picking:return
         try:
-            rules=[c.rule() for c in self.cards]
+            rules=[dict(c.rule(),priority=c.priority.get()) for c in self.cards]
+            if not getattr(self,'_profile_read_failed',False) or getattr(self,'_autosave_job',None) is not None:self.flush_autosave()
             if mode=='search' and not any(r['enabled'] for r in rules):raise ValueError('请至少启用一个颜色区域。')
         except ValueError as e:self.status.configure(text=str(e));return
-        strategy='atlas'
-        runtime_strategy='atlas' if mode=='search' else 'legacy'
+        strategy=self.search_strategy.get() if mode=='search' else 'legacy'
+        runtime_strategy=strategy
         target=self.selected_window
         self.active_rules=rules
         self.active_mode=mode
@@ -545,7 +681,7 @@ class App(ct.CTk):
         if mode=='search':
             try:
                 if self.overlay is None:self.overlay=SearchOverlay(self,self.stop,self.select_candidate,settings_path=DATA/'settings.json')
-                self.overlay.begin(rules)
+                self.overlay.begin(rules,passive=strategy=='native')
             except Exception:
                 self.set_detail('浮窗暂不可用，寻色状态请查看主窗口。')
         threading.Thread(target=self.runner.launch,args=(rules,mode,False,activate,target),
@@ -558,7 +694,7 @@ class App(ct.CTk):
         if self.overlay is not None:self.overlay.dismiss()
     def finish_run(self):
         stopped=self.runner is not None and self.runner.stop.is_set()
-        self.busy=False;self.start.configure(state='normal');self.runner=None
+        self.busy=False;self.runner=None;self.start.configure(state='normal')
         if stopped:
             self.status.configure(text='已停止自动染色，可重新开始。')
             if self.overlay is not None:self.overlay.dismiss()
@@ -570,118 +706,125 @@ class App(ct.CTk):
             self.q.put((kind,data))
         run_hotkeys(platform_win.u,ctypes,platform_win.W,self._hotkeys_stop,receive,keys)
     def tick(self):
-        for _ in range(50):
-            if self.q.empty():break
-            k,d=self.q.get()
-            if self.overlay is not None:self.overlay.handle(k,d)
-            if k=='hotkey':
-                if d['id']==1:self.go(activate=True)
-                elif d['id']==2:self.stop()
-                elif d['id']==5:self.go('recovery_test')
-            elif k=='hotkey_status':
-                names={1:'F8',2:'F9',5:'F6'}
-                failed=[names[i] for i in d['failed']]
-                text=(tr('快捷键已就绪：F8 开始 / F9 停止') if not failed else
-                      tr('全局注册不可用：')+', '.join(failed)+tr('；F9 仍通过轮询停止，其他操作请使用按钮。'))
-                self.footer.configure(text=text)
-            elif k=='window_bound':
-                self.set_detail(tr('正在识别窗口：')+d['title'])
-                prefix=tr('自动检测')+' · ' if self.selected_window is None else tr('游戏窗口 · ')
-                label=prefix+d['title']
-                self.window_button.configure(text=label if len(label)<=34 else label[:31]+'…')
-            elif k=='targets':
-                for c,color in zip(self.cards,d['colors']):
-                    c.enabled.set(True);c.target.set(color);c.alt.set('')
-                self.save()
-            elif k in ('scene','match','restore_action'):
-                for i,(c,color) in enumerate(zip(self.cards,d.get('colors',[]))):
-                    inactive=self.active_rules is not None and not self.active_rules[i]['enabled']
-                    c.current.configure(text='当前颜色  '+(color or ('未参与匹配' if inactive else '读取失败')))
-                if k=='scene':self.status.configure(text=f'正在寻色 · 游戏剩余 {d.get("seconds") or "—"} 秒')
-                elif k=='restore_action':self.status.configure(text=f'正在恢复最佳颜色 · 游戏剩余 {d.get("seconds") or "—"} 秒')
-            elif k=='waiting':
-                self.status.configure(text=tr('等待染色界面') if d.get('seconds') is None else tr('等待染色界面 · 剩余 ')+str(d['seconds'])+tr(' 秒'))
-                self.set_detail(tr(d['message']))
-            elif k in ('atlas_progress','single_progress'):
-                from ui_progress import progress_text
-                title,body=progress_text(d)
-                self.status.configure(text=tr(title));self.set_detail(tr(body))
-            elif k=='single_verified':
-                for i,(card,color) in enumerate(zip(self.cards,d.get('actual_colors') or [None]*3)):
-                    disabled=self.active_rules is not None and not self.active_rules[i]['enabled']
-                    card.current.configure(text='当前颜色  '+(color or ('未参与匹配' if disabled else '读取失败')))
-                from ui_progress import single_result_presentation
-                title,detail=single_result_presentation(d)
-                self.status.configure(text=tr(title))
-                self.set_detail(tr(detail))
-                if d.get('verified') and self.active_rules:
+        try:
+            for _ in range(50):
+                if self.q.empty():break
+                k,d=self.q.get()
+                # Result presentation is optional; it must not strand the
+                # worker's terminal event or prevent the next UI poll.
+                try:
+                    if self.overlay is not None:self.overlay.handle(k,d)
+                except Exception:self.report_callback_exception(*sys.exc_info())
+                try:self.handle_event(k,d)
+                except Exception:self.report_callback_exception(*sys.exc_info())
+        finally:self.after(60,self.tick)
+    def handle_event(self,k,d):
+        if k=='hotkey':
+            if d['id']==1:self.go(activate=True)
+            elif d['id']==2:self.stop()
+            elif d['id']==5:self.go('recovery_test')
+        elif k=='hotkey_status':
+            names={1:'F8',2:'F9',5:'F6'}
+            failed=[names[i] for i in d['failed']]
+            text=(tr('快捷键已就绪：F8 开始 / F9 停止') if not failed else
+                  tr('全局注册不可用：')+', '.join(failed)+tr('；F9 仍通过轮询停止，其他操作请使用按钮。'))
+            self.footer.configure(text=text)
+        elif k=='window_bound':
+            self.set_detail(tr('正在识别窗口：')+d['title'])
+            prefix=tr('自动检测')+' · ' if self.selected_window is None else tr('游戏窗口 · ')
+            label=prefix+d['title']
+            self.window_button.configure(text=label if len(label)<=34 else label[:31]+'…')
+        elif k=='targets':
+            for c,color in zip(self.cards,d['colors']):
+                c.enabled.set(True);c.target.set(color);c.alt.set('')
+            self.flush_autosave()
+        elif k in ('scene','match','restore_action'):
+            for i,(c,color) in enumerate(zip(self.cards,d.get('colors',[]))):
+                inactive=self.active_rules is not None and not self.active_rules[i]['enabled']
+                c.current.configure(text='当前颜色  '+(color or ('未参与匹配' if inactive else '读取失败')))
+            if k=='scene':self.status.configure(text=f'正在寻色 · 游戏剩余 {d.get("seconds") or "—"} 秒')
+            elif k=='restore_action':self.status.configure(text=f'正在恢复最佳颜色 · 游戏剩余 {d.get("seconds") or "—"} 秒')
+        elif k=='waiting':
+            self.status.configure(text=tr('等待染色界面') if d.get('seconds') is None else tr('等待染色界面 · 剩余 ')+str(d['seconds'])+tr(' 秒'))
+            self.set_detail(tr(d['message']))
+        elif k in ('atlas_progress','single_progress','native_progress'):
+            from ui_progress import progress_text
+            title,body=progress_text(d)
+            self.status.configure(text=tr(title));self.set_detail(tr(body))
+        elif k=='native_result':
+            from native_status import result_text
+            title,detail=result_text(d)
+            self.status.configure(text=tr(title));self.set_detail(tr(detail))
+            for card,color in zip(self.cards,d.get('actual_colors') or [None]*3):
+                card.current.configure(text='当前颜色  '+(color or '读取失败'))
+            if d.get('verified') and self.active_rules:
+                try:
+                    row=save_result(DATA/'history.json',d['actual_colors'],self.active_rules,
+                        'matched' if d.get('accepted') else 'compromise' if d.get('outcome')=='compromise' else 'observed',
+                        d.get('restored'),d.get('best_actual_colors'))
+                    self.history=read_history(DATA/'history.json');self.display_best(row)
+                except OSError:self.set_detail(tr('本轮结果未能保存，请检查程序文件夹是否可写。'))
+        elif k=='single_verified':
+            for i,(card,color) in enumerate(zip(self.cards,d.get('actual_colors') or [None]*3)):
+                disabled=self.active_rules is not None and not self.active_rules[i]['enabled']
+                card.current.configure(text='当前颜色  '+(color or ('未参与匹配' if disabled else '读取失败')))
+            from ui_progress import single_result_presentation
+            title,detail=single_result_presentation(d)
+            self.status.configure(text=tr(title))
+            self.set_detail(tr(detail))
+            if d.get('verified') and self.active_rules:
+                try:
+                    row=save_result(DATA/'history.json',d['actual_colors'],self.active_rules,
+                        'matched' if d.get('accepted') else 'compromise',
+                        d.get('restored'),d.get('best_actual_colors'))
+                    self.history=read_history(DATA/'history.json');self.display_best(row)
+                except OSError:self.set_detail(tr('本轮结果未能保存，请检查程序文件夹是否可写。'))
+        elif k=='atlas_status':
+            self.status.configure(text=tr('自动染色'))
+            self.set_detail(tr(d.get('message','')))
+        elif k=='atlas_ready':self.status.configure(text=tr('本局颜色板质量门槛通过，正在准备自动最佳方案。'))
+        elif k in ('atlas_default_verified','atlas_verified'):
+            colors=d.get('actual_colors',d.get('colors',[]))
+            for card,color in zip(self.cards,colors):card.current.configure(text='当前颜色  '+(color or '读取失败'))
+            self.status.configure(text='当前结果已达到所设目标，请在游戏内手动确认。' if d.get('accepted') else '当前结果未达到全部目标；请先查看妥协方案，再在游戏内手动确认是否套用。')
+        elif k=='atlas_best_not_restored':
+            for card,color in zip(self.cards,d.get('actual_colors') or [None]*3):
+                card.current.configure(text='当前颜色  '+(color or '读取失败'))
+            self.status.configure(text=tr('未能恢复先前最佳结果，请以游戏当前颜色为准。'))
+        elif k=='atlas_default_unavailable':self.status.configure(text=tr(d.get('message','剩余时间不足，未发送定位操作。')))
+        elif k=='atlas_invalidated':self.status.configure(text=tr(d.get('message','颜色板质量未达标，未发布候选。')))
+        elif k=='atlas_choice_rejected':self.status.configure(text=tr(d.get('message','剩余时间不足，保持自动最佳方案。')))
+        elif k=='atlas_selection_expired':self.status.configure(text=tr('未选择其他方案，保持自动最佳方案。'))
+        elif k in ('wait_timeout','interrupted'):
+            self.status.configure(text=tr(d['message']))
+            if not (self.runner is not None and self.runner.stop.is_set()):
+                self.after(100,lambda m=d['message']:messagebox.showinfo(tr('流程已中断'),tr(m),parent=self))
+        elif k=='action':self.set_detail('正在调整色板，持续寻找更接近的颜色…')
+        elif k in ('explore','restoring','magnifying','restore_fallback','input_recheck','activation'):self.set_detail(d['message'])
+        elif k=='best':
+            if self.active_rules:self.display_best(describe_result(d['colors'],self.active_rules))
+        elif k in ('error','done'):
+            self.status.configure(text=d.get('message',''))
+            if k=='error':
+                self.after(100,lambda m=d.get('message',''):messagebox.showerror(tr('流程已中断'),tr(m),parent=self))
+            elif not d.get('popup') and getattr(self,'active_mode','search')=='search':
+                self.after(100,lambda m=d.get('message',''):messagebox.showinfo(tr('流程已中断'),tr(m),parent=self))
+            for c,color in zip(self.cards,d.get('colors',[])):c.current.configure(text='当前颜色  '+(color or '读取失败'))
+            if d.get('popup'):
+                if self.active_rules:
                     try:
-                        row=save_result(DATA/'history.json',d['actual_colors'],self.active_rules,
-                            'matched' if d.get('accepted') else 'compromise',
-                            d.get('restored'),d.get('best_actual_colors'))
+                        row=save_result(DATA/'history.json',d.get('colors',[]),self.active_rules,d.get('outcome'),d.get('restored'),d.get('best_colors'))
                         self.history=read_history(DATA/'history.json');self.display_best(row)
-                    except OSError:self.set_detail(tr('本轮结果未能保存，请检查程序文件夹是否可写。'))
-            elif k=='atlas_status':
-                message=d.get('message','')
-                if message=='配准失败，已停止继续移动，正在读取当前游戏颜色。':
-                    self.status.configure(text=tr('停止采集并读取当前颜色'))
-                else:
-                    self.status.configure(text=tr('自动染色'))
-                self.set_detail(tr(message))
-            elif k=='atlas_recovery':
-                colors=d.get('actual_colors') or [None]*3
-                for card,color in zip(self.cards,colors):
-                    card.current.configure(text='当前颜色  '+(color or '读取失败'))
-                from ui_progress import atlas_result_presentation
-                title,detail=atlas_result_presentation(d)
-                self.status.configure(text=tr(title));self.set_detail(tr(detail))
-            elif k=='atlas_recovery_unavailable':
-                self.status.configure(text=tr('已保留当前画面'))
-                self.set_detail(tr(d.get('message','当前动作未能可靠复核，已停止自动移动。')))
-            elif k=='atlas_ready':self.status.configure(text=tr('本局颜色板质量门槛通过，正在准备自动最佳方案。'))
-            elif k in ('atlas_default_verified','atlas_verified','atlas_checkpoint_verified'):
-                colors=d.get('actual_colors',d.get('colors',[]))
-                for card,color in zip(self.cards,colors):card.current.configure(text='当前颜色  '+(color or '读取失败'))
-                from ui_progress import atlas_result_presentation
-                title,detail=atlas_result_presentation(d)
-                self.status.configure(text=tr(title));self.set_detail(tr(detail))
-            elif k=='atlas_best_not_restored':
-                for card,color in zip(self.cards,d.get('actual_colors') or [None]*3):
-                    card.current.configure(text='当前颜色  '+(color or '读取失败'))
-                self.status.configure(text=tr('未能恢复先前最佳结果，请以游戏当前颜色为准。'))
-            elif k=='atlas_default_unavailable':self.status.configure(text=tr(d.get('message','剩余时间不足，未发送定位操作。')))
-            elif k=='atlas_invalidated':self.status.configure(text=tr(d.get('message','颜色板质量未达标，未发布候选。')))
-            elif k=='atlas_choice_rejected':self.status.configure(text=tr(d.get('message','剩余时间不足，保持自动最佳方案。')))
-            elif k=='atlas_selection_expired':self.status.configure(text=tr('未选择其他方案，保持自动最佳方案。'))
-            elif k in ('wait_timeout','interrupted'):
-                self.status.configure(text=tr(d['message']))
-                if not (self.runner is not None and self.runner.stop.is_set()):
-                    self.after(100,lambda m=d['message']:messagebox.showinfo(tr('流程已中断'),tr(m),parent=self))
-            elif k=='action':self.set_detail('正在调整色板，持续寻找更接近的颜色…')
-            elif k in ('explore','restoring','magnifying','restore_fallback','input_recheck','activation'):self.set_detail(d['message'])
-            elif k=='best':
-                if self.active_rules:self.display_best(describe_result(d['colors'],self.active_rules))
-            elif k in ('error','done'):
-                self.status.configure(text=d.get('message',''))
-                if k=='error':
-                    self.after(100,lambda m=d.get('message',''):messagebox.showerror(tr('流程已中断'),tr(m),parent=self))
-                elif not d.get('popup') and getattr(self,'active_mode','search')=='search':
-                    self.after(100,lambda m=d.get('message',''):messagebox.showinfo(tr('流程已中断'),tr(m),parent=self))
-                for c,color in zip(self.cards,d.get('colors',[])):c.current.configure(text='当前颜色  '+(color or '读取失败'))
-                if d.get('popup'):
-                    if self.active_rules:
-                        try:
-                            row=save_result(DATA/'history.json',d.get('colors',[]),self.active_rules,d.get('outcome'),d.get('restored'),d.get('best_colors'))
-                            self.history=read_history(DATA/'history.json');self.display_best(row)
-                        except OSError:self.set_detail('本轮结果未能保存，请检查程序文件夹是否可写。')
-                    message=d['message']+'\n\n当前颜色：'+' / '.join(c or '未识别' for c in d.get('colors',[]))
-                    self.after(100,lambda m=message,o=d.get('outcome'):messagebox.showinfo(tr('流程完成 · '+('妥协结果' if o=='compromise' else '目标达标')),tr(m),parent=self))
-            elif k=='finished':self.finish_run()
-        self.after(60,self.tick)
+                    except OSError:self.set_detail('本轮结果未能保存，请检查程序文件夹是否可写。')
+                message=d['message']+'\n\n当前颜色：'+' / '.join(c or '未识别' for c in d.get('colors',[]))
+                self.after(100,lambda m=message,o=d.get('outcome'):messagebox.showinfo(tr('流程完成 · '+('妥协结果' if o=='compromise' else '目标达标')),tr(m),parent=self))
+        elif k=='finished':self.finish_run()
     def close(self):
         if self.busy:self.stop();self.after(250,self.close)
         else:
+            if not getattr(self,'_profile_read_failed',False) or getattr(self,'_autosave_job',None) is not None:self.flush_autosave()
             self._hotkeys_stop.set()
+            if hasattr(self,'_resize_surface'):self._resize_surface.destroy()
             self._resize_redraw.restore()
             self.destroy()
 

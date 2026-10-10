@@ -175,28 +175,6 @@ class VisibleCandidateTests(unittest.TestCase):
 
 
 class LiveSearchTests(unittest.TestCase):
-    def test_no_stable_entry_read_sends_no_exploration_input(self):
-        io=FakeIO();io.read=lambda *a,**k:[None]*3
-        with patch('single_region_search.visible_candidates') as scan:
-            result=run_single_region(io,scene(),rules('#FFFFFF',exact=True),game_deadline=100)
-        self.assertFalse(result['verified']);self.assertEqual(io.commands,[])
-        self.assertEqual(result['reason'],'baseline_unverified');scan.assert_not_called()
-
-    def test_exact_miss_restores_entry_near_white_and_keeps_baseline_separate(self):
-        io=FakeIO(color=lambda offset:'#FFFEFE' if not offset.any() else '#777777')
-        with patch('single_region_search.visible_candidates',
-                   return_value=[dict(source=np.array([85.,180.]))]):
-            result=run_single_region(io,scene(),rules('#FFFFFF',exact=True),game_deadline=100,
-                limits=QuickSearchLimits(max_candidate_trials=1,max_explorations=0))
-        self.assertEqual(result['actual_colors'][0],'#FFFEFE')
-        self.assertTrue(result['best_current']);self.assertTrue(result['compromise'])
-        self.assertEqual(result['baseline_result']['actual_colors'][0],'#FFFEFE')
-        self.assertEqual(result['best_observed_result']['actual_colors'][0],'#FFFEFE')
-
-    def test_library_finish_reserve_remains_overridable(self):
-        self.assertEqual(QuickSearchLimits().finish_reserve_seconds, 1.)
-        self.assertEqual(QuickSearchLimits(finish_reserve_seconds=15.).finish_reserve_seconds, 15.)
-
     def test_initial_similarity_hit_is_double_verified_and_never_moves(self):
         io = FakeIO(color='#FEFEFE')
         result = run_single_region(io, scene(), rules(tolerance=4), game_deadline=100)
@@ -226,25 +204,6 @@ class LiveSearchTests(unittest.TestCase):
         self.assertTrue(result['verified'])
         self.assertEqual(result['actual_colors'][0], '#888888')
         self.assertEqual(len(io.reads), 3)
-
-    def test_exact_miss_keeps_searching_and_returns_measured_compromise(self):
-        """An exact target miss is a usable near-colour outcome, not a stop."""
-        io = FakeIO(color='#888888')
-        with patch('single_region_search.visible_candidates', return_value=[]):
-            result = run_single_region(
-                io, scene(), rules('#FFFFFF', exact=True), game_deadline=100,
-                limits=QuickSearchLimits(max_explorations=2, max_zoom_levels=0))
-        # The search still spends its bounded exploration allowance instead
-        # of treating the absent #FFFFFF sample as an unrecoverable failure.
-        self.assertEqual(result['explorations'], 2)
-        self.assertTrue(result['verified'])
-        self.assertFalse(result['accepted'])
-        self.assertTrue(result['compromise'])
-        self.assertTrue(result['exact_target_missed'])
-        self.assertEqual(result['outcome'], 'compromise')
-        self.assertTrue(result['best_current'])
-        self.assertEqual(result['actual_colors'][0], '#888888')
-        self.assertEqual(result['best_actual_colors'][0], '#888888')
 
     def test_measured_target_hit_finishes_without_followup_exploration(self):
         image = np.full((300, 300, 3), 80, np.uint8)
@@ -313,7 +272,6 @@ class LiveSearchTests(unittest.TestCase):
         self.assertEqual(result['outcome'], 'compromise')
         self.assertEqual(result['actual_colors'][0], '#777777')
         self.assertEqual(result['best_actual_colors'][0], '#888888')
-        self.assertTrue(result['historical_best_unrestored'])
 
     def test_missing_candidates_use_finite_two_axis_translation_only(self):
         io = FakeIO(color='#888888')

@@ -1,6 +1,5 @@
 """Windows IO for fast current-board search. Never applies a dye."""
 import time
-from dataclasses import replace
 from pathlib import Path
 import numpy as np
 
@@ -9,22 +8,14 @@ from execution_diagnostics import execution_diagnostics
 from live_atlas_capture import open_capture_game, wait_for_dye_board
 from result_history import describe_result
 from session_store import ACTIVE_MARKER
-from single_region_search import QuickSearchLimits, run_single_region
+from single_region_search import run_single_region
 from vision import configure_ocr, read_codes
-from search_evidence import RoundEvidence, timed
-from build_info import runtime_identity
 
 
 def result_fields(result, rules):
     measured=describe_result(result.get('actual_colors') or [None]*3,rules)
-    result=dict(result,actual_deltas=[row['delta'] for row in measured['regions']],
+    return dict(result,actual_deltas=[row['delta'] for row in measured['regions']],
                 maximum=measured['maximum'],average=measured['average'])
-    for name in ('baseline_result','best_observed_result'):
-        if isinstance(result.get(name),dict):
-            historical=describe_result(result[name].get('actual_colors') or [None]*3,rules)
-            result[name]=dict(result[name],actual_deltas=[row['delta'] for row in historical['regions']],
-                              maximum=historical['maximum'],average=historical['average'])
-    return result
 
 
 class SingleRegionIO:
@@ -39,15 +30,11 @@ class SingleRegionIO:
         # atlas_runtime.motion; it never changes the registration gates.
         self.motion_feature_cache={}
         self.code_read_stats=dict(calls=0,ocr_passes=0,reused_cards=0)
-        self.evidence=None
-        self._frame_count=0
-        self._frame_ids={}
 
     def check(self):self.g.check()
     def clock(self):return time.monotonic()
     def pause(self,seconds):self.g.pause(seconds)
 
-    @timed('capture')
     def capture(self):
         self.check()
         # Keep the cursor outside the game client while sampling.  Moving it
@@ -55,16 +42,8 @@ class SingleRegionIO:
         # pixel candidate, especially on compact or resized windows.
         self.g.move_to((-20, -20))
         self.last_frame=self.g.capture()
-        self._frame_count+=1
-        self._frame_ids[id(self.last_frame)]=f'single-frame-{self._frame_count}'
-        while len(self._frame_ids)>4:
-            self._frame_ids.pop(next(iter(self._frame_ids)))
         return self.last_frame
 
-    def frame_id(self,image):
-        return self._frame_ids.get(id(image))
-
-    @timed('ocr')
     def read(self,image,*,enabled,deadline):
         self.check()
         self.code_read_stats['calls']+=1
@@ -92,21 +71,18 @@ class SingleRegionIO:
         self.check()
         return output
 
-    @timed('input')
     def drag(self,board,dx,dy):
         self.check()
         self.move_count+=1
         self.motion_action='drag'
         return self.g.drag(board,int(dx),int(dy))
 
-    @timed('input')
     def wheel(self,board,steps,anchor=None):
         self.check()
         self.move_count+=1
         self.motion_action='wheel'
         return self.g.wheel(board,int(steps),anchor=anchor)
 
-    @timed('registration')
     def measure(self,before,after,scene):
         self.check()
         diagnostics={}
@@ -146,15 +122,6 @@ class SingleRegionIO:
     def emit(self,kind,**data):
         if kind=='single_best':self.best_frame=self.last_frame
         if kind=='single_verified':data=result_fields(data,self.rules)
-        if isinstance(self.evidence,RoundEvidence):
-            if kind=='single_observation':
-                self.evidence.record_observation(data['actual_colors'],data.get('frame_ids',()),
-                    data.get('pose'),data.get('pose_epoch',0),data['verified'],self.clock(),
-                    positioned=self.move_count>0)
-            elif kind=='single_verified':
-                if data.get('restore_fallback_used') or data.get('restored'):
-                    self.evidence.mark_return(bool(data.get('restored') or data.get('restore_fallback_verified')))
-                data['round_evidence']=self.evidence.report(self.clock())
         self.owner.event(kind,**data)
 
 
@@ -191,20 +158,11 @@ def run_live_single_region(owner,rules,*,target=None,activate=False,**_context):
                                 emit=lambda _kind,**data:owner.event('single_progress',**data),
                                 progress_stage='observe')
         io=SingleRegionIO(owner,game,ready['scene'],folder,rules)
-        io.evidence=RoundEvidence(Path(owner.folder).name,runtime_identity().get('source_sha256'),
-            rules,ready['budget'].deadline,ready_at=ready['ready_at'])
-        owner.round_evidence=io.evidence
-        # Real rounds need an explicit tail for final positioning plus two
-        # consecutive HEX reads.  Keep this policy at the live boundary so
-        # deterministic/offline callers can continue to control their own
-        # synthetic deadline budget.
-        live_limits = replace(QuickSearchLimits(), finish_reserve_seconds=15.)
         result=run_single_region(io,ready['scene'],rules,game_deadline=ready['budget'].deadline,
-                                 search_started_at=ready['ready_at'], limits=live_limits)
+                                 search_started_at=ready['ready_at'])
         result=result_fields(result,rules)
         result['code_read_stats']=dict(io.code_read_stats)
         result['elapsed_seconds']=time.monotonic()-started
-        result['round_evidence']=io.evidence.report(time.monotonic())
         owner.event('single_summary',**result)
         return result
     finally:
@@ -214,8 +172,6 @@ def run_live_single_region(owner,rules,*,target=None,activate=False,**_context):
                 try:game.send(flag)
                 except (RuntimeError,OSError):pass
         if io is not None:
-            if isinstance(io.evidence,RoundEvidence):
-                owner.event('round_evidence',**io.evidence.report(time.monotonic()))
             frames={}
             if io.last_frame is not None:frames['final.png']=io.last_frame
             if io.best_frame is not None:frames['best.png']=io.best_frame

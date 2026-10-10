@@ -26,27 +26,10 @@ def build_from_capture(capture_dir, rules):
     artifact=capture_dir if isinstance(capture_dir,dict) else {'folder':capture_dir}
     source=Path(artifact['folder'])
     game=artifact.get('game')
-    # A live capture worker stops at the first registration mismatch.  Do not
-    # replay all saved frames through the slower serial analyzer: that replay
-    # used to leave the UI parked at e.g. 45/48 even though capture had
-    # already stopped.  Preserve the diagnostic and let the service perform
-    # its read-only two-frame fallback immediately.
-    alignment_error=artifact.get('alignment_error')
-    if alignment_error:
-        progress=artifact.get('progress')
-        if progress:
-            progress(stage='validate',current=0,total=0,
-                     message='采集对齐失败，已停止移动，正在读取当前游戏色码。')
-        return dict(quality_gate=dict(passed=False,reason='capture_alignment_failed',
-                                      alignment_error=str(alignment_error),
-                                      captured_frames=artifact.get('alignment_frames')),
-                    candidates=[],alignment_error=str(alignment_error),
-                    alignment_frames=artifact.get('alignment_frames'),
-                    board=None)
     runtime={}
     analyze_capture(source, target_rules=rules,check=game.check if game is not None else None,
                     atlas_resolution=1024,progress=artifact.get('progress'),runtime=runtime,
-                    prepared=artifact.get('prepared'),search_check=artifact.get('search_check'))
+                    prepared=artifact.get('prepared'))
     report_path=source/'analysis'/'report.json'
     if not report_path.is_file():raise RuntimeError('Atlas analysis did not produce report.json')
     report=json.loads(report_path.read_text(encoding='utf-8'))

@@ -10,7 +10,6 @@ Screenshot colors select proposals; only consecutive game HEX reads verify a
 result. Integer wheel inputs are measured; reverse notches are not an undo.
 """
 from dataclasses import dataclass
-from copy import deepcopy
 import math
 
 import cv2
@@ -19,7 +18,6 @@ import numpy as np
 from atlas_masks import material_masks
 from input_gestures import drag_gesture
 from vision import accepted, error, lab, rgb
-from workflow_budget import WorkflowBudget
 
 
 @dataclass(frozen=True)
@@ -49,9 +47,6 @@ class QuickSearchLimits:
     verification_gap_seconds: float = .12
     observation_reserve_seconds: float = 2.5
     step_reserve_seconds: float = 1.8
-    # The live Windows entry point raises this to 15 seconds for a real
-    # 120-second round.  Keep the library default small for deterministic
-    # simulation/replay callers that provide their own deadline budget.
     finish_reserve_seconds: float = 1.
     landing_tolerance: float = .75
 
@@ -230,7 +225,6 @@ class _Search:
         self.verified = False
         self.current = False
         self.best = None
-        self.baseline=None
         self.layer_best = None
         self.restore_target = 'global_best'
         self.restore_fallback_used = False
@@ -346,7 +340,6 @@ class _Search:
     def observe(self, image=None):
         started = self.io.clock()
         previous = None
-        frame_ids=[]
         self.verified = False
         for index in range(self.limits.max_observation_frames):
             if self.remaining() <= self.limits.finish_reserve_seconds:
@@ -354,10 +347,6 @@ class _Search:
             if image is None:
                 image = self.capture()
             self.image = image
-            frame_id=getattr(self.io,'frame_id',None)
-            if callable(frame_id):
-                name=frame_id(image)
-                if name is not None:frame_ids.append(name)
             self.colors = self.read(image)
             self.current = True
             if previous is not None and self.colors[self.region] is not None and self.colors == previous:
@@ -370,9 +359,6 @@ class _Search:
                     break
                 self.io.pause(self.limits.verification_gap_seconds)
         self.observation_seconds = max(self.observation_seconds, self.io.clock() - started)
-        evidence=getattr(self.io,'evidence',None)
-        if evidence is not None:
-            evidence.record_duration('verification',self.io.clock()-started)
         # The first real HEX reads reveal slow OCR before leaving the initial
         # best. Every later move can require the same observation cost, not
         # merely one final read at the end of the whole route.
@@ -398,13 +384,7 @@ class _Search:
             if self.matches_record(self.layer_best):
                 self.layer_best.update(pose=self.pose.copy(), epoch=self.epoch)
         self.emit('single_observation', actual_colors=self.colors.copy(), verified=self.verified,
-                  current=self.current, accepted=self.verified and accepted(self.colors, self.rules),
-                  frame_ids=frame_ids[-2:],pose=None if self.pose is None else self.pose.tolist(),
-                  pose_epoch=self.epoch)
-        if self.baseline is None and self.moves==0 and self.verified:
-            self.baseline=dict(actual_colors=self.colors.copy(),verified=True,
-                accepted=bool(accepted(self.colors,self.rules)),
-                actual_pose=None if self.pose is None else self.pose.tolist(),pose_epoch=self.epoch)
+                  current=self.current, accepted=self.verified and accepted(self.colors, self.rules))
         return improved
 
     def steps(self, displacement):
@@ -453,12 +433,7 @@ class _Search:
                   failure_reserve_seconds=failure_reserve,
                   remaining_seconds=self.remaining(), search_remaining_seconds=self.search_remaining(),
                   finish_remaining_seconds=self.finish_remaining())
-        tail_allowed=True
-        if getattr(self.io,'evidence',None) is not None:
-            tail_allowed=WorkflowBudget(self.started,self.deadline,self.limits.finish_reserve_seconds).allow_operation(
-                now=self.io.clock(),operation_seconds=outbound*self.step_seconds,
-                return_seconds=back*self.step_seconds,verification_seconds=self.observation_seconds)
-        return (tail_allowed and back <= self.limits.max_return_steps and self.search_remaining() >= action_needed and
+        return (back <= self.limits.max_return_steps and self.search_remaining() >= action_needed and
                 self.finish_remaining() >= needed)
 
     def move(self, displacement, *, restoring=False):
@@ -479,10 +454,7 @@ class _Search:
         self.current = self.verified = False
         self.colors = [None] * 3
         try:
-            prior_input_stage=getattr(self.io,'input_stage','input')
-            self.io.input_stage='return' if restoring else 'input'
-            try:self.io.drag(self.scene.board, int(command[0]), int(command[1]))
-            finally:self.io.input_stage=prior_input_stage
+            self.io.drag(self.scene.board, int(command[0]), int(command[1]))
             self.moves += 1
             self.io.pause(self.limits.settle_seconds)
             after = self.capture()
@@ -641,12 +613,7 @@ class _Search:
                   search_remaining_seconds=self.search_remaining(),
                   finish_remaining_seconds=self.finish_remaining(),
                   failure_reserve_seconds=failure_reserve)
-        tail_allowed=True
-        if getattr(self.io,'evidence',None) is not None:
-            tail_allowed=WorkflowBudget(self.started,self.deadline,self.limits.finish_reserve_seconds).allow_operation(
-                now=self.io.clock(),operation_seconds=self.step_seconds,
-                return_seconds=back_steps*self.step_seconds,verification_seconds=self.observation_seconds)
-        return (tail_allowed and back_steps <= self.limits.max_return_steps and self.search_remaining() >= action_needed and
+        return (back_steps <= self.limits.max_return_steps and self.search_remaining() >= action_needed and
                 self.finish_remaining() >= needed)
 
     def zoom(self, steps):
@@ -875,31 +842,10 @@ class _Search:
         # unverified read remains an unknown/failure state.
         accepted_result = bool(self.verified and accepted(self.colors, self.rules))
         outcome = ('matched' if accepted_result else 'compromise') if self.verified else 'unverified'
-        # ``outcome`` is used by the current UI, while callers that persist
-        # or relay the result should not have to infer compromise status from
-        # a pair of fields.  In particular, Exact mode intentionally keeps
-        # searching after a miss and returns the best *measured* colour when
-        # no exact HEX was observed.  Expose that fact explicitly so a
-        # near-colour can never be mistaken for an exact hit or for an
-        # unexplained early stop.
-        compromise = bool(self.verified and not accepted_result)
-        historical_best_unrestored = bool(self.best is not None and not self.at_best())
         return dict(actual_colors=self.colors.copy(), accepted=accepted_result,
-                    baseline_result=deepcopy(self.baseline),
-                    best_observed_result=None if self.best is None else dict(
-                        actual_colors=self.best['colors'].copy(),verified=True,
-                        accepted=bool(accepted(self.best['colors'],self.rules)),
-                        actual_pose=None if self.best['pose'] is None else self.best['pose'].tolist(),
-                        pose_epoch=self.best['epoch']),
-                    outcome=outcome, compromise=compromise,
-                    exact_target_missed=bool(self.exact and compromise),
-                    verified=self.verified, current=self.current,
+                    outcome=outcome, verified=self.verified, current=self.current,
                     best_actual_colors=None if self.best is None else self.best['colors'].copy(),
                     best_verified=self.best is not None, best_current=self.at_best(),
-                    # This is deliberately separate from ``best_verified``:
-                    # the historical sample may be valid evidence yet not be
-                    # the colour currently visible in the game.
-                    historical_best_unrestored=historical_best_unrestored,
                     restored=self.restored, reason=self.reason, moves=self.moves,
                     explorations=self.explorations, candidate_trials=self.trials,
                     local_trials=self.local_trials,
@@ -918,9 +864,6 @@ class _Search:
     def run(self):
         self.emit('single_progress', stage='observe', moves=0)
         self.observe()
-        if not self.verified:
-            self.reason='baseline_unverified'
-            return self.result()
         if self.verified and accepted(self.colors, self.rules):
             self.reason = 'matched'
             return self.result()

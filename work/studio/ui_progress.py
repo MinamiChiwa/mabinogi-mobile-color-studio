@@ -1,14 +1,11 @@
 """Presentation-only progress: counts describe actual work, never fake percentages."""
 STAGES={
+    'native_validate':'检查当前色板',
     'waiting':'等待染色界面','zoom':'识别与缩放','capture':'采集颜色板',
     'align':'对齐采集画面','period':'测量色板周期','stitch':'拼接全局颜色板',
     'export':'保存颜色板','validate':'检查拼图质量','search':'搜索目标颜色',
     'similarity':'计算旋转与缩放','ready':'准备候选方案','position':'移动到目标位置','verify':'复核游戏色码',
     'observe':'读取当前游戏色码','restore':'恢复已测最佳颜色',
-    # This is a terminal capture state, rather than normal image processing.
-    # Keeping it as a distinct stage prevents a failed background alignment
-    # from looking like a stalled N/48 progress bar.
-    'recover':'停止采集并读取当前颜色',
 }
 
 
@@ -18,7 +15,6 @@ def progress_text(data):
     body=data.get('message') or (
         '等待手动进入染色倒计时；F9 可停止。' if data.get('stage')=='waiting' else
         '图像处理中，鼠标暂时不动是正常现象。' if data.get('stage') in ('align','period','stitch','export','validate','search','similarity','ready') else
-        '配准失败，已停止继续移动，正在读取当前游戏颜色。' if data.get('stage')=='recover' else
         '根据图像实测位移校正；F9随时停止。')
     return title,body
 
@@ -36,21 +32,8 @@ def single_result_presentation(data):
         return ('单区域寻色已结束', '当前色码未完成复核，请以游戏内显示为准。')
     if outcome=='matched' or (outcome not in ('matched','compromise','unverified') and data.get('accepted')):
         return ('单区域目标已达标', '自动移动已结束，可继续在游戏内手动调整。')
-    if data.get('historical_best_unrestored') or data.get('best_current') is False:
+    if data.get('best_current') is False:
         return ('未命中目标 · 妥协方案',
                 '未找到满足目标的颜色。此前最佳实测结果未能恢复；下方显示当前已复核的妥协结果，请以游戏内当前颜色为准。')
     return ('未命中目标 · 妥协方案',
             '未找到满足目标的颜色；下方显示本轮已实测确认的妥协结果。这是寻色未命中后的正常结束状态，并非程序故障。请查看色差，并在游戏内手动确认是否采用。')
-
-
-def atlas_result_presentation(data):
-    if data.get('historical_best_unrestored'):
-        return ('此前最佳实测结果未能恢复',
-                '当前色码与历史最佳分别显示；历史色码不是游戏当前结果，请以当前实测为准。')
-    if not data.get('verified'):
-        return ('当前颜色未完成复核','未能读取当前色码，请以游戏内显示为准。')
-    if data.get('recovered') or data.get('positioning_complete') is False:
-        return ('只读当前颜色','已双帧读取当前颜色；未定位候选，也未确认恢复历史最佳。')
-    if data.get('accepted'):
-        return ('游戏色码已复核','全部目标达标，请在游戏内手动确认是否套用。')
-    return ('未命中目标 · 已定位妥协方案','当前显示已定位并双帧复核的近似结果，请查看各区色差并在游戏内手动决定是否采用。')

@@ -29,7 +29,6 @@ __pycache__/
 *.pyc
 .env
 .venv/
-/tests/fixtures/
 !/work/studio/periodic_atlas.py
 !/work/studio/replay_archive.py
 !/work/studio/live_atlas_capture.py
@@ -131,3 +130,15 @@ VALIDATION.md
 
 # Local continuation notes
 /CONTINUATION_GUIDE.md
+
+# Native production package and its small recognition assets.
+!/work/studio/native_live/
+/work/studio/native_live/*
+!/work/studio/native_live/*.py
+!/work/studio/native_live/assets/
+/work/studio/native_live/assets/*
+!/work/studio/native_live/assets/dye_hex_glyphs.json
+!/work/studio/native_live/assets/dye_hex_glyphs.npz
+!/work/studio/native_live/assets/dye_timer_hourglass.json
+!/work/studio/native_live/assets/dye_timer_hourglass.png
+!/work/studio/native-window-check.ps1

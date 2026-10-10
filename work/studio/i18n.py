@@ -6,6 +6,54 @@ from opencc import OpenCC
 language='简体中文'
 traditional=OpenCC('s2twp')
 EN={
+'无法读取窗口物理边界。':'Could not read the physical client bounds.',
+'无法转换窗口物理坐标。':'Could not convert the client bounds to physical coordinates.',
+'窗口物理尺寸无效。':'The physical client size is invalid.',
+'未能定位游戏模块':'Could not locate the game module',
+'已记录目标进程及实际安装路径，请查看诊断记录。':'The target process and actual installation path were recorded. See the diagnostics.',
+'当前游戏版本尚未支持':'This game version is not supported yet',
+'游戏模块或数据版本与当前适配版本不同，详情已写入诊断记录。':'The game module or data version differs from the supported build. Details are in the diagnostics.',
+'窗口坐标映射未完成':'Window coordinate mapping is unavailable',
+'已记录游戏内部尺寸、物理窗口尺寸及缩放信息，请查看诊断记录。':'Game rendering size, physical client size and scaling were recorded. See the diagnostics.',
+'未能读取物理窗口坐标':'Could not read physical window coordinates',
+'请恢复游戏窗口，详情已写入诊断记录。':'Restore the game window. Details are in the diagnostics.',
+'正在扩大细化搜索，并核对返回路线。':'Expanding refinement search and checking return routes.',
+' 本轮细化搜索时间已用完，保留当前结果；不能据此判断无解。':' Refinement search time was used up. The current result was retained; this does not prove there is no solution.',
+' 当前局部动作组合未找到可安全执行的改善路线，不能据此判断无解。':' The local input combinations found no improvement with a verified return route; this does not prove there is no solution.',
+' 已保留恢复时间，当前余量不足以再安全试探。':' Return time was reserved. The remaining allowance cannot fit another protected attempt.',
+'正在查找更接近的颜色，并保留恢复时间。':'Searching for closer colors while reserving return time.',
+'正在细化颜色，已预留恢复时间。':'Refining colors with return time reserved.',
+'正在恢复已验证的颜色。':'Restoring the verified colors.',
+'已复核本轮色差较小的方案，请查看实测色差，在游戏内手动确认是否采用。':'A lower-error option from this search has been verified. Review the measured color differences and confirm manually in the game.',
+'未找到精准方案，正在定位并复核色差较小的妥协方案。':'No exact plan found. Positioning and verifying a lower-error compromise.',
+'未命中目标 · 当前妥协结果':'Target not matched - current compromise',
+'当前颜色已复核，但未恢复此前更好的实测结果，请在游戏内手动确认是否采用。':'Current colors are verified, but a better previous observation was not restored. Confirm manually in the game.',
+'已定位并复核本轮色差较小的方案，请查看实测色差，在游戏内手动确认是否采用。':'A lower-error option from this search has been positioned and verified. Review the measured color differences and confirm manually in the game.',
+'精准寻色':'Precise Search',
+'图像寻色':'Visual Search',
+'检查当前色板':'Checking the current palette',
+'正在检查当前游戏与取色数据。':'Checking the current game and palette data.',
+'正在计算可执行的目标方案。':'Searching for an executable target plan.',
+'正在调整色板。':'Adjusting the palette.',
+'正在核对当前游戏色码。':'Verifying the current game HEX.',
+'目标 HEX 已精确匹配':'Target HEX matched exactly',
+'目标颜色已在容差内匹配':'Target colors matched within tolerance',
+'游戏色码已复核，请在游戏内手动确认是否套用。':'Game HEX verified. Confirm application manually in the game.',
+'本轮未找到达标方案':'No matching plan found this round',
+'有限搜索未找到符合目标的可执行方案，不能据此判断色板无解。':'The bounded search found no executable match. This does not prove the palette has no solution.',
+'剩余时间不足，已停止':'Stopped: insufficient remaining time',
+'未继续发送操作，请以游戏当前颜色为准。':'No further input was sent. Refer to the current colors in the game.',
+'请先退出当前染色界面':'Exit the current dye screen first',
+'工具需要先开始等待，再手动进入新一局染色。':'Start waiting in the tool, then manually enter a new dye session.',
+'当前游戏或窗口条件不支持':'Current game or window conditions are unsupported',
+'请检查游戏版本、窗口和程序权限，详情已写入诊断记录。':'Check the game version, window and application permissions. Details were saved in diagnostics.',
+'实际操作响应不符，已停止':'Stopped: unexpected input response',
+'已停止后续操作，请查看当前游戏颜色。':'Further input stopped. Check the current game colors.',
+'本轮寻色已停止':'This search has stopped',
+'本轮寻色已结束':'This search has ended',
+'当前颜色未达到全部目标，请以游戏内显示为准。':'Current colors do not meet every target. Refer to the game display.',
+'请以游戏当前颜色为准。':'Refer to the current game colors.',
+'当前色码记录':'Observed current HEX',
 '读取当前游戏色码':'Reading current game HEX',
 '恢复已测最佳颜色':'Restoring the best measured color',
 '单区域目标已达标':'Single-region target matched',
@@ -198,7 +246,6 @@ EN.update({'请先停止寻色再切换语言。': 'Stop the search before switc
 EN.update({'未检测到唯一窗口': 'No unique window found', '① 设置颜色与窗口    →    ② 点击开始或按 F8    →    ③ 进入普通染色，教学后自动寻色': '1 Set colors and window   →   2 Start / F8   →   3 Open regular dye; search begins after the tutorial', '任务已启动，正在等待或寻色；按 F9 停止。': 'Already waiting or searching. Press F9 to stop.', '快捷键不可用：': 'Unavailable hotkeys: ', '快捷键已就绪：F8 开始 / F9 停止': 'Hotkeys ready: F8 Start / F9 Stop', '正在识别窗口：': 'Detecting window: ', '浮窗暂不可用，寻色状态请查看主窗口。': 'Overlay unavailable. Follow progress in the main window.', '游戏窗口 · ': 'Game window · ', '窗口选择已更新，下次开始时生效。': 'Window selection updated for the next start.', '自动检测': 'Auto-detect', '请先按 F9 停止，再更换游戏窗口。': 'Press F9 to stop before changing the game window.', '；请关闭其他工具副本或使用按钮。': '. Close other copies of this tool or use its buttons.', '未能自动切回游戏。请点击游戏窗口，程序会继续等待识别，无需再次开始。': 'Could not focus the game. Click the game window; detection will continue without restarting.', '选择游戏窗口': 'Select game window', '默认自动识别瑪奇Mobile，也可选择标题不同的游戏窗口。': 'Automatically finds Mabinogi Mobile. Choose a window manually if its title differs.', '刷新窗口': 'Refresh list', '使用此窗口': 'Use selection', '自动检测到：': 'Detected: ', '确认后仅对所选窗口识别；窗口关闭后需重新选择。': 'Only the selected window will be used. Select it again if it closes.', '发现多个游戏窗口，请手动选择目标窗口。': 'Multiple game windows found. Select the intended window manually.', '所选窗口已关闭，请重新选择游戏窗口。': 'The selected window closed. Select the game window again.', '无法读取窗口列表，请重试。': 'Could not list windows. Try again.', '未找到游戏窗口。请启动游戏，或手动选择窗口。': 'Game window not found. Open the game or select a window manually.', '感知色差 ΔE ≤ ': 'Color difference ΔE ≤ ', ' · 数值越小越严格': ' · Lower is stricter', '色差由中心向外增加 · 放大查看每个颜色，拖动或滚动浏览，悬停查看 HEX': 'Difference increases outward · Use +/− to zoom, drag to browse, hover for HEX', '色差由中心向外增加 · ＋／－缩放，拖动浏览，悬停查看 HEX': 'Difference increases outward · Use +/− to zoom, drag to browse, hover for HEX'})
 
 TW={
-'本轮没有预测达标方案；以下结果仅供参考，实际复核未达标时会停止。':'本輪沒有預測達標方案；以下結果僅供參考，實際複核未達標時會停止。',
 '确认后仅对所选窗口识别；窗口关闭后需重新选择。':'確認後僅辨識所選視窗；視窗關閉後請重新選擇。',
 '默认自动识别瑪奇Mobile，也可选择标题不同的游戏窗口。':'預設自動辨識瑪奇Mobile，也可選擇標題不同的遊戲視窗。',
 }
@@ -212,9 +259,7 @@ EN.update(RUNTIME_EN);TW.update(RUNTIME_TW)
 # intentionally keyed by the full sentence: translating only a shorter
 # substring would leave the remainder of a status message in Chinese.
 EN.update({
-    '候选选择未能完成，已保持自动方案。': 'Candidate selection could not be completed. The automatic combination was kept.',
-    '渐进候选搜索未完成，回退完整颜色板候选。': 'Progressive candidate search did not complete. Falling back to full-board candidates.',
-    '未选择其他方案，保持自动最佳方案。': 'No other combination was selected. The automatic best combination was kept.',
+    '已找到目标色板位置，正在定位并复核。':'Target palette pose found. Positioning and verifying.',
     '。尚未搜索目标组合，不能据此判断没有满足目标的方案。': '. The target combinations have not been searched, so this does not show that no match exists.',
     '请进入普通染色；教学结束后自动验证颜色板。F9停止。': 'Open regular dyeing; the board is verified automatically after the tutorial. F9 stops.',
     '游戏倒计时已截止，未发布候选。': 'The game countdown has expired. No candidates were published.',
@@ -225,7 +270,6 @@ EN.update({
     '倒计时复核暂时不可用，沿用首次识别结果': 'The countdown could not be rechecked temporarily. The first reading is being used.',
 })
 TW.update({
-    '渐进候选搜索未完成，回退完整颜色板候选。': '漸進候選搜尋未完成，改用完整色板候選。',
     '。尚未搜索目标组合，不能据此判断没有满足目标的方案。': '。尚未搜尋目標組合，無法據此判斷沒有符合目標的方案。',
     '请进入普通染色；教学结束后自动验证颜色板。F9停止。': '請進入普通染色；教學結束後會自動驗證顏色板。F9 停止。',
     '游戏倒计时已截止，未发布候选。': '遊戲倒數已結束，未發布候選方案。',
@@ -234,6 +278,12 @@ TW.update({
     '已停止，保留自动最佳方案。': '已停止，保留自動最佳方案。',
     '倒计时复核暂时不可用，沿用首次识别结果；未延长安全截止时间。': '倒數暫時無法複核，沿用首次辨識結果；未延長安全操作期限。',
     '倒计时复核暂时不可用，沿用首次识别结果': '倒數暫時無法複核，沿用首次辨識結果。',
+})
+EN.update({
+    '无法绑定当前染色板':'Cannot bind the current palette',
+    '请确认只打开了一个染色板；关闭重叠窗口后重试。':'Keep only one dye palette open and retry.',
+    '工具内部错误，已停止':'Tool error; stopped',
+    '本轮未继续发送操作，详细异常已写入诊断记录。':'Further input stopped. Details are saved in the diagnostic record.',
 })
 _english_parts=sorted(EN,key=len,reverse=True)
 _widgets=weakref.WeakSet()

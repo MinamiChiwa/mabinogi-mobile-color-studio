@@ -94,9 +94,10 @@ def bounded_zoom(ticks,current,best):
     return int(np.clip(round(target-current),-32,32))
 
 class Runner:
-    def __init__(self,emit,folder,atlas_runner=None):
+    def __init__(self,emit,folder,atlas_runner=None,native_runner=None):
         self.emit=emit; self.stop=threading.Event(); self.folder=Path(folder); self.trace=deque(maxlen=2048);self.store=SessionStore(self.folder)
         self.atlas_runner=atlas_runner
+        self.native_runner=native_runner
         self.candidate_choices=queue.Queue()
     def choose_candidate(self,batch_id,candidate_id):
         """Thread-safe UI bridge for the currently published atlas batch."""
@@ -145,10 +146,28 @@ class Runner:
                 if self.stop.is_set():raise
                 im=None
     def launch(self,rules,mode='search',auto=False,activate=False,target=None,strategy='legacy',**strategy_context):
-        if strategy not in ('legacy','atlas'):
+        if strategy not in ('legacy','atlas','native'):
             raise ValueError('Unknown search strategy')
+        if strategy=='native':
+            if self.native_runner is None:raise RuntimeError('Native strategy is not connected to this Runner')
+            mark_session(self.folder)
+            (self.folder/ACTIVE_MARKER).write_text('active',encoding='ascii')
+            try:
+                self.event('config',rules=rules,strategy='native',auto_apply=False,build=runtime_identity())
+                return self.native_runner(self,rules,mode=mode,auto=False,activate=activate,target=target,**strategy_context)
+            except (Interrupted,InterruptedError) as exc:self.event('interrupted',message=str(exc))
+            except Exception:
+                self.event('native_result',verified=False,accepted=False,stop_reason='unavailable',
+                    actual_colors=[None]*3,actual_deltas=[None]*3,error=traceback.format_exc())
+            finally:
+                try:
+                    (self.folder/'run-summary.json').write_text(json.dumps(dict(stop_requested=self.stop.is_set(),
+                        events=list(self.trace)),ensure_ascii=False,indent=2),encoding='utf-8')
+                finally:
+                    (self.folder/ACTIVE_MARKER).unlink(missing_ok=True)
+                    start_session_cleanup(self.folder.parent);self.emit('finished',{});self.trace.clear()
+            return None
         if strategy=='atlas':
-            self.round_evidence=None
             single=mode=='search' and sum(bool(r.get('enabled')) for r in rules)==1
             if not single and self.atlas_runner is None:
                 raise RuntimeError('Atlas strategy is not connected to this Runner')
@@ -182,10 +201,6 @@ class Runner:
                            message='自动染色未能可靠完成，已停止自动移动并保留游戏当前画面。',
                            detail=traceback.format_exc())
             finally:
-                if self.round_evidence is not None:
-                    # Pure local metadata; this must not capture/read the game
-                    # after F9, focus loss or the hard countdown cutoff.
-                    self.event('round_evidence',**self.round_evidence.report(time.monotonic()))
                 # Atlas already retains screenshots. Preserve the much smaller
                 # event trail too, so a rejected map is not mistaken for an
                 # unsuccessful search, and F9 receipt can be diagnosed.

@@ -1,0 +1,6 @@
+* text=auto
+*.py text eol=lf
+*.md text eol=lf
+*.ps1 text eol=lf
+*.png -text
+*.npz -text
