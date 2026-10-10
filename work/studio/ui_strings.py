@@ -117,6 +117,12 @@ TW={
 
 # Current product copy. Historical keys above only translate archived events.
 EN.update({
+'已读取 ':'Read ',
+'内存区域 ':'Memory regions ',
+'活动候选 ':'Active candidates ',
+'未完成读取 ':'Incomplete reads ',
+'色板候选读取未完成':'Palette candidate read incomplete',
+'有候选或内存区域未能可靠读取，本次已停止扫描并保存详情。请在游戏普通界面重试，无需消耗染色道具。':'Some candidates or memory regions could not be read reliably. Scanning stopped and details were saved. Retry on an ordinary game screen; no dye item is needed.',
 '完整切换与返回路线超过剩余操作额度，已保留当前实测结果。':'The full switch and return exceed the remaining action allowance. The current measured result has been kept.',
 '当前色板位置或颜色已变化，已重新读取；请选择当前候选。':'The palette position or colors changed and were read again. Select from the current candidates.',
 '所选候选已失效，已保留当前颜色。':'The selected candidate has expired. Current colors have been kept.',
@@ -209,6 +215,12 @@ EN.update({
 '此方案名称已存在，请使用其他名称。':'That preset name already exists. Choose a different name.',
 })
 TW.update({
+'已读取 ':'已讀取 ',
+'内存区域 ':'記憶體區域 ',
+'活动候选 ':'活動候選 ',
+'未完成读取 ':'未完成讀取 ',
+'色板候选读取未完成':'色板候選讀取尚未完成',
+'有候选或内存区域未能可靠读取，本次已停止扫描并保存详情。请在游戏普通界面重试，无需消耗染色道具。':'有候選或記憶體區域未能可靠讀取，本次已停止掃描並儲存詳情。請在遊戲普通畫面重試，無需消耗染色道具。',
 '完整切换与返回路线超过剩余操作额度，已保留当前实测结果。':'完整切換與返回路線超過剩餘操作額度，已保留目前實測結果。',
 '当前色板位置或颜色已变化，已重新读取；请选择当前候选。':'目前色板位置或顏色已變化，已重新讀取；請選擇目前候選。',
 '所选候选已失效，已保留当前颜色。':'所選候選已失效，已保留目前顏色。',

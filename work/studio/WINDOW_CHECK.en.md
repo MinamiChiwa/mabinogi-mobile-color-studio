@@ -10,7 +10,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\native-window-check.ps1
 
 The script reads process and window information without sending game input. Records are saved under `data/window-check-YYYYMMDD-HHMMSS/`. Include `native-preflight.json` and `native-preparation.json` when reporting a problem.
 
-Preflight locates supported modules across installation paths and measures the target window in its DPI context before converting to physical pixels. When rendering and physical window dimensions differ, the tool builds and verifies an integer pixel mapping for search and fine adjustment. No fixed game resolution is required. The topmost overlay does not take focus; it passes mouse input through during execution and allows clicks during candidate selection. F9 or Stop cancels the run.
+Preflight locates supported modules across installation paths and measures the target window in its DPI context before converting to physical pixels. When rendering and physical window dimensions differ, the tool builds and verifies an integer pixel mapping for search and fine adjustment. No fixed game resolution is required. The topmost overlay supports clicks and dragging without taking focus. It briefly hides while sending game gestures, then returns. F9 or Stop cancels the run.
 
 Reader cursor differences are diagnostic rather than a reason to stop before actual game readback. `pixel_mapping_diagnostics` retains raw coordinates, differences and native mouse-cache observations. Identical repeated cache reads do not prove a fresh input frame. Process/window changes, failed mapping checks, F9 and deadlines still stop execution.
 

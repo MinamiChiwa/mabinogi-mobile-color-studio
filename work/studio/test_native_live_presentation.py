@@ -59,6 +59,27 @@ class NativePresentationTests(unittest.TestCase):
         self.assertIn('扫描',title)
         self.assertIn('暂时不要进入',body)
 
+    def test_discovery_reports_actual_work_and_distinguishes_unreadable_candidates(self):
+        from ui_progress import progress_text
+        title,body=progress_text(dict(stage='discovery',discovery=dict(bytes_scanned=33554432,
+            regions_visited=256,eligible_addresses=['0x10000'],candidate_read_failures=2)))
+        self.assertIn('32.0',body);self.assertIn('256',body)
+        self.assertIn('1',body);self.assertIn('2',body)
+        self.assertNotIn('%',body)
+
+    def test_discovery_read_failure_is_explicit_and_fully_localized(self):
+        import i18n
+        original=i18n.language
+        try:
+            title,body=self.module().result_text(dict(verified=False,stop_reason='discovery_read_failure'))
+            self.assertIn('读取',title)
+            self.assertIn('普通界面',body)
+            self.assertNotIn('未检测到',title)
+            i18n.set_language('English')
+            for text in (title,body):
+                self.assertFalse(any('\u4e00'<=c<='\u9fff' for c in str(i18n.tr(text))))
+        finally:i18n.set_language(original)
+
     def test_explicit_measured_choice_is_not_presented_as_failed_restoration(self):
         title,body=self.module().result_text(dict(verified=True,accepted=False,
             stop_reason='user_candidate_observed',best_current=False))

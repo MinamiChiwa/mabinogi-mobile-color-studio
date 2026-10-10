@@ -125,15 +125,15 @@ class NativeCandidateUITests(unittest.TestCase):
         self.assertNotIn('正在定位', str(self.overlay.candidate_rows['best'].cget('text')))
         self.assertEqual(data['candidates'][0]['colors'], ['#000000', '#020202'])
 
-    def test_selection_disables_clicks_and_progress_restores_pass_through(self):
+    def test_selection_disables_candidate_clicks_but_keeps_overlay_chrome_reachable(self):
         self.emit('native_candidate_ready', candidates())
         self.overlay.candidate_rows['other'].invoke()
-        self.assertTrue(self.overlay._native_policy['passive_input'])
+        self.assertFalse(self.overlay._native_policy['passive_input'])
         self.assertEqual(self.overlay.phase, 'positioning')
         self.overlay.choose('native-batch', 'other')
         self.assertEqual(self.choices, [('native-batch', 'other')])
         self.emit('native_candidate_selected', dict(batch_id='native-batch', candidate_id='other', status='positioning'))
-        self.assertTrue(self.overlay._native_policy['passive_input'])
+        self.assertFalse(self.overlay._native_policy['passive_input'])
         self.assertEqual(self.overlay.phase, 'positioning')
         self.overlay.choose('native-batch', 'best')
         self.assertEqual(self.choices, [('native-batch', 'other')])

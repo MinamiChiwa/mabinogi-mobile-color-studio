@@ -5,6 +5,59 @@ from .runtime_read import Reader
 from .capture_dye_state import checked_object, mm_items, snapshot
 
 
+class InvalidDyeCandidate(ValueError):
+ """A class byte-pattern match whose readable structure is not an object."""
+
+
+def _pointer(value,field,*,nullable=False,class_pointer=False):
+ if value==0 and nullable:return 0
+ if type(value) is not int or not 0x10000<=value<0x800000000000 or value%8:
+  raise InvalidDyeCandidate(f'Invalid {field} pointer: {value!r}')
+ return value
+
+
+class CandidateReadView:
+ """Check scan-derived addresses before dereferencing, including metadata.
+
+ Readable null, low, unaligned or noncanonical object links are invalid shapes.
+ Read failures at structurally valid addresses still propagate as OSError.
+ """
+ def __init__(self,reader):self.reader=reader
+ def read(self,address,size):
+  if type(address) is not int or not 0x10000<=address<0x800000000000 or not 0<=size<=64*1024*1024 or address+size>0x800000000000:
+   raise InvalidDyeCandidate(f'Invalid candidate read range: {address!r}, {size!r}')
+  raw=self.reader.read(address,size)
+  if len(raw)!=size:raise OSError(f'Short candidate read at {address:x}')
+  return raw
+ def u64(self,address):return struct.unpack('<Q',self.read(address,8))[0]
+ def cstring(self,address,maxlen=256):return Reader.cstring(self,address,maxlen)
+ def class_name(self,address):
+  _pointer(address,'class',class_pointer=True)
+  return Reader.class_name(self,address)
+ def fields(self,address):
+  _pointer(address,'class',class_pointer=True)
+  _pointer(self.u64(address+0x80),'field table')
+  return Reader.fields(self,address)
+
+
+def _typed_object(reader,address,name,required=()):
+ _pointer(address,name)
+ _pointer(reader.u64(address),'class',class_pointer=True)
+ if reader.class_name(reader.u64(address))!=name:
+  raise InvalidDyeCandidate('Unexpected object type: '+name)
+ if not required:return {}
+ fields=reader.fields(reader.u64(address))
+ if any(type(fields.get(key)) is not int or not 16<=fields[key]<=512 for key in required):
+  raise InvalidDyeCandidate('Invalid runtime field layout: '+name)
+ return fields
+
+
+def _fragment_items(reader,address):
+ _typed_object(reader,address,'Silvervine.ManualMemory.MMList`1')
+ _pointer(reader.u64(address+16),'fragment array')
+ return mm_items(reader,address)
+
+
 class IncrementalDyeScan:
  """Resume a guarded heap census; a partial first hit is never a selection.
 
@@ -19,7 +72,7 @@ class IncrementalDyeScan:
   self.seen=set();self.hits={};self.first_eligible_seen={};self.known=list(known_addresses);self.known_index=0
   self.validation_addresses=None;self.validation_index=0;self.validated={}
   self.phase='scanning';self.bytes_scanned=0;self.chunks_scanned=0;self.regions_visited=0
-  self.read_failures=0;self.last_read_error=None;self.candidate_read_errors={}
+  self.read_failures=0;self.last_read_error=None;self.candidate_read_errors={};self.rejected_candidates={}
 
  def _inspect(self,address,check,*,validating=False):
   check();began=self.clock();unreadable=False
@@ -28,10 +81,13 @@ class IncrementalDyeScan:
   except OSError as exc:
    check();hit=None;unreadable=True
    self.candidate_read_errors[address]=type(exc).__name__+': '+str(exc)
+  except InvalidDyeCandidate as exc:
+   check();hit=None;self.rejected_candidates[address]=str(exc)
   except (ValueError,struct.error):
    check();hit=None
   check()
   if hit:
+   self.rejected_candidates.pop(address,None)
    self.hits[address]=hit
    if hit['capture_eligible']:self.first_eligible_seen.setdefault(address,began)
   if validating:
@@ -108,23 +164,37 @@ class IncrementalDyeScan:
    candidate_read_failures=len(self.candidate_read_errors),
    unreadable_candidate_addresses=[hex(address) for address in sorted(self.candidate_read_errors)],
    candidate_read_errors={hex(address):error for address,error in sorted(self.candidate_read_errors.items())},
+   rejected_candidate_count=len(self.rejected_candidates),
+   rejected_candidates={hex(address):reason for address,reason in sorted(self.rejected_candidates.items())[:16]},
+   census_finished=self.phase=='complete',
    scan_started_monotonic=self.started,scan_elapsed_seconds=max(0.,self.clock()-self.started),
    inputs_sent=0,ready_for_input=False)
 
 def inspect(r,a,cls):
+ r=CandidateReadView(r)
+ _pointer(a,'candidate');_pointer(cls,'dye class',class_pointer=True)
  if r.u64(a)!=cls or r.u64(a+8)!=0:return None
- fs=checked_object(r,a,'MM.Client.Presentation.UI.Instances.StageScene.Dyeing.DyeingPaletteInstanceImpl')
- data=r.u64(a+fs['data']);df=checked_object(r,data,'Client.CodeGenerated.UI.DyeingPaletteControlData')
- result=r.u64(a+fs['resultCache']);checked_object(r,result,'Client.CodeGenerated.UI.DyeingPaletteResult')
- arr,count=mm_items(r,r.u64(data+df['PaletteFragmentDataList']))
+ fs=_typed_object(r,a,'MM.Client.Presentation.UI.Instances.StageScene.Dyeing.DyeingPaletteInstanceImpl',
+  ('data','resultCache','<TransitionController>k__BackingField','<Result>k__BackingField'))
+ data=_pointer(r.u64(a+fs['data']),'control data')
+ df=_typed_object(r,data,'Client.CodeGenerated.UI.DyeingPaletteControlData',('PaletteFragmentDataList','SharedMaterial'))
+ result=_pointer(r.u64(a+fs['resultCache']),'result cache')
+ _typed_object(r,result,'Client.CodeGenerated.UI.DyeingPaletteResult')
+ arr,count=_fragment_items(r,_pointer(r.u64(data+df['PaletteFragmentDataList']),'fragment list'))
  natives=[]
  for i in range(count):
-  f=r.u64(arr+32+i*8);ff=checked_object(r,f,'Client.CodeGenerated.UI.DyeingPaletteFragmentData');texture=r.u64(f+ff['Texture'])
-  if r.class_name(r.u64(texture))!='UnityEngine.Texture2D':return None
-  natives.append(r.u64(texture+16))
- controller=r.u64(a+fs['<TransitionController>k__BackingField']);state=struct.unpack('<i',r.read(controller+20,4))[0]
- material=r.u64(data+df['SharedMaterial']);native_material=r.u64(material+16)
- active_result=r.u64(a+fs['<Result>k__BackingField'])
+  f=_pointer(r.u64(arr+32+i*8),'fragment')
+  ff=_typed_object(r,f,'Client.CodeGenerated.UI.DyeingPaletteFragmentData',('Texture',))
+  texture=_pointer(r.u64(f+ff['Texture']),'texture',nullable=True)
+  if texture:
+   _typed_object(r,texture,'UnityEngine.Texture2D')
+   natives.append(_pointer(r.u64(texture+16),'native texture',nullable=True))
+  else:natives.append(0)
+ controller=_pointer(r.u64(a+fs['<TransitionController>k__BackingField']),'transition controller')
+ state=struct.unpack('<i',r.read(controller+20,4))[0]
+ material=_pointer(r.u64(data+df['SharedMaterial']),'material',nullable=True)
+ native_material=_pointer(r.u64(material+16),'native material',nullable=True) if material else 0
+ active_result=_pointer(r.u64(a+fs['<Result>k__BackingField']),'active result',nullable=True)
  return {'address':hex(a),'data':hex(data),'region_count':count,'native_textures':[hex(x) for x in natives],'live_textures':all(natives),'native_material':hex(native_material),'controller_state':state,'active_result':hex(active_result),'capture_eligible':all(natives) and bool(native_material) and bool(active_result) and state==2}
 def scan(r,capture=False):
  cls=r.u64(r.base+0x106c9010);pattern=struct.pack('<Q',cls);hits=[];saved=[];seen=set();total=0;t=time.perf_counter()

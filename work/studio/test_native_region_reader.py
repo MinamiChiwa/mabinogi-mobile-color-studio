@@ -37,7 +37,7 @@ class DyeMemory:
             raw=self.allocate(32+pixels.nbytes);self.put(raw+24,'Q',pixels.nbytes)
             self.bytes(raw+32,pixels.tobytes())
             self.put(palette+16,'iii',254,254,3);self.put(palette+32,'Q',raw)
-            texture=self.object('UnityEngine.Texture2D',{});self.put(texture+16,'Q',0x800000000+index)
+            texture=self.object('UnityEngine.Texture2D',{});self.put(texture+16,'Q',0x800000000+index*16)
             self.put(fragment+16,'Q',palette);self.put(fragment+24,'f',.5);self.put(fragment+32,'Q',texture)
             self.fragments.append(fragment);self.palettes.append(palette);self.raw_arrays.append(raw)
         self.fragment_list,self.fragment_array=self.list(self.fragments,struct.pack('<'+'Q'*count,*self.fragments))
@@ -54,7 +54,16 @@ class DyeMemory:
 
     def object(self,name,fields):
         if name not in self.classes:
-            self.classes[name]=(self.allocate(16),fields)
+            cls=self.allocate(256);namespace,_,short_name=name.rpartition('.')
+            name_address=self.allocate(256);namespace_address=self.allocate(256)
+            self.bytes(name_address,short_name.encode()+b'\0')
+            self.bytes(namespace_address,namespace.encode()+b'\0')
+            table=self.allocate(32*(len(fields)+1))
+            self.put(cls+16,'QQ',name_address,namespace_address);self.put(cls+0x80,'Q',table)
+            for index,(field,offset) in enumerate(fields.items()):
+                field_address=self.allocate(256);self.bytes(field_address,field.encode()+b'\0')
+                self.put(table+index*32,'QQQiI',field_address,0,cls,offset,0)
+            self.classes[name]=(cls,fields)
         address=self.allocate(128);self.put(address,'Q',self.classes[name][0]);return address
 
     def list(self,items,payload):

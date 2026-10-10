@@ -22,6 +22,8 @@ def result_text(data):
     reason=data.get('stop_reason')
     if reason=='initial_validation_timeout':
         return ('游戏初始化检查超时','进程或窗口检查尚未完成。请在游戏普通界面重试，并附上本次诊断记录。')
+    if reason=='discovery_read_failure':
+        return ('色板候选读取未完成','有候选或内存区域未能可靠读取，本次已停止扫描并保存详情。请在游戏普通界面重试，无需消耗染色道具。')
     if reason in ('initial_discovery_timeout','discovery_incomplete_timeout'):
         return ('色板扫描尚未完成','本次扫描未能完成候选和唯一性检查，不能据此判断没有染色板。请在游戏普通界面重新准备，等提示就绪后再进入染色。')
     if reason=='ambiguous_active_palette_timeout':

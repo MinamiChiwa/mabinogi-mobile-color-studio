@@ -5,8 +5,8 @@ import json
 from pathlib import Path
 import sys
 
-APP_VERSION = '0.4.1rc1'
-POLICY_REVISION = 'native-ranked-candidate-selection-v17'
+APP_VERSION = '0.4.1rc2'
+POLICY_REVISION = 'native-typed-discovery-interactive-overlay-v18'
 
 
 def source_identity(root):

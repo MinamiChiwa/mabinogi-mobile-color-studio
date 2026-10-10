@@ -18,6 +18,16 @@ def progress_text(data):
         '等待手动进入染色倒计时；F9 可停止。' if data.get('stage')=='waiting' else
         '图像处理中，鼠标暂时不动是正常现象。' if data.get('stage') in ('align','period','stitch','export','validate','search','similarity','ready') else
         '根据图像实测位移校正；F9随时停止。')
+    discovery=data.get('discovery')
+    if data.get('stage') in ('discovery','waiting') and isinstance(discovery,dict):
+        scanned=discovery.get('bytes_scanned',0)
+        regions=discovery.get('regions_visited',0)
+        eligible=discovery.get('eligible_addresses',[])
+        if type(scanned) is int and type(regions) is int and isinstance(eligible,list):
+            body+='\n已读取 '+f'{scanned/1048576:.1f} MiB · 内存区域 '+str(regions)
+            body+=' · 活动候选 '+str(len(eligible))
+            errors=discovery.get('candidate_read_failures',0)+discovery.get('read_failures',0)
+            if errors:body+=' · 未完成读取 '+str(errors)
     return title,body
 
 

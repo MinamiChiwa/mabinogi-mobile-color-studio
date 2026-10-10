@@ -23,6 +23,7 @@ def collect_validation_session(backend, *, wait_seconds=300.,session_seconds=90.
         phase='initial_validation',phase_seconds=dict(process_identity=0.,window_context=0.,discovery=0.))
     check();start=clock();deadline=start+30.
     class Expired(Exception):pass
+    class DiscoveryBlocked(Exception):pass
     def guard():
         check()
         if clock()>=deadline:raise Expired()
@@ -33,7 +34,7 @@ def collect_validation_session(backend, *, wait_seconds=300.,session_seconds=90.
         try:return operation()
         finally:result['phase_seconds'][name]+=max(0.,clock()-began)
     def discover():
-        try:return timed('discovery',lambda:backend.discover(deadline,guard))
+        try:candidate=timed('discovery',lambda:backend.discover(deadline,guard))
         finally:
             diagnostic=getattr(backend,'last_discovery_diagnostic',None)
             if isinstance(diagnostic,dict):
@@ -42,6 +43,12 @@ def collect_validation_session(backend, *, wait_seconds=300.,session_seconds=90.
                 emit('discovery_progress',phase=result['phase'],discovery=diagnostic,
                      deadline_monotonic=deadline,phase_seconds=dict(result['phase_seconds']),
                      inputs_sent=0,ready_for_input=False)
+        diagnostic=result.get('discovery_progress',{})
+        if diagnostic.get('census_finished') is True and diagnostic.get('status')=='coverage_incomplete':
+            emit('discovery_blocked',phase=result['phase'],discovery=diagnostic,
+                 stop_reason='discovery_read_failure',inputs_sent=0,ready_for_input=False)
+            raise DiscoveryBlocked()
+        return candidate
     def discovery_complete():
         # Injected legacy backends return None only after a completed census.
         diagnostic=result.get('discovery_progress')
@@ -173,6 +180,10 @@ def collect_validation_session(backend, *, wait_seconds=300.,session_seconds=90.
                     result['stop_reason']='read_failure_limit';break
             pause(min(poll_seconds,max(0.,deadline-clock())))
         else:result['stop_reason']='sample_limit'
+    except DiscoveryBlocked:
+        result['stop_reason']='discovery_read_failure'
+    except InterruptedError as exc:
+        result.update(stop_reason='interrupted',error=str(exc),interrupted=True)
     except Expired:
         diagnostic=result.get('discovery_progress',{})
         if result['phase']=='initial_validation':result['stop_reason']='initial_validation_timeout'

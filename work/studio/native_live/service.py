@@ -104,7 +104,7 @@ def run_native_search(owner,rules,*,mode='search',target=None,activate=False,**u
     def event(row):
         name=row['event'];stage={'armed':'waiting','session_discovered':'capture','palette_captured':'native_validate',
             'initial_validation':'native_validate','process_bound':'native_validate','window_validated':'native_validate',
-            'discovery_progress':'discovery',
+            'discovery_progress':'discovery','discovery_blocked':'discovery',
             'planning':'search','action':'position','observed':'verify','initial_visual_wait':'native_validate',
             'compromise_selected':'position','observation_wait':'verify','target_approach':'position',
             'refinement_planning':'search','refinement_search_progress':'search'}.get(name)

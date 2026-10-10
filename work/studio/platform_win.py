@@ -5,7 +5,7 @@ import numpy as np
 from PIL import ImageGrab
 from window_target import resolve_target,valid_target,WindowUnavailable
 from window_dpi import physical_pixel_context,target_pixel_context
-from overlay_native import capture_scope
+from overlay_native import capture_scope,input_scope
 from input_gestures import (drag_gesture, grouped_rotation_gesture, rotation_path,
                             wheel_gesture, path_gesture)
 
@@ -79,8 +79,11 @@ class Game:
         self.initial=self.geometry()
         return self.capture()
     def send(self,flags,dx=0,dy=0,data=0):
-        event=Input(type=0,mi=Mouse(dx,dy,data&0xffffffff,flags,0,0))
-        if u.SendInput(1,C.byref(event),C.sizeof(Input))!=1:raise RuntimeError('Windows 未接受鼠标输入。请检查游戏与工具是否使用相同权限运行。')
+        # Gesture scopes retain suppression across down/path/up. Standalone
+        # cleanup releases and cursor parking must obey the same hit boundary.
+        with input_scope():
+            event=Input(type=0,mi=Mouse(dx,dy,data&0xffffffff,flags,0,0))
+            if u.SendInput(1,C.byref(event),C.sizeof(Input))!=1:raise RuntimeError('Windows 未接受鼠标输入。请检查游戏与工具是否使用相同权限运行。')
     def move_to(self,p):
         with physical_pixel_context():
             x,y,w,h=self.geometry(); vx,vy=u.GetSystemMetrics(76),u.GetSystemMetrics(77)
@@ -90,6 +93,8 @@ class Game:
         return self.perform_gesture(path_gesture(points,right,absolute))
     def perform_gesture(self,gesture):
         """Send the already planned integer descriptor without regenerating it."""
+        with input_scope():return self._perform_gesture(gesture)
+    def _perform_gesture(self,gesture):
         self.check()
         self.last_gesture=gesture
         if not gesture.has_effect:return False
@@ -147,9 +152,10 @@ class Game:
     def wheel(self,board,steps,anchor=None):
         return self.perform_gesture(wheel_gesture(board,steps,anchor))
     def click(self,p):
-        self.check(); self.move_to(p); time.sleep(.06); self.send(2)
-        try:time.sleep(.09)
-        finally:self.send(4)
+        with input_scope():
+            self.check(); self.move_to(p); time.sleep(.06); self.send(2)
+            try:time.sleep(.09)
+            finally:self.send(4)
     def escape(self):
         self.check()
         for flag in [0,2]:

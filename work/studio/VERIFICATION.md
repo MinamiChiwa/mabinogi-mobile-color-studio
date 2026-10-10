@@ -1,5 +1,13 @@
 # Current verification scope
 
+## Candidate 0.4.1rc2: Typed discovery and interactive overlay (2026-10-11)
+
+Policy: `native-typed-discovery-interactive-overlay-v18`. The supplied rc1 session found an active palette but two invalid class-pattern matches repeatedly failed at low read addresses and blocked seven completed censuses. Scan-local structural validation now rejects readable invalid shapes while legitimate-address read errors still prevent uniqueness. A real failed census ends with an explicit reason, and F9 returns partial diagnostics for baseline persistence. Eighty-six focused scanner/reader/service checks passed; an independent review ran40 matching checks and found no blocker. Root ran78 related scan/status/language checks successfully.
+
+Ordinary-screen read-only validation on the user's restarted game emitted armed, waited30 seconds and sent zero input. Its uninitialized dye class does not establish an active palette capture. No dye item was consumed. Interactive overlay controls now use a narrow per-window mouse-activation subclass plus a Tk global-focus binding barrier. Full registered overlays are hidden only during actual input, with finally restoration and capture exclusion preserved. Fifty-one overlay/input/DPI checks passed, including native hit tests, dummy-window control events, input hiding, screenshot comparisons and10 lifecycle/scale/GC repetitions. Real in-game candidate switching remains unverified in this revision; GitHub publication is paused.
+
+Final quick regression:581 tests,580 passed,1 optional private OCR skipped,zero failures/errors;68.922s total. Thirty-six candidate/overlay completion, atlas, two-region and language checks passed separately. No production search budget was increased. Invalid-address classification was independently reviewed and40 literal-reader/discovery cases passed; no confirmed blocker was found.
+
 ## Candidate 0.4.1rc1: Ranked native alternatives (2026-10-11)
 
 Policy: `native-ranked-candidate-selection-v17`. This candidate has not been published. Native candidates remain in the same bound session and IO lifecycle; a target hit no longer removes other audited choices. Explicit choices recompile from measured state with protected returns, and final acceptance uses current actual HEX. The topmost selection surface is interactive without activation; execution remains pass-through. Completion restores main controls and provides a read-only list. Simplified Chinese, Traditional Chinese and English copy is synchronized.

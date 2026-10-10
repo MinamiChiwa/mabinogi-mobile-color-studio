@@ -121,6 +121,10 @@ class SearchOverlay(ct.CTkToplevel):
         self.heading.bind('<Button-1>',self._drag_start)
         self.heading.bind('<B1-Motion>',self._drag)
         self.heading.bind('<ButtonRelease-1>',self.save_position)
+        # CTkToplevel installs a global Button-1 focus_set handler. Child
+        # handlers run before this toplevel tag; stop only the later global
+        # focus handler so overlay chrome works without activating the game.
+        self.bind('<Button-1>',lambda _event:'break',add='+')
         self.update_idletasks()
         self._prepare_native()
         self.bind('<Map>',self._native_mapped,add='+')
@@ -217,7 +221,10 @@ class SearchOverlay(ct.CTkToplevel):
         self._native_run=False
         self._native_candidate_run=False;self._native_candidate_batch=None;self._native_candidate_closed=False
         self.stop_button.configure(text='停止 F9',command=self.stop_action)
-        self._passive_input=bool(passive)
+        # Older callers pass passive=True for native runs. Controls must stay
+        # reachable while reading/planning; Game scopes suppress the surface
+        # only around an actual gesture, without changing the foreground.
+        self._passive_input=False
         self._started=time.monotonic();self._stage_started=self._started;self._stage=None;self._deadline=None
         position=self.preferences.get('overlay_position',[20,100])
         # Width/height returned by winfo are native physical pixels.  Using
@@ -316,7 +323,7 @@ class SearchOverlay(ct.CTkToplevel):
         self._native_candidate_batch=data['batch_id']
         self.phase='verified' if readonly else 'choosing' if ready else 'computing'
         if readonly:self.batch_id=None;self.selection_sent=True
-        self.set_passive_input(not (ready or readonly))
+        self.set_passive_input(False)
         self.activity.stop();self.activity.set(1)
         self._deadline=data.get('effective_deadline')
         for row in owned['candidates']:
@@ -366,7 +373,7 @@ class SearchOverlay(ct.CTkToplevel):
         if getattr(self,'_native_candidate_run',False):
             row=next((row for row in self._candidate_data['candidates'] if row['id']==candidate_id),None)
             if not row or not row.get('available',True) or candidate_id==self.default_candidate_id:return
-            self.phase='positioning';self.set_passive_input(True)
+            self.phase='positioning';self.set_passive_input(False)
         self.selection_sent=True
         for button in self.candidate_rows.values():button.configure(state='disabled')
         self.select_candidate(batch_id,candidate_id)
@@ -453,7 +460,7 @@ class SearchOverlay(ct.CTkToplevel):
                 self.show_native_candidates(self.update_native_observation(data),readonly=True);return
             status=data.get('status')
             if status=='positioning':
-                self.phase='positioning';self.selection_sent=True;self.set_passive_input(True)
+                self.phase='positioning';self.selection_sent=True;self.set_passive_input(False)
                 for button in self.candidate_rows.values():button.configure(state='disabled')
                 self.render('正在定位所选方案','正在核对当前游戏色码。');return
             if status in ('observed','current','restored') and data.get('screenshot_verified'):
@@ -470,7 +477,7 @@ class SearchOverlay(ct.CTkToplevel):
             return
         if kind in ('native_progress','native_result'):
             self._native_run=True
-            if not getattr(self,'_passive_input',False):self.set_passive_input(True)
+            if getattr(self,'_passive_input',False):self.set_passive_input(False)
         if kind=='finished' and getattr(self,'_native_run',False):
             # Native results remain in the main window and history. Its
             # topmost surface must release the underlying controls when the

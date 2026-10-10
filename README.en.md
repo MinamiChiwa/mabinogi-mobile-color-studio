@@ -32,7 +32,7 @@ When leather, wood or another material’s base palette lacks pure black or whit
 - Current colors, alternatives, enabled regions, matching modes, tolerances, priorities and search strategy save automatically and restore next time.
 - Save preset manages named configurations: save current settings, edit or rename independently, load, and delete. Editing a preset changes the main configuration only when loaded.
 - Results retain the last 50 color combinations and their measured ΔE. Presets and result history are stored separately.
-- Simplified Chinese, Traditional Chinese and English are supported. The resizable window rearranges cards into one, two or three columns. The topmost overlay passes mouse input through during execution; candidate selection remains clickable without taking game focus.
+- Simplified Chinese, Traditional Chinese and English are supported. The resizable window rearranges cards into one, two or three columns. The topmost overlay supports clicks and dragging without taking game focus. It briefly hides while sending a game gesture, then returns.
 - Data defaults to `data` beside the app. A nonwritable folder falls back to `%LOCALAPPDATA%\MabinogiMobileColorStudio\data`, then to the temporary directory.
 - Diagnostics retain the latest three sessions while protecting active records. Temporary data may be cleared by Windows.
 
