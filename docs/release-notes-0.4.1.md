@@ -1,4 +1,4 @@
-# 0.4.1 — 候选选择与双区域适配（发布草稿）
+# 0.4.1 — 候选选择、双区域适配与扫描/浮窗修复
 
 ## 简体中文
 
@@ -9,7 +9,7 @@
 - 初始化扫描保留进度，准确区分未完成、多个候选和无活动色板；进程权限拒绝提供同权限启动指导。
 - 完成后释放主界面操作，并支持重新查看只读候选。简中、繁中、英语文案和教程同步更新。
 
-本地候选版正在验证，暂未公开发布。预测不代表游戏实测，多色精准及所有硬件环境不保证成功。程序不会自动开启染色或套用结果。
+预测不代表游戏实测，多色精准及所有硬件环境不保证成功。程序不会自动开启染色或套用结果。
 
 ## 繁體中文
 
@@ -20,7 +20,7 @@
 - 初始化掃描保留進度，正確區分未完成、多個候選與無活動色板；程序存取權限遭拒時提供相同權限執行指引。
 - 完成後釋放主畫面操作，並支援重新查看唯讀候選。簡中、繁中、英文文案與教學同步更新。
 
-本機候選版正在驗證，尚未公開發布。預測不代表遊戲實測，多色精準與所有硬體環境不保證成功。程式不會自動開啟染色或套用結果。
+預測不代表遊戲實測，多色精準與所有硬體環境不保證成功。程式不會自動開啟染色或套用結果。
 
 ## English
 
@@ -31,4 +31,4 @@ Local rc2 fixes repeated palette-scan blockage caused by invalid memory pattern 
 - Initialization scans retain progress and distinguish incomplete discovery, multiple candidates and no active board. Process-access denials provide guidance for matching privilege levels.
 - Completion releases main-window controls and allows reopening a read-only candidate list. Simplified Chinese, Traditional Chinese and English copy and tutorials are updated together.
 
-The local candidate is being verified and has not been publicly released. Predictions are not measured game results. Multiple exact matches and every hardware environment are not guaranteed. The tool never opens a dye round or applies its result automatically.
+Predictions are not measured game results. Multiple exact matches and every hardware environment are not guaranteed. The tool never opens a dye round or applies its result automatically.

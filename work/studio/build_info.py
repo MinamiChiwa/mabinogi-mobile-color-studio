@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import sys
 
-APP_VERSION = '0.4.1rc2'
+APP_VERSION = '0.4.1'
 POLICY_REVISION = 'native-typed-discovery-interactive-overlay-v18'
 
 
