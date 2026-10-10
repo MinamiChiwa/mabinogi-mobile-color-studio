@@ -5,8 +5,8 @@ import json
 from pathlib import Path
 import sys
 
-APP_VERSION = '0.4.1'
-POLICY_REVISION = 'native-dynamic-dye-regions-v16'
+APP_VERSION = '0.4.1rc1'
+POLICY_REVISION = 'native-ranked-candidate-selection-v17'
 
 
 def source_identity(root):

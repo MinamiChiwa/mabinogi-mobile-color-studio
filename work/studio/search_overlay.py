@@ -86,7 +86,7 @@ class SearchOverlay(ct.CTkToplevel):
         super().__init__(parent)
         self.withdraw();self.overrideredirect(True);self.attributes('-topmost',True)
         self.configure(fg_color='#131F2C');self.rules=[];self.phase='waiting';self._text=None
-        self.select_candidate=select_candidate;self.candidate_rows={};self.batch_id=None
+        self.select_candidate=select_candidate;self.candidate_rows={};self.batch_id=None;self.stop_action=stop
         self.default_candidate_id=None
         self.settings_path=settings_path;self.preferences=read_settings(settings_path) if settings_path else {}
         self._collapsed=False;self._has_results=False;self._heartbeat_job=None;self._alpha_job=None
@@ -215,6 +215,8 @@ class SearchOverlay(ct.CTkToplevel):
     def begin(self,rules,*,passive=False):
         self._dismissed=False
         self._native_run=False
+        self._native_candidate_run=False;self._native_candidate_batch=None;self._native_candidate_closed=False
+        self.stop_button.configure(text='停止 F9',command=self.stop_action)
         self._passive_input=bool(passive)
         self._started=time.monotonic();self._stage_started=self._started;self._stage=None;self._deadline=None
         position=self.preferences.get('overlay_position',[20,100])
@@ -261,7 +263,10 @@ class SearchOverlay(ct.CTkToplevel):
         self._candidate_data=dict(data,candidates=list(data.get('candidates',[])))
         rows=data.get('candidates',[])
         default=data.get('default_id');self.default_candidate_id=default
-        if data.get('compromise_only') or data.get('family_unavailable'):
+        native=data.get('strategy')=='native'
+        if native:
+            self.render('本轮候选方案','候选按区域优先级与色差排序')
+        elif data.get('compromise_only') or data.get('family_unavailable'):
             self.render('自动定位最接近方案',data.get('message') or
                         '未找到满足所设目标的组合，正在定位最接近的妥协方案。')
         else:
@@ -278,13 +283,13 @@ class SearchOverlay(ct.CTkToplevel):
                         font=SMALL_FONT,text_color='#F2C879',wraplength=520,
                         anchor='w',justify='left').pack(fill='x',padx=6,pady=(0,5))
         for row in rows:
-            result=data.get('observations',{}).get(row['id']) if row['id']==default else None
+            result=data.get('observations',{}).get(row['id']) if native or row['id']==default else None
             shown=candidate_display(row,result)
             frame=ct.CTkFrame(self.candidate_container);frame.pack(fill='x',pady=4)
             title=('当前方案 · 游戏实测' if row['id']==default else '已测试方案 · 游戏实测') if shown['measured'] else '候选方案 · 预测颜色'
             ct.CTkLabel(frame,text=title,font=BODY_FONT).pack(anchor='w',padx=6,pady=(4,2))
             for i,(color,delta) in enumerate(zip(shown['colors'],shown['deltas'])):
-                text=f'区域 {i+1}  {color}   ΔE {delta:.2f}' if delta is not None else f'区域 {i+1}  未参与匹配'
+                text=f'区域 {i+1}  {color}   ΔE {delta:.2f}' if delta is not None else f'区域 {i+1}  '+(color+' · ' if color else '')+'未参与匹配'
                 line=ct.CTkFrame(frame,fg_color='transparent');line.pack(fill='x',padx=6)
                 ct.CTkLabel(line,text='',width=18,height=18,fg_color=color or '#333333').pack(side='left',padx=(0,6))
                 ct.CTkLabel(line,text=text,font=BODY_FONT).pack(side='left')
@@ -299,7 +304,49 @@ class SearchOverlay(ct.CTkToplevel):
             button.pack(fill='x',padx=6,pady=6);self.candidate_rows[row['id']]=button
         if default in self.candidate_rows:
             measured=bool(data.get('observations',{}).get(default,{}).get('verified'))
-            self.candidate_rows[default].configure(text='自动方案（当前）' if measured else '正在定位此方案')
+            self.candidate_rows[default].configure(text=('当前方案（实测）' if measured else '当前方案')
+                                                  if native else '自动方案（当前）' if measured else '正在定位此方案')
+    def show_native_candidates(self,data,*,ready=False,readonly=False):
+        """Keep the worker's ranked targets separate from measured observations."""
+        owned=dict(data,strategy='native',default_id=data.get('current_candidate_id',data.get('default_id')),
+                   candidates=[dict(row) for row in data.get('candidates',[])],
+                   observations=dict(data.get('observations',{})))
+        self.show_candidates(owned)
+        self._native_run=True;self._native_candidate_run=True
+        self._native_candidate_batch=data['batch_id']
+        self.phase='verified' if readonly else 'choosing' if ready else 'computing'
+        if readonly:self.batch_id=None;self.selection_sent=True
+        self.set_passive_input(not (ready or readonly))
+        self.activity.stop();self.activity.set(1)
+        self._deadline=data.get('effective_deadline')
+        for row in owned['candidates']:
+            enabled=(ready and not readonly and row.get('available',True)
+                     and row['id']!=owned['default_id'] and self.select_candidate is not None)
+            self.candidate_rows[row['id']].configure(state='normal' if enabled else 'disabled')
+        self.render('本轮候选方案','候选选择已结束，以下方案仅供查看。' if readonly else
+                    '当前颜色已复核，可选择其他方案。' if ready else '候选按区域优先级与色差排序')
+        if ready:
+            self.copy.configure(text=tr('当前颜色已复核，可选择其他方案。')+'\n'+
+                                tr('候选按区域优先级与色差排序')+'\n'+
+                                tr('可选择其他方案，切换前会核对剩余时间和返回路线。实际染色请在游戏内手动确认。'))
+    def update_native_observation(self,data):
+        owned=dict(self._candidate_data,observations=dict(self._candidate_data.get('observations',{})))
+        colors=data.get('actual_colors') or data.get('current_colors')
+        candidate_id=data.get('current_candidate_id')
+        if candidate_id is None and data.get('status')!='restored':candidate_id=data.get('candidate_id')
+        if candidate_id is None and colors:
+            candidate_id=next((row['id'] for row in owned['candidates'] if row['colors']==colors),None)
+        owned['current_candidate_id']=candidate_id;owned['default_id']=candidate_id
+        if data.get('verified') and data.get('screenshot_verified') and candidate_id is not None:
+            owned['observations'][candidate_id]=dict(data,actual_colors=colors)
+        return owned
+    def reopen_native_candidates(self):
+        data=getattr(self,'_candidate_data',None)
+        if not getattr(self,'_native_candidate_run',False) or not data:return
+        self._dismissed=False
+        self.show_native_candidates(data,readonly=True)
+        self.stop_button.configure(text='关闭候选',command=self.dismiss)
+        self._prepare_native();self.deiconify();self._prepare_native()
     def show_default_verification(self,data):
         result=data.get('result',data)
         colors=result.get('actual_colors')
@@ -316,6 +363,10 @@ class SearchOverlay(ct.CTkToplevel):
     def choose(self,batch_id,candidate_id):
         if (getattr(self,'phase',None)!='choosing' or getattr(self,'selection_sent',False) or
                 batch_id!=self.batch_id or candidate_id not in self.candidate_rows):return
+        if getattr(self,'_native_candidate_run',False):
+            row=next((row for row in self._candidate_data['candidates'] if row['id']==candidate_id),None)
+            if not row or not row.get('available',True) or candidate_id==self.default_candidate_id:return
+            self.phase='positioning';self.set_passive_input(True)
         self.selection_sent=True
         for button in self.candidate_rows.values():button.configure(state='disabled')
         self.select_candidate(batch_id,candidate_id)
@@ -388,6 +439,35 @@ class SearchOverlay(ct.CTkToplevel):
             if data.get('region_count')==2:
                 self.render('已识别双区域色板','已识别 2 个染色区域，区域 3 本局不可用。')
             return
+        if kind in ('native_candidates','native_candidate_ready'):
+            if (getattr(self,'_native_candidate_batch',None) is not None
+                    and data.get('batch_id')!=self._native_candidate_batch):return
+            if getattr(self,'_native_candidate_closed',False):return
+            if kind=='native_candidates':self._native_candidate_closed=False
+            self.show_native_candidates(data,ready=kind=='native_candidate_ready');return
+        if kind in ('native_candidate_selected','native_candidate_closed'):
+            if (data.get('batch_id')!=getattr(self,'_native_candidate_batch',None) or
+                    getattr(self,'_native_candidate_closed',False)):return
+            if kind=='native_candidate_closed' or data.get('status')=='expired':
+                self._native_candidate_closed=True
+                self.show_native_candidates(self.update_native_observation(data),readonly=True);return
+            status=data.get('status')
+            if status=='positioning':
+                self.phase='positioning';self.selection_sent=True;self.set_passive_input(True)
+                for button in self.candidate_rows.values():button.configure(state='disabled')
+                self.render('正在定位所选方案','正在核对当前游戏色码。');return
+            if status in ('observed','current','restored') and data.get('screenshot_verified'):
+                self.show_native_candidates(self.update_native_observation(data))
+                self.render('所选方案已复核','当前颜色已复核，可选择其他方案。')
+            elif status=='rejected':
+                from native_status import candidate_reason_text
+                self.show_native_candidates(self._candidate_data,ready=True)
+                self.render('已保留当前方案',candidate_reason_text(data.get('reason')))
+            elif status=='recovery_unconfirmed':
+                self._native_candidate_closed=True
+                self.show_native_candidates(self._candidate_data,readonly=True)
+                self.render('已停止自动移动','请以游戏当前颜色为准。')
+            return
         if kind in ('native_progress','native_result'):
             self._native_run=True
             if not getattr(self,'_passive_input',False):self.set_passive_input(True)
@@ -407,7 +487,11 @@ class SearchOverlay(ct.CTkToplevel):
         if kind=='native_result':
             from native_status import result_text
             self.activity.stop();self.activity.set(1)
-            self.show_recovery(data)
+            if getattr(self,'_native_candidate_run',False) and getattr(self,'_candidate_data',None):
+                owned=self.update_native_observation(data)
+                self._native_candidate_closed=True
+                self.show_native_candidates(owned,readonly=True)
+            else:self.show_recovery(data)
             self.render(*result_text(data));return
         if kind=='atlas_command':
             self.phase='positioning';self.update_activity({'stage':'position'})

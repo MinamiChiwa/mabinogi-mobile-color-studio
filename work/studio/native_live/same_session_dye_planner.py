@@ -229,6 +229,7 @@ def _plan_fingerprint(plan):
                  'nearest_diagnostic','reachability_conclusion')
     if plan.get('schema',1)>=3:fields+=('compromise_candidate',)
     if plan.get('schema',1)>=4:fields+=('approach_candidate',)
+    if plan.get('schema',1)>=5:fields+=('candidate_pool',)
     return hashlib.sha256(_json({key:plan[key] for key in fields}).encode()).hexdigest()
 
 
@@ -361,7 +362,7 @@ def _refine_single_wheels(session,pose,geometry,settings,rules,seeds,*,now,deadl
 
 def plan_from_checkpoint(context, checkpoint, frames, rules, grid, *, now, engineering_deadline,
         time_budget_seconds=12., reserve_seconds=EXECUTION_RESERVE_SECONDS, verification_margin_seconds=8., clock=time.monotonic,
-        check=lambda:None):
+        check=lambda:None,collect_candidates=False):
     """Rebase the existing fresh search on the observed pose, with bounded time.
 
     No recorded routes or after-action pose enter the search. Caller grid is
@@ -383,6 +384,7 @@ def plan_from_checkpoint(context, checkpoint, frames, rules, grid, *, now, engin
         candidate=None,feedback=feedback,ready_for_input=False,game_response_verified=False,
         live_closed_loop_verified=False,server_confirmation_verified=False,
         seed_mode='fresh_from_current_checkpoint',stop_reason='insufficient_time')
+    if collect_candidates:result.update(schema=5,candidate_pool=[])
     prepared=max(0.,clock()-started);search_now=now+prepared
     result['planned_at']=search_now
     if search_now+verification_margin_seconds>=end or prepared>=time_budget_seconds:
@@ -413,6 +415,21 @@ def plan_from_checkpoint(context, checkpoint, frames, rules, grid, *, now, engin
                 or rank(row)<rank(result['nearest_diagnostic'])):
             result['nearest_diagnostic']=audit_candidate_endpoint(context,checkpoint,rules,row,check=check)
     def finish(candidate,reason):
+        if collect_candidates:
+            # Candidate collection owns its finite allowance inside this same
+            # planning budget. It never starts a second global search after a
+            # target hit, nor substitutes a mathematical pose for a route.
+            from .candidate_selection import collect_candidate_pool
+            accepted=candidate if isinstance(candidate,list) else [candidate] if candidate else []
+            retained=[stationary_row,*accepted,*compromise_rows.values()]
+            retained.extend(row for row in (result.get('nearest_diagnostic'),
+                result.get('approach_candidate'),result.get('compromise_candidate')) if row)
+            result['candidate_pool']=collect_candidate_pool(context,checkpoint,rules,retained,
+                proposals=_local_input_candidates(geometry,settings),
+                deadline=min(started+time_budget_seconds-.05,clock()+.8),
+                clock=clock,check=check,max_proposals=160)
+            target=[row for row in result['candidate_pool'] if row['prediction']['predicted_accepted']]
+            if target:candidate=target
         if not candidate and compromise_rows:
             selected=choose_compromise(context,checkpoint,rules,
                 [stationary_row,*sorted(compromise_rows.values(),key=lambda row:(*predicted_quality(row['prediction'],rules),row['needed']))[:16]],
@@ -425,13 +442,13 @@ def plan_from_checkpoint(context, checkpoint, frames, rules, grid, *, now, engin
         completed=max(0.,clock()-started);result['planned_at']=now+completed
         def fits(row):return row is not None and now+completed+row['needed']+verification_margin_seconds<end
         if isinstance(candidate,list):candidate=next((row for row in candidate if fits(row)),None)
-        if completed>=time_budget_seconds:candidate=None;reason='search_budget_exhausted'
+        if completed>=time_budget_seconds and not collect_candidates:candidate=None;reason='search_budget_exhausted'
         if not fits(candidate):candidate=None
         if not fits(result['nearest_diagnostic']):result['nearest_diagnostic']=None
         if not fits(result['compromise_candidate']):result['compromise_candidate']=None
         if not fits(result['approach_candidate']):result['approach_candidate']=None
-        if completed>=time_budget_seconds:result['compromise_candidate']=None
-        if completed>=time_budget_seconds:result['approach_candidate']=None
+        if completed>=time_budget_seconds and not collect_candidates:result['compromise_candidate']=None
+        if completed>=time_budget_seconds and not collect_candidates:result['approach_candidate']=None
         classification=('predicted_exact' if candidate['prediction']['target_exact'] else 'predicted_within_tolerance') if candidate else 'not_found_in_budget'
         if candidate is None and now+completed+_needed([],3.,.5)+verification_margin_seconds>=end:
             classification='insufficient_time'
@@ -441,6 +458,9 @@ def plan_from_checkpoint(context, checkpoint, frames, rules, grid, *, now, engin
             result.update(result_classification='model_target_approach',stop_reason='model_target_approach')
         result['plan_fingerprint']=_plan_fingerprint(result)
         return result
+    if collect_candidates and stationary['predicted_accepted']:
+        return finish(audit_candidate_endpoint(context,checkpoint,rules,stationary_row,check=check),
+            'predicted_candidate')
     # A continuous pose grid can miss a reachable integer micro drag. Generate
     # this bounded neighborhood from geometry alone, never from a live receipt.
     result['local_integer_candidates_evaluated']=0

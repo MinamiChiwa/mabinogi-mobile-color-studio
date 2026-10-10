@@ -25,6 +25,8 @@ def verify(release,source):
     required={'app','build_info','profile_store','ui_presets','ui_dialogs','ui_strings','region_priority','dye_regions','process_access',
               'candidate_ranking','resize_surface','native_status','native_input_compile',
               'native_live.controller','native_live.same_session_dye_planner','native_live.compromise',
+              'native_live.candidate_selection','native_live.collect_dye_validation',
+              'native_live.native_provider_backend','native_live.scan_live_dye',
               'native_live.project_probe_io','native_live.project_closed_loop_io','native_live.service',
               'native_live.read_dye_window_mapping','native_live.runtime_read','overlay_native','search_overlay'}
     comparisons={}

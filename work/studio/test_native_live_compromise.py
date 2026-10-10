@@ -173,11 +173,26 @@ class NativeCompromiseTests(unittest.TestCase):
         result=run_goal_loop(c,c.session,c.settings,self.rules,engineering_deadline=90.,clock=c.clock,planner=forced)
         self.assertTrue(result['best_current'])
         self.assertLess(result['maximum'],result['initial_maximum'])
-        # Optional protected refinement follows restoration. The original
-        # positioning/restore phase itself still has at most four inputs.
+        # The compiler may need a drag plus a non-reciprocal wheel pair for
+        # the return. Verify the complete measured return rather than impose
+        # an obsolete two-gesture route ceiling.
         original_steps=[s for s in result['steps'] if s['purpose'] not in ('refine','restore_refinement')]
-        self.assertGreater(len(original_steps),2);self.assertLessEqual(len(original_steps),4)
+        self.assertGreater(len(original_steps),2)
+        self.assertTrue(all(s['receipt']['completed'] is True for s in original_steps))
+        restored=[s for s in original_steps if s['purpose']=='restore_best']
+        self.assertTrue(restored)
+        self.assertEqual(restored[-1]['after']['client_hex'],original_steps[0]['after']['client_hex'])
+        self.assertTrue(restored[-1]['screenshot_verified'])
+        self.assertEqual(len(restored[-1]['after_frames']),2)
+        self.assertTrue(all(frame['hex']==restored[-1]['after']['client_hex']
+            for frame in restored[-1]['after_frames']))
+        for step in restored:
+            replayed=replay_native_route(step['before']['pose'],[step['requested_gesture']],
+                c.geometry,c.settings,wheel_delta_per_step=1.,sample_policy='all_recorded_points')['final_pose']
+            self.assertEqual(step['after']['pose'],replayed)
         self.assertLessEqual(len(c.actions),64)
+        self.assertTrue(result['verified']);self.assertTrue(result['screenshot_verified'])
+        self.assertEqual(result['actual_colors'],result['best_actual_colors'])
         self.assertEqual(result['stop_reason'],'compromise_observed')
 
 

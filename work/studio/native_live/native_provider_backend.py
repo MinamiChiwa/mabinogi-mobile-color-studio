@@ -5,7 +5,7 @@ from pathlib import Path
 from dye_regions import region_count,session_region_count
 from .runtime_read import Reader, K
 from .capture_dye_state import checked_object, mm_items, snapshot
-from .scan_live_dye import inspect, scan
+from .scan_live_dye import inspect, IncrementalDyeScan
 from native_palette_scoring import load_session
 from native_palette_model import picker_view_uv,distort_cpu_uv,sample_cpu,color32
 from native_runtime_bridge import read_bound_stable_pair
@@ -24,7 +24,9 @@ EXPECTED_METADATA='3f6827a41d26ab50ef0051b881cb2c6dcab0c12aab5e95cc7da0071fae63a
 UNINITIALIZED_DYE_CLASS_TOKEN=0x20035507
 
 class DyeClassUnavailable(ValueError):
-    pass
+    def __init__(self,message,*,class_value=None):
+        self.class_value=class_value
+        super().__init__(message)
 
 class GuardedReader(Reader):
     guard = staticmethod(lambda: None)
@@ -40,7 +42,8 @@ class GuardedReader(Reader):
 
 
 class CurrentBuildBackend:
-    def __init__(self, pid, *, output_root=None):
+    def __init__(self, pid, *, output_root=None,clock=time.monotonic):
+        self.clock=clock
         self.reader = GuardedReader(pid)
         self.output_root=Path(output_root) if output_root is not None else Path.cwd()/'native-captures'
         creation, exit_time, kernel, user = (wintypes.FILETIME() for _ in range(4))
@@ -74,22 +77,56 @@ class CurrentBuildBackend:
         check()
         cls = self.reader.u64(self.base + 0x106c9010)
         if cls in (0,UNINITIALIZED_DYE_CLASS_TOKEN):
-            raise DyeClassUnavailable('Dye class not initialized')
+            raise DyeClassUnavailable('Dye class not initialized',class_value=cls)
         if cls < 0x100000000 or self.reader.class_name(cls) != 'MM.Client.Presentation.UI.Instances.StageScene.Dyeing.DyeingPaletteInstanceImpl':
             raise ValueError('Dye class not initialized or build mismatch')
         return cls
 
     def discover(self, deadline, check):
+        if not math.isfinite(deadline):raise ValueError('Finite discovery deadline required')
+        started=self.clock();identity=self.process_identity();check()
         try:
-            self._bind(check)
-        except DyeClassUnavailable:
+            cls=self._bind(check)
+        except DyeClassUnavailable as exc:
+            self._discovery_scan=None
+            value=exc.class_value
+            verified=False;status='class_uninitialized'
+            if value in (0,UNINITIALIZED_DYE_CLASS_TOKEN):
+                # The exact unresolved marker was checked against this build's
+                # original DLL and a fresh process (stage43). It is distinct
+                # from an incomplete heap census or an unknown low pointer.
+                repeated=self.reader.u64(self.base+0x106c9010);check()
+                if self.process_identity()!=identity:raise OSError('Process changed during palette discovery')
+                verified=repeated==value
+                if not verified:status='class_initializing'
+            self.last_discovery_diagnostic=dict(status=status,scan_complete=False,
+                uniqueness_verified=False,eligible_addresses=[],candidate_count=0,bytes_scanned=0,
+                initial_absence_verified=verified,class_value=hex(value) if value is not None else None,
+                absence_source='current_build_unresolved_type_marker' if verified else None,
+                process_identity=identity,inputs_sent=0,ready_for_input=False,
+                discover_seconds=max(0.,self.clock()-started))
             return None
-        self.scans += 1
-        hits, _, _, _ = scan(self.reader, capture=False)
-        eligible = [h for h in hits if h['capture_eligible']]
-        if len(eligible) != 1:
-            return None
-        return int(eligible[0]['address'], 16)
+        check()
+        previous=getattr(self,'_discovery_scan',None)
+        if previous is not None and (getattr(self,'_discovery_identity',None)!=identity or previous.cls!=cls):
+            self._discovery_scan=None
+            raise OSError('Process/class changed during palette discovery')
+        if previous is None or previous.phase=='complete':
+            known=() if previous is None else tuple(previous.seen|set(previous.known))
+            self._discovery_scan=IncrementalDyeScan(self.reader,cls,clock=self.clock,known_addresses=known)
+            self._discovery_identity=identity;self.scans+=1
+        current=self._discovery_scan
+        try:
+            current.advance(deadline,check)
+            check()
+            if self.process_identity()!=identity:raise OSError('Process changed during palette discovery')
+        finally:
+            self.last_discovery_diagnostic=current.diagnostic()
+            self.last_discovery_diagnostic['discover_seconds']=max(0.,self.clock()-started)
+        diagnostic=self.last_discovery_diagnostic
+        if diagnostic['uniqueness_verified']:
+            return int(diagnostic['eligible_addresses'][0],16)
+        return None
 
     def probe(self, address, deadline, check):
         r = self.reader

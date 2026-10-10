@@ -1,6 +1,14 @@
 # Current verification scope
 
-## Release 0.4.1: Two-region dye boards (2026-10-11)
+## Candidate 0.4.1rc1: Ranked native alternatives (2026-10-11)
+
+Policy: `native-ranked-candidate-selection-v17`. This candidate has not been published. Native candidates remain in the same bound session and IO lifecycle; a target hit no longer removes other audited choices. Explicit choices recompile from measured state with protected returns, and final acceptance uses current actual HEX. The topmost selection surface is interactive without activation; execution remains pass-through. Completion restores main controls and provides a read-only list. Simplified Chinese, Traditional Chinese and English copy is synchronized.
+
+Frozen release profile:604 tests,603 passed,1 optional private OCR fixture skipped,zero failures/errors;221.860s total. Final delta checks:81 passed,zero skips/failures/errors;62.852s total. The delta covers 20 candidate contracts, initialization, service events, user wording, translation and actual measured recovery. Nine isolated native candidate Tk cases plus two existing hit-testing cases passed, including live language switching, stale batches, read-only reopening and main-control release. No new live game read, input or dye item was used. This validates local behavior and packaging contracts; real candidate switching and the remote PC's discovery speed remain unverified.
+
+The separate initial discovery fix resumes bounded heap scan slices, preserves phase diagnostics and requires full candidate revalidation. Exact repeated uninitialized markers preserve the previously verified fresh-process waiting behavior. A final unreadable candidate remains unknown and cannot establish uniqueness. Seventy-six focused initialization and related IO contracts passed; this does not prove the remote PC's discovery speed. See `docs/research/initial-discovery-timeout-2026-10-11.md`.
+
+## Pre-candidate 0.4.1: Two-region dye boards (2026-10-11)
 
 Policy: `native-dynamic-dye-regions-v16`. The two latest user records completed window/build preflight, then rejected the palette with `Only three-fragment layout validated`, before any input. No two-region capture or screenshot survived that failure. Actual two-region identification is based on the user's observation; the archive alone proves a non-three count.
 
@@ -12,7 +20,7 @@ Final release regression:536 tests,535 passed,1 optional private OCR fixture ski
 
 Final quick including its three desktop smoke contracts:502 tests,501 passed,1 skipped,zero failures/errors;43.319s execution,46.261s total. The added two-region count/model contracts remain in quick; expensive recorded search matrices remain release/research only.
 
-Remote 0.4.0 process-access follow-up:15 supplied sessions entered native validation, then Windows rejected `OpenProcess(0x410)` with error5 before any input. This is a game-process read denial, not an app-launch crash. The same read-only access request is retained; failure records now include elevation/integrity diagnostics or explicit unknowns, while the UI explains same-privilege launch and ordinary-screen preflight. No automatic privilege change occurs. Twenty-two focused contracts and a real self-process token/query check passed; a wider48-check diagnostic/service/reader/language set passed. Remote access restoration remains unverified. See `docs/research/remote-process-access-2026-10-11.md`.
+Remote 0.4.0 process-access follow-up:15 supplied sessions entered native validation, then Windows rejected `OpenProcess(0x410)` with error5 before any input. This is a game-process read denial, not an app-launch crash. The same read-only access request is retained; failure records now include elevation/integrity diagnostics or explicit unknowns, while the UI explains same-privilege launch and ordinary-screen preflight. No automatic privilege change occurs. Twenty-two focused contracts and a real self-process token/query check passed; a wider48-check diagnostic/service/reader/language set passed. The user confirmed normal use after manually running the tool as administrator. See `docs/research/remote-process-access-2026-10-11.md`.
 
 ## Release 0.4.0 (2026-10-11)
 

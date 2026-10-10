@@ -21,6 +21,8 @@ Extract the entire release and run `ColorStudio.exe`. Keep `_internal` beside it
 
 Each palette is bound to its game session. Regions share transformations; mathematical palette candidates still need an executable route and game HEX verification. Predicted colors do not prove a match. If all targets cannot be met, the tool tries to retain the best measured compromise in priority order.
 
+Other candidates remain available after a target is found, ordered by region priority and color difference. The tool positions and verifies the target when time permits; you can then select another combination in the overlay. Each switch checks the current session, full route and return allowance again. If time is insufficient, current colors are kept. Unexecuted entries are predictions, not measured results. After the run, View this round’s alternatives opens a read-only list from the main window.
+
 Two- and three-region boards are detected automatically. A two-region round uses its actual left and right regions; the third UI card is marked unavailable without changing saved settings or priorities. If only the absent third region is enabled, no input is sent and the tool asks you to enable Region 1 or 2.
 
 When leather, wood or another material’s base palette lacks pure black or white, `#000000` or `#FFFFFF` cannot be matched exactly. Refer to the game’s actual HEX values. Multiple exact matches and finding a globally optimal result within the time limit are not guaranteed.
@@ -30,13 +32,13 @@ When leather, wood or another material’s base palette lacks pure black or whit
 - Current colors, alternatives, enabled regions, matching modes, tolerances, priorities and search strategy save automatically and restore next time.
 - Save preset manages named configurations: save current settings, edit or rename independently, load, and delete. Editing a preset changes the main configuration only when loaded.
 - Results retain the last 50 color combinations and their measured ΔE. Presets and result history are stored separately.
-- Simplified Chinese, Traditional Chinese and English are supported. The resizable window rearranges cards into one, two or three columns. The topmost overlay passes game mouse input through.
+- Simplified Chinese, Traditional Chinese and English are supported. The resizable window rearranges cards into one, two or three columns. The topmost overlay passes mouse input through during execution; candidate selection remains clickable without taking game focus.
 - Data defaults to `data` beside the app. A nonwritable folder falls back to `%LOCALAPPDATA%\MabinogiMobileColorStudio\data`, then to the temporary directory.
 - Diagnostics retain the latest three sessions while protecting active records. Temporary data may be cleared by Windows.
 
 ## Diagnostics
 
-`native-window-check.ps1` performs a passive preflight on an ordinary game screen, with no input or dye item required. The accompanying `WINDOW_CHECK.zh-CN.md` provides instructions.
+`native-window-check.ps1` performs a passive preflight on an ordinary game screen, with no input or dye item required. The accompanying `WINDOW_CHECK.en.md` provides instructions.
 
 Preflight checks the current build, modules, physical client area and game coordinates. A passing preflight does not prove live dye accuracy. Several display/scaling configurations were tested; universal size, mixed-DPI or game-version support is not claimed. Stop and restart after changing the game window during a run.
 

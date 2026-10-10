@@ -39,5 +39,50 @@ class NativePresentationTests(unittest.TestCase):
         title,body=self.module().result_text(dict(verified=False,stop_reason='internal_error'))
         self.assertIn('内部',title);self.assertIn('诊断',body)
 
+    def test_incomplete_initial_scan_is_not_reported_as_no_palette(self):
+        for reason in ('initial_discovery_timeout','discovery_incomplete_timeout'):
+            with self.subTest(reason=reason):
+                title,body=self.module().result_text(dict(verified=False,stop_reason=reason))
+                self.assertIn('扫描',title)
+                self.assertIn('普通界面',body)
+                self.assertNotIn('未检测到',title)
+
+    def test_initial_context_timeout_and_ambiguous_candidates_are_distinct(self):
+        title,_=self.module().result_text(dict(verified=False,stop_reason='initial_validation_timeout'))
+        self.assertIn('初始化',title)
+        title,body=self.module().result_text(dict(verified=False,stop_reason='ambiguous_active_palette_timeout'))
+        self.assertIn('唯一',title);self.assertIn('多个',body)
+
+    def test_discovery_progress_does_not_invite_entering_before_armed(self):
+        from ui_progress import progress_text
+        title,body=progress_text(dict(stage='discovery'))
+        self.assertIn('扫描',title)
+        self.assertIn('暂时不要进入',body)
+
+    def test_explicit_measured_choice_is_not_presented_as_failed_restoration(self):
+        title,body=self.module().result_text(dict(verified=True,accepted=False,
+            stop_reason='user_candidate_observed',best_current=False))
+        self.assertIn('所选',title)
+        self.assertIn('实测色差',body)
+        self.assertNotIn('未恢复',body)
+
+    def test_candidate_rejections_are_localized_without_technical_error_text(self):
+        import i18n
+        from native_status import candidate_reason_text
+        original=i18n.language
+        try:
+            for language in ('简体中文','繁體中文','English'):
+                i18n.set_language(language)
+                for reason in ('insufficient_protected_time','candidate_compile_timeout',
+                        'insufficient_protected_actions','candidate_return_not_proven',
+                        'candidate_endpoint_not_reproduced','reference_changed',
+                        'stale_or_unknown_candidate','RuntimeError: implementation detail'):
+                    with self.subTest(language=language,reason=reason):
+                        source=candidate_reason_text(reason);text=str(i18n.tr(source))
+                        self.assertNotIn(reason,text)
+                        if language=='English':
+                            self.assertFalse(any('\u4e00'<=char<='\u9fff' for char in text),text)
+        finally:i18n.set_language(original)
+
 
 if __name__=='__main__':unittest.main()

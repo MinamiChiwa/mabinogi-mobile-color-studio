@@ -15,13 +15,16 @@ from .compromise import rebase_compromise_plan,observed_quality,predicted_qualit
 from .refinement import find_refinement,find_recovery
 from native_input_route_search import _needed
 from dye_regions import session_region_count,bind_region_rules
+from .candidate_selection import (candidate_id,candidate_observation,present_candidates,
+    compile_candidate_selection,CandidateUnavailable,exact_observed_rules,actual_colors)
 
 
 class GoalStop(Exception):pass
 
 
 def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.monotonic,
-        max_rounds=64,max_actions=64,planner=plan_from_checkpoint,event=lambda row:None,pause=time.sleep):
+        max_rounds=64,max_actions=64,planner=plan_from_checkpoint,event=lambda row:None,pause=time.sleep,
+        candidate_choice=None):
     count=session_region_count(session)
     rules=normalize_target_rules(bind_region_rules(rules,count))
     if (type(max_rounds) is not int or not 1<=max_rounds<=64 or type(max_actions) is not int or not 1<=max_actions<=64
@@ -34,6 +37,8 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
         server_confirmation_verified=False,initial_visual_retries=0,observation_retries=0,compromise_selected=False)
     compromise_route=None;compromise_template=None;best_observed=None
     target_route=None;target_template=None
+    candidate_rows=[];candidate_observations={};batch_id='native-'+str(time.monotonic_ns())
+    if candidate_choice is not None and not callable(candidate_choice):raise ValueError('Invalid candidate choice callback')
     costs=dict(native=[],visual=[],input=[])
     io.timer_grace_until=timer_grace_until
     def emit(name,**data):event(dict(event=name,at_monotonic=clock(),**data))
@@ -147,7 +152,7 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
         step=dict(before=fresh,requested_gesture=gesture,expected_pose=expected,purpose=purpose);result['steps'].append(step)
         emit('action',kind=gesture['kind'],purpose=purpose)
         performer=(getattr(io,'perform_protected_candidate',io.perform_candidate)
-            if phase_deadline is not None and purpose in ('refine','restore_refinement') else io.perform_candidate)
+            if phase_deadline is not None and purpose in ('refine','restore_refinement','select_candidate','restore_selection') else io.perform_candidate)
         began=clock();receipt=performer(gesture,label,until);step['receipt']=receipt
         costs['input'].append(max(0.,clock()-began-gesture['input_seconds']))
         if receipt.get('completed') is not True:raise GoalStop('input_outcome_unknown')
@@ -167,7 +172,7 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
         else:
             after=observe_native(label+'_native_after',until);after_frames=None
             measured=assess_native_feedback(context,after,rules,expected_pose=expected)
-            if measured['observed_target_accepted']:
+            if measured['observed_target_accepted'] and purpose not in ('select_candidate','restore_selection'):
                 # Confirm an early target hit visually. A valid bound native
                 # pose residual only rebases subsequent input; it does not
                 # repeat the costly screenshot/OCR phase mid-route.
@@ -184,6 +189,192 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
             step['model_response_warning']='model_response_mismatch'
             measured['stop_reason']='replan_required'
         return after,after_frames,measured
+
+    def retain_candidates(plan):
+        nonlocal candidate_rows
+        if candidate_choice is None:return
+        rows=plan.get('candidate_pool',[])
+        rows=[*rows,*(row for row in (plan.get('candidate'),plan.get('compromise_candidate')) if row)]
+        retained={tuple(row['actual_colors']):row for row in candidate_rows}
+        for row in rows:
+            owned=copy.deepcopy(row)
+            owned.setdefault('actual_colors',actual_colors(context,owned['final_pose']))
+            retained[tuple(owned['actual_colors'])]=owned
+        candidate_rows=sorted(retained.values(),key=lambda row:(*predicted_quality(row['prediction'],rules),
+            row['needed'],len(row['input_route'])))[:12]
+        emit('native_candidates',**present_candidates(batch_id,candidate_rows,rules,
+            cp['client_hex'],candidate_observations,deadline=end))
+
+    def candidate_choices():
+        """Retain this IO/context and reserve a checked return before any selection."""
+        nonlocal cp,frames,current,candidate_rows,best_observed
+        if candidate_choice is None or not current or not current.get('frames'):return
+        score=score_native_pose(session,cp['pose'],rules)
+        stationary=audit_candidate_endpoint(context,cp,rules,dict(input_route=[],final_pose=cp['pose'],
+            prediction=score,needed=_needed([],3.,.5),source='current_observed_reference'))
+        stationary['actual_colors']=cp['client_hex']
+        retained={tuple(row['actual_colors']):row for row in candidate_rows}
+        retained[tuple(cp['client_hex'])]=stationary
+        candidate_rows=sorted(retained.values(),key=lambda row:(*predicted_quality(row['prediction'],rules),
+            row['needed'],len(row['input_route'])))
+        if len(candidate_rows)>12:
+            candidate_rows=[row for row in candidate_rows[:11] if row['actual_colors']!=cp['client_hex']]+[stationary]
+            candidate_rows.sort(key=lambda row:(*predicted_quality(row['prediction'],rules),row['needed']))
+        result.update(candidate_batch_id=batch_id,candidate_selections=[])
+        def ready():
+            payload=present_candidates(batch_id,candidate_rows,rules,cp['client_hex'],candidate_observations,deadline=end)
+            result['candidates']=copy.deepcopy(payload['candidates']);result['candidate_observations']=copy.deepcopy(payload['observations'])
+            emit('native_candidate_ready',**payload)
+        ready()
+        close_reason='deadline'
+        def closing_allowance():return max(4.,1.5*max(costs['visual'][-3:],default=0.)+.5)+8.25
+        while clock()+closing_allowance()<end:
+            close_allowance=closing_allowance()
+            guard();began=clock();poll_end=min(end-close_allowance,began+.25)
+            selected_id=candidate_choice(batch_id,poll_end)
+            io.check(end)
+            if clock()+close_allowance>=end:break
+            guard()
+            if selected_id is None:
+                # A UI poll may return immediately. Keep guards active without
+                # consuming a search allowance or extending this session cap.
+                left=poll_end-clock()
+                if left>0:pause(left)
+                continue
+            row=next((row for row in candidate_rows if candidate_id(batch_id,row['actual_colors'])==selected_id),None)
+            if row is None:
+                emit('native_candidate_selected',batch_id=batch_id,candidate_id=selected_id,status='rejected',reason='stale_or_unknown_candidate')
+                continue
+            if row['actual_colors']==cp['client_hex']:
+                cp,frames=observe_resilient('selection_current_revalidate')
+                if row['actual_colors']==cp['client_hex']:
+                    emit('native_candidate_selected',batch_id=batch_id,candidate_id=selected_id,status='current',
+                        **candidate_observation(cp['client_hex'],rules));continue
+            # Even the cheapest choice needs fresh frames, full compilation,
+            # final frames and protected measured recovery. No partial route
+            # begins merely because its first gesture fits.
+            if clock()+24.>=end:
+                emit('native_candidate_selected',batch_id=batch_id,candidate_id=selected_id,status='rejected',reason='insufficient_protected_time')
+                continue
+            fresh,fresh_frames=observe_resilient('selection_reference')
+            cp,frames=fresh,fresh_frames
+            anchor=copy.deepcopy(current);baseline=anchor['checkpoint'];anchor_rules=exact_observed_rules(baseline['client_hex'])
+            try:
+                compiled=compile_candidate_selection(context,fresh,rules,row,
+                    deadline=min(clock()+6.,end-18.),clock=clock,
+                    check=lambda:getattr(io,'planning_check',io.check)(end))
+                route=compiled['input_route'];returns=compiled['prefix_recoveries']
+                outward,visual=route_allowance(compiled)
+                return_allowance=max((route_allowance(recovery)[0] for recovery in returns),default=0.)
+                return_actions=max((len(recovery['input_route']) for recovery in returns),default=0)+1
+                # Two measured return attempts and correction search are reserved.
+                recovery_reserve=2*(return_allowance+2.)+visual
+                if len(route)+2*return_actions>max_actions-result['actual_input_attempts']:
+                    raise CandidateUnavailable('insufficient_protected_actions')
+                if clock()+outward+recovery_reserve>=end:
+                    raise CandidateUnavailable('insufficient_protected_time')
+            except (CandidateUnavailable,ValueError,TimeoutError) as exc:
+                emit('native_candidate_selected',batch_id=batch_id,candidate_id=selected_id,status='rejected',reason=str(exc))
+                continue
+            transaction=dict(candidate_id=selected_id,anchor_colors=baseline['client_hex'],
+                target_colors=row['actual_colors'],protection_audit=compiled['protection_audit'],
+                status='admitted',return_allowance=recovery_reserve,actual_colors=None)
+            result['candidate_selections'].append(transaction)
+            emit('native_candidate_selected',batch_id=batch_id,candidate_id=selected_id,status='positioning')
+            phase_end=min(end-recovery_reserve,clock()+outward);completed=0;dirty=False
+            failure=None;selection_step_start=len(result['steps'])
+            try:
+                reference=fresh
+                for index,gesture in enumerate(route):
+                    dirty=True
+                    cp,frames,feedback=submit(gesture,'selection_'+str(len(result['candidate_selections']))+'_'+str(index),
+                        reference,'select_candidate',visual_required=index==len(route)-1,phase_deadline=phase_end)
+                    completed=index+1;reference=cp
+                    # A hit on the user's original target is an intermediate,
+                    # not permission to truncate the explicitly selected route.
+                    if result['steps'][-1].get('model_response_warning') and index+1<len(route):
+                        suffix=route[index+1:]
+                        replay=replay_native_route(cp['pose'],suffix,geometry,settings,
+                            wheel_delta_per_step=1.,sample_policy='all_recorded_points')
+                        audited=audit_candidate_endpoint(context,cp,rules,dict(input_route=suffix,
+                            final_pose=replay['final_pose'],prediction=score_native_pose(session,replay['final_pose'],rules),
+                            needed=_needed(suffix,3.,.5),source='actual_selection_suffix'))
+                        result['steps'][-1]['remaining_route_audit']=dict(reference_pose=cp['pose'],
+                            final_pose=audited['final_pose'],prediction=audited['prediction'],continued=True)
+                        emit('route_revalidated',remaining_gestures=len(suffix),reference_pose=cp['pose'],
+                            predicted_colors=audited['prediction']['colors'],purpose='select_candidate')
+                if not route:cp,frames=observe_resilient('selection_current',phase_end)
+                if not assess_feedback(context,cp,frames,compiled['selection_rules'])['observed_target_accepted']:
+                    failure='candidate_endpoint_unconfirmed'
+            except (TimeoutError,VisualNotReady,GoalStop,ValueError) as exc:
+                if isinstance(exc,GoalStop) and str(exc)!='target_visual_unconfirmed':raise
+                latest=result['steps'][-1] if len(result['steps'])>selection_step_start else None
+                completed=sum(step.get('receipt',{}).get('completed') is True
+                    for step in result['steps'][selection_step_start:])
+                if isinstance(exc,InputNotStarted):dirty=completed>0
+                if dirty and not isinstance(exc,InputNotStarted) and (latest is None or not latest.get('receipt',{}).get('completed')):
+                    raise GoalStop('input_outcome_unknown')
+                failure=str(exc)
+            if failure is None:
+                transaction.update(status='observed',actual_colors=cp['client_hex'])
+                candidate_observations[selected_id]=candidate_observation(cp['client_hex'],rules)
+                if observed_quality(cp['client_hex'],rules)<observed_quality(best_observed['checkpoint']['client_hex'],rules):
+                    best_observed=copy.deepcopy(current)
+                result.update(stop_reason='user_candidate_observed',accepted=score_codes(cp['client_hex'],rules)['accepted'])
+                emit('native_candidate_selected',batch_id=batch_id,candidate_id=selected_id,status='observed',
+                    **candidate_observations[selected_id]);ready();continue
+            transaction['failure']=failure
+            if not dirty:
+                current=anchor;cp,frames=baseline,anchor['frames']
+                emit('native_candidate_selected',batch_id=batch_id,candidate_id=selected_id,status='rejected',reason=failure)
+                ready();continue
+            # Failure returns through fresh native readback; opposite wheel
+            # descriptors or an old pose reference never authorize this input.
+            restored=False
+            for retry in range(2):
+                cp=observe_native('selection_return_reference_'+str(retry))
+                preferred=returns[min(max(completed,1),len(returns))-1]['input_route'] if returns else []
+                replay=replay_native_route(cp['pose'],preferred,geometry,settings,
+                    wheel_delta_per_step=1.,sample_policy='all_recorded_points')
+                recovery=audit_candidate_endpoint(context,cp,anchor_rules,dict(input_route=preferred,
+                    final_pose=replay['final_pose'],prediction=score_native_pose(session,replay['final_pose'],anchor_rules),
+                    needed=_needed(preferred,3.,.5),source='actual_selection_return'))
+                if not recovery['prediction']['predicted_accepted']:
+                    recovery=find_recovery(context,cp,baseline,anchor_rules,
+                        deadline=min(clock()+2.,end-8.),clock=clock,
+                        check=lambda:getattr(io,'planning_check',io.check)(end),preferred_routes=(preferred,))
+                if recovery is None:continue
+                allowance,_=route_allowance(recovery)
+                if len(recovery['input_route'])>max_actions-result['actual_input_attempts'] or clock()+allowance>=end:break
+                reference=cp;return_route=recovery['input_route'];return_end=min(end-8.,clock()+allowance)
+                for index,gesture in enumerate(return_route):
+                    cp,frames,feedback=submit(gesture,'selection_return_'+str(retry)+'_'+str(index),reference,
+                        'restore_selection',visual_required=index==len(return_route)-1,phase_deadline=return_end)
+                    reference=cp
+                if not return_route:cp,frames=observe_resilient('selection_return_current',return_end)
+                if assess_feedback(context,cp,frames,anchor_rules)['observed_target_accepted']:
+                    restored=True;break
+            if not restored:
+                transaction['status']='recovery_unconfirmed'
+                emit('native_candidate_selected',batch_id=batch_id,candidate_id=selected_id,status='recovery_unconfirmed',reason=failure)
+                raise GoalStop('candidate_recovery_unconfirmed')
+            transaction.update(status='restored',actual_colors=cp['client_hex'])
+            result['accepted']=score_codes(cp['client_hex'],rules)['accepted']
+            restored_id=next((candidate_id(batch_id,row['actual_colors']) for row in candidate_rows
+                if row['actual_colors']==cp['client_hex']),None)
+            emit('native_candidate_selected',batch_id=batch_id,candidate_id=restored_id,status='restored',reason=failure,
+                failed_candidate_id=selected_id,current_candidate_id=restored_id,
+                **candidate_observation(cp['client_hex'],rules));ready()
+        result['candidate_selection_close']=close_reason
+        # Waiting is not evidence that the board stayed at its last measured
+        # pose. Re-read two frames before exposing a final current result.
+        result['last_verified_candidate_colors']=cp['client_hex']
+        cp,frames=observe_resilient('candidate_wait_closed')
+        final_id=next((candidate_id(batch_id,row['actual_colors']) for row in candidate_rows
+            if row['actual_colors']==cp['client_hex']),None)
+        emit('native_candidate_closed',batch_id=batch_id,reason=close_reason,current_colors=cp['client_hex'],
+            current_candidate_id=final_id,**candidate_observation(cp['client_hex'],rules))
+        result['current_candidate_id']=final_id
 
     def protected_refinement():
         """Spend only time left after reserving a measured, audited return."""
@@ -424,6 +615,14 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
             emit('observed',colors=cp['client_hex'],remaining_seconds=frames[-1]['remaining_seconds'])
             if observed['stop_reason']=='target_visual_unconfirmed':raise GoalStop('target_visual_unconfirmed')
             if observed['observed_target_accepted']:
+                if candidate_choice is not None and not candidate_rows:
+                    p=cp['pose'];x,y=p['position'];s=p['scale']
+                    grid=PoseGrid((x-.04,x+.04),(y-.02,y+.02),9,5,
+                        (s*.99,s,s*1.01,s*.9999),(p['rotation_degrees'],))
+                    plan=planner(context,cp,frames,rules,grid,now=clock(),engineering_deadline=end,
+                        time_budget_seconds=min(25.,max(.01,end-clock()-15)),clock=clock,
+                        check=lambda:getattr(io,'planning_check',io.check)(end),collect_candidates=True)
+                    result['planning_rounds'].append(plan);retain_candidates(plan)
                 result.update(stop_reason='target_observed',accepted=True);break
             if result['actual_input_attempts']>=max_actions:raise GoalStop('action_limit')
             pose=cp['pose'];x,y=pose['position'];scale=pose['scale']
@@ -437,15 +636,18 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                     target_route=target_template=None
                     plan=planner(context,cp,frames,rules,grid,now=clock(),engineering_deadline=end,
                         time_budget_seconds=min(25.,max(.01,end-clock()-15)),clock=clock,
-                        check=lambda:getattr(io,'planning_check',io.check)(end))
+                        check=lambda:getattr(io,'planning_check',io.check)(end),
+                        **({'collect_candidates':True} if candidate_choice is not None else {}))
             elif compromise_route is None:
                 plan=planner(context,cp,frames,rules,grid,now=clock(),engineering_deadline=end,
                     time_budget_seconds=min(25.,max(.01,end-clock()-15)),clock=clock,
-                    check=lambda:getattr(io,'planning_check',io.check)(end))
+                    check=lambda:getattr(io,'planning_check',io.check)(end),
+                    **({'collect_candidates':True} if candidate_choice is not None else {}))
             else:
                 plan=rebase_compromise_plan(context,cp,frames,rules,compromise_route,compromise_template,
                     now=clock(),check=lambda:getattr(io,'planning_check',io.check)(end))
             result['planning_rounds'].append(plan)
+            retain_candidates(plan)
             purpose='target'
             if plan['candidate'] is None:
                 if plan.get('approach_candidate') is not None:
@@ -577,6 +779,15 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                 # visible at the final endpoint; native-only hits remain reads.
                 if frames and assess_feedback(context,cp,frames,restore_rules)['observed_target_accepted']:break
         if result['stop_reason']=='compromise_observed':protected_refinement()
+        try:candidate_choices()
+        except Exception:
+            # A cancelled or rebound waiting session cannot certify its cached
+            # checkpoint as current. Preserve it only as last measured evidence.
+            if candidate_choice is not None and current is not None:
+                result['last_verified_candidate_colors']=current['checkpoint']['client_hex']
+                result['last_verified_candidate']=copy.deepcopy(current)
+                current=None
+            raise
     except GoalStop as exc:result['stop_reason']=str(exc)
     except InterruptedError as exc:result.update(stop_reason='interrupted',error=str(exc))
     except TimeoutError as exc:result.update(stop_reason='insufficient_time',error=str(exc))
@@ -593,6 +804,12 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
         result['screenshot_verified']=assess_feedback(context,current['checkpoint'],current['frames'],rules)['screenshot_verified'] if context else False
         result.update(verified=True,actual_colors=score['colors'],actual_deltas=score['deltas'],
             target_exact=score['target_exact'],current=current,remaining_seconds=current['frames'][-1]['remaining_seconds'])
+        if candidate_choice is not None:
+            result['accepted']=bool(score['accepted'] and result['screenshot_verified'])
+            result['actual_colors']=list(current['checkpoint']['client_hex'])
+        if candidate_choice is not None:
+            result['current_candidate_id']=next((candidate_id(batch_id,row['actual_colors']) for row in candidate_rows
+                if row['actual_colors']==current['checkpoint']['client_hex']),None)
         if best_observed is not None:
             result.update(best_actual_colors=best_observed['checkpoint']['client_hex'],
                 best_current=observed_quality(score['colors'],rules)<=observed_quality(best_observed['checkpoint']['client_hex'],rules))
@@ -606,8 +823,9 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
             score=score_codes(current['checkpoint']['client_hex'],rules)
             result.update(actual_colors=score['colors'],actual_deltas=score['deltas'],
                 screenshot_verified=False)
+            if candidate_choice is not None:result['actual_colors']=list(current['checkpoint']['client_hex'])
     result.update(elapsed_seconds=max(0.,clock()-start),effective_deadline=end)
-    result['outcome']=('matched' if result['accepted'] else 'compromise' if result['stop_reason']=='compromise_observed'
+    result['outcome']=('matched' if result['accepted'] else 'compromise' if result['stop_reason'] in ('compromise_observed','user_candidate_observed')
         and result['verified'] else 'not_found' if result['stop_reason']=='not_found_in_budget' else 'stopped')
     values=[v for v in result['actual_deltas'] if v is not None]
     result.update(maximum=max(values) if values else None,average=sum(values)/len(values) if values else None)

@@ -149,12 +149,19 @@ class ServiceIntegrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             folder=Path(tmp);events=[]
             owner=Runner(lambda kind,data:events.append((kind,data)),folder)
+            # This fixture models IO in its own clock. Waiting for an absent
+            # test UI must advance that clock, not spend a real 80-second round.
+            def poll_choice(batch_id,deadline):
+                io.t=max(io.t,deadline)
+                return None
+            owner.wait_candidate_choice=poll_choice
             baseline=dict(stop_reason='passive_baseline_collected',session_deadline_monotonic=90.,
                 capture={'capture_folder':'fixture'},baseline={'motion':{'settings':io.case['settings']}})
             backend=SimpleNamespace(close=lambda:None)
             def loop(adapter,session,settings,received,**kwargs):
                 if planner is not None:kwargs['planner']=planner
-                return run_goal_loop(adapter,session,settings,received,clock=io.clock,**kwargs)
+                return run_goal_loop(adapter,session,settings,received,clock=io.clock,
+                    pause=lambda seconds:setattr(io,'t',io.t+seconds),**kwargs)
             with patch.object(service,'_prepare',return_value=(backend,{})), \
                  patch.object(service,'resolve_target',return_value=WindowTarget(20,123,'Game','MabinogiMobile.exe')), \
                  patch.object(service,'collect_validation_session',return_value=baseline), \

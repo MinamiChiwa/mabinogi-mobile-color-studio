@@ -1,8 +1,37 @@
 """User-facing native results, separate from predicted candidate acceptance."""
 
 
+def candidate_reason_text(reason):
+    """Explain selection rejections without displaying internal exception text."""
+    if reason in ('insufficient_protected_time','candidate_compile_timeout'):
+        return '剩余时间不足以完成切换、返回与颜色复核，已保留当前实测结果。'
+    if reason=='insufficient_protected_actions':
+        return '完整切换与返回路线超过剩余操作额度，已保留当前实测结果。'
+    if reason=='candidate_return_not_proven':
+        return '所选方案的返回路线尚未完成验证，已保留当前实测结果。'
+    if reason=='candidate_endpoint_not_reproduced':
+        return '所选方案无法完成路线复核，已保留当前实测结果。'
+    if reason=='reference_changed':
+        return '当前色板位置或颜色已变化，已重新读取；请选择当前候选。'
+    if reason=='stale_or_unknown_candidate':
+        return '所选候选已失效，已保留当前颜色。'
+    return '所选方案暂时无法安全切换，已保留当前实测结果。'
+
+
 def result_text(data):
     reason=data.get('stop_reason')
+    if reason=='initial_validation_timeout':
+        return ('游戏初始化检查超时','进程或窗口检查尚未完成。请在游戏普通界面重试，并附上本次诊断记录。')
+    if reason in ('initial_discovery_timeout','discovery_incomplete_timeout'):
+        return ('色板扫描尚未完成','本次扫描未能完成候选和唯一性检查，不能据此判断没有染色板。请在游戏普通界面重新准备，等提示就绪后再进入染色。')
+    if reason=='ambiguous_active_palette_timeout':
+        return ('未能唯一绑定染色板','检测到多个活动色板候选。请确认只打开了一个染色板，并附上诊断记录。')
+    if reason=='no_active_palette_timeout':
+        return ('等待染色界面超时','等待期间未找到已验证的活动染色板，本轮没有发送操作。')
+    if reason=='user_candidate_observed' and data.get('verified'):
+        return ('所选方案已复核','已保留您选择的方案。请查看各区域实测色差，在游戏内手动确认是否套用。')
+    if reason=='candidate_recovery_unconfirmed':
+        return ('所选方案返回未完成复核','切换后的恢复结果尚未确认。请以游戏当前颜色为准，详细记录已保存。')
     if reason=='no_available_regions':return ('本局没有已启用的可用区域','本局没有已启用的可用区域，请启用区域 1 或 2。')
     if data.get('verified') and data.get('accepted') and reason=='target_observed':
         return ('目标 HEX 已精确匹配' if data.get('target_exact') else '目标颜色已在容差内匹配',

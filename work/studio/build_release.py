@@ -51,6 +51,10 @@ verification.parent.mkdir(parents=True,exist_ok=True)
 shutil.copy2(root/'VERIFICATION.md',verification)
 shutil.copy2(root/'native-window-check.ps1',out/'ColorStudio/native-window-check.ps1')
 shutil.copy2(root/'WINDOW_CHECK.zh-CN.md',out/'ColorStudio/WINDOW_CHECK.zh-CN.md')
+for name in ('WINDOW_CHECK.zh-TW.md','WINDOW_CHECK.en.md'):
+    shutil.copy2(root/name,out/'ColorStudio'/name)
+notes=workspace/'docs/release-notes-0.4.1.md'
+if notes.exists():shutil.copy2(notes,out/'ColorStudio/RELEASE_NOTES.md')
 # Development validation reports remain in the workspace. Distributions
 # contain current user documentation and one current verification summary.
 print('RELEASE',out/'ColorStudio/ColorStudio.exe')

@@ -103,13 +103,21 @@ def run_native_search(owner,rules,*,mode='search',target=None,activate=False,**u
             owner.stop.set();raise InterruptedError('F9')
     def event(row):
         name=row['event'];stage={'armed':'waiting','session_discovered':'capture','palette_captured':'native_validate',
+            'initial_validation':'native_validate','process_bound':'native_validate','window_validated':'native_validate',
+            'discovery_progress':'discovery',
             'planning':'search','action':'position','observed':'verify','initial_visual_wait':'native_validate',
             'compromise_selected':'position','observation_wait':'verify','target_approach':'position',
             'refinement_planning':'search','refinement_search_progress':'search'}.get(name)
         with (folder/'native-events.jsonl').open('a',encoding='utf-8') as stream:
             stream.write(json.dumps(row,ensure_ascii=False)+'\n')
+        if name in ('native_candidates','native_candidate_ready','native_candidate_selected','native_candidate_closed'):
+            owner.event(name,**{key:value for key,value in row.items() if key!='event'})
+            return
         message={'native_validate':'正在检查当前游戏与取色数据。','search':'正在计算可执行的目标方案。',
+            'discovery':'正在准备只读扫描，暂时不要进入染色界面；等提示就绪后再开始。F9 可停止。',
             'position':'正在调整色板。','verify':'正在核对当前游戏色码。'}.get(stage)
+        if name=='discovery_progress' and row.get('phase')=='waiting':
+            stage='waiting';message='正在等待并检查活动染色板；F9 可停止。'
         if name=='compromise_selected':message='未找到精准方案，正在定位并复核色差较小的妥协方案。'
         if name=='target_approach':message='已找到目标色板位置，正在定位并复核。'
         if name=='refinement_planning':message='正在查找更接近的颜色，并保留恢复时间。'
@@ -146,8 +154,10 @@ def run_native_search(owner,rules,*,mode='search',target=None,activate=False,**u
             rules=normalize_target_rules(bind_region_rules(rules,count));result['rules']=rules
             settings=InputSettings(**baseline['baseline']['motion']['settings'])
             adapter=ProjectClosedLoopIO(backend,baseline,folder/'native-actions',stop=owner.stop)
+            choice=getattr(owner,'wait_candidate_choice',None)
+            options=dict(candidate_choice=choice) if callable(choice) else {}
             result.update(run_goal_loop(adapter,session,settings,rules,
-                engineering_deadline=baseline['session_deadline_monotonic'],event=event))
+                engineering_deadline=baseline['session_deadline_monotonic'],event=event,**options))
     except InterruptedError as exc:result.update(stop_reason='interrupted',error=str(exc))
     except (ValueError,OSError,RuntimeError) as exc:
         result.update(stop_reason='no_available_regions' if result.get('stop_reason')=='no_available_regions' else 'unavailable',error=type(exc).__name__+': '+str(exc),
@@ -163,7 +173,7 @@ def run_native_search(owner,rules,*,mode='search',target=None,activate=False,**u
         if backend is not None:backend.close()
     values=[v for v in result['actual_deltas'] if v is not None]
     result.update(maximum=max(values) if values else None,average=sum(values)/len(values) if values else None,
-        outcome='matched' if result['accepted'] else 'compromise' if result['stop_reason']=='compromise_observed'
+        outcome='matched' if result['accepted'] else 'compromise' if result['stop_reason'] in ('compromise_observed','user_candidate_observed')
             and result['verified'] else 'not_found' if result['stop_reason']=='not_found_in_budget' else 'stopped')
     (folder/'native-result.json').write_text(json.dumps(result,indent=2,ensure_ascii=False),encoding='utf-8')
     # The full result is already persisted on disk. Keep the UI event small so

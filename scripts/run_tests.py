@@ -20,6 +20,7 @@ test_app_data test_build_info test_core test_dpi_layout test_display_geometry
 test_hotkeys test_input_gestures test_window_target test_platform_dpi
 test_runtime_i18n_coverage test_ui_i18n test_ui_performance
 test_native_ui_completion test_native_ui_hit_testing test_responsive_geometry
+test_native_candidate_ui
 test_overlay_native test_runner_strategy test_native_live_layout
 test_native_live_presentation test_native_live_ui test_native_live_runner
 test_native_live_service test_native_live_timer_policy test_native_live_session_budget
@@ -123,6 +124,7 @@ DESKTOP_TEST_PREFIXES = (
     'test_resize_surface.',
     'test_profile_ui.',
     'test_native_ui_hit_testing.',
+    'test_native_candidate_ui.',
     'test_responsive_geometry.ResponsiveGeometryTests.',
     'test_overlay_native.NativeOverlayWorkerTests.',
 )
@@ -131,6 +133,7 @@ QUICK_DESKTOP_TEST_IDS = frozenset((
     'test_resize_surface.ResizeSurfaceTests.test_sizing_surface_restores_live_controls_at_latest_width',
     'test_profile_ui.ProfileUITests.test_current_settings_autosave_including_incomplete_input',
     'test_native_ui_hit_testing.NativeUIHitTestingTests.test_native_finished_releases_main_hit_regions_and_next_run_reopens_overlay',
+    'test_native_candidate_ui.NativeCandidateUITests.test_completion_releases_main_controls_and_reopens_only_read_only_candidates',
 ))
 
 
