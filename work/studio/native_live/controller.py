@@ -532,17 +532,48 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                 result['restoration_rounds'].append(recovery_plan)
                 candidate=recovery_plan['candidate']
                 if candidate is None:break
-                if len(candidate['input_route'])>max_actions-result['actual_input_attempts']:break
-                if clock()+candidate['needed']+8.*max(1,len(candidate['input_route']))>=end:break
+                try:reserve_route(candidate,'restore_best',include_revalidation=True)
+                except GoalStop as exc:
+                    result['restoration_budget_stop']=str(exc);break
                 checked,checked_frames=observe_resilient('restore_'+str(recovery)+'_revalidate')
                 validate_plan_reference(context,recovery_plan,checked,checked_frames,now=clock(),rules=restore_rules)
                 if not candidate['input_route']:cp,frames=checked,checked_frames;break
-                cp,frames,feedback=submit(candidate['input_route'][0],'restore_'+str(recovery),checked,'restore_best')
-                if observed_quality(cp['client_hex'],rules)<observed_quality(best_observed['checkpoint']['client_hex'],rules):
-                    best_observed=copy.deepcopy(current)
-                if feedback['observed_target_accepted']:
-                    result.update(accepted=True,stop_reason='target_observed');break
-                if score_codes(cp['client_hex'],restore_rules)['accepted']:break
+                try:reserve_route(candidate,'restore_best')
+                except GoalStop as exc:
+                    result['restoration_budget_stop']=str(exc);break
+                restore_fresh=checked;route=candidate['input_route']
+                for index,gesture in enumerate(route):
+                    cp,frames,feedback=submit(gesture,
+                        'restore_'+str(recovery) if index==0 else 'restore_'+str(recovery)+'_step_'+str(index),
+                        restore_fresh,'restore_best',visual_required=index==len(route)-1)
+                    if (current and current.get('frames') and assess_feedback(context,cp,frames,rules)['screenshot_verified']
+                            and observed_quality(cp['client_hex'],rules)<observed_quality(best_observed['checkpoint']['client_hex'],rules)):
+                        best_observed=copy.deepcopy(current)
+                    if feedback['observed_target_accepted']:
+                        result.update(accepted=True,stop_reason='target_observed');break
+                    suffix=route[index+1:]
+                    if suffix and result['steps'][-1].get('model_response_warning'):
+                        # Continue the already admitted suffix from actual
+                        # native feedback. Residuals do not trigger another
+                        # global search or repeat a completed wheel leg.
+                        guard()
+                        replay=replay_native_route(cp['pose'],suffix,geometry,settings,
+                            wheel_delta_per_step=1.,sample_policy='all_recorded_points')
+                        audit=audit_candidate_endpoint(context,cp,restore_rules,dict(
+                            input_route=copy.deepcopy(suffix),final_pose=replay['final_pose'],
+                            prediction=score_native_pose(session,replay['final_pose'],restore_rules),
+                            needed=_needed(suffix,3.,.5),source='actual_feedback_restore_suffix'))
+                        result['steps'][-1]['remaining_route_audit']=dict(
+                            reference_pose=cp['pose'],final_pose=audit['final_pose'],
+                            prediction=audit['prediction'],continued=True,
+                            target_prediction_changed=not bool(audit['prediction']['predicted_accepted']))
+                        emit('route_revalidated',remaining_gestures=len(suffix),reference_pose=cp['pose'],
+                            predicted_colors=audit['prediction']['colors'],purpose='restore_best')
+                    restore_fresh=cp
+                if result.get('accepted'):break
+                # A return is complete only when its actual HEX is independently
+                # visible at the final endpoint; native-only hits remain reads.
+                if frames and assess_feedback(context,cp,frames,restore_rules)['observed_target_accepted']:break
         if result['stop_reason']=='compromise_observed':protected_refinement()
     except GoalStop as exc:result['stop_reason']=str(exc)
     except InterruptedError as exc:result.update(stop_reason='interrupted',error=str(exc))
@@ -563,7 +594,8 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
         if best_observed is not None:
             result.update(best_actual_colors=best_observed['checkpoint']['client_hex'],
                 best_current=observed_quality(score['colors'],rules)<=observed_quality(best_observed['checkpoint']['client_hex'],rules))
-            result['restored']=result['best_current'] if result.get('restoration_rounds') else None
+            result['restored']=(bool(result['best_current'] and result['screenshot_verified'])
+                if result.get('restoration_rounds') else None)
     else:
         result.update(verified=False,accepted=False,target_exact=False,
             actual_colors=[None]*3,actual_deltas=[None]*3,current=None)

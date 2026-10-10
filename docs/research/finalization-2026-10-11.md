@@ -37,3 +37,5 @@ rc16 三白 ΔE≤8 在局部五秒帧解码预算耗尽时错误退出为 insuf
 无私有资料的公开源码精确跳过不存在的原捕获文件，不吞已有 JSON/schema/hash 错误，也不生成虚假实机素材。旧无当前引用模块原样归档，个人会话、设置和桌面图不提交。
 
 最终冻结发布集合：482项，481通过、1原私有OCR档案跳过、0失败/错误；执行140.667s、入口146.897s。此前477项结果被这次完整冻结集合替代。
+
+Best-result recovery follow-up: complete multi-action returns including opposite wheel legs now execute the entire audited suffix from measured feedback. Independent screenshot verification is required before claiming restoration. New five recovery contracts plus26 existing frame/protected/fine-scale checks:31 passed in19.869s, with no game inputs. Final independent review found no remaining important issue in this scope.
