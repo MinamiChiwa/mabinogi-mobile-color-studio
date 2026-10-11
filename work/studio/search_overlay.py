@@ -88,6 +88,8 @@ class SearchOverlay(ct.CTkToplevel):
         self.configure(fg_color='#131F2C');self.rules=[];self.phase='waiting';self._text=None
         self.select_candidate=select_candidate;self.candidate_rows={};self.batch_id=None;self.stop_action=stop
         self.default_candidate_id=None
+        self.retry_action=getattr(parent,'request_native_retry',None)
+        self._retry_enabled=False;self._retry_pending=False
         self.settings_path=settings_path;self.preferences=read_settings(settings_path) if settings_path else {}
         self._collapsed=False;self._has_results=False;self._heartbeat_job=None;self._alpha_job=None
         self._surface_job=None;self._native_job=None;self._passive_input=False
@@ -106,6 +108,8 @@ class SearchOverlay(ct.CTkToplevel):
         self.copy.grid(row=0,column=0,padx=8,pady=4,sticky='ew')
         self.stop_button=ct.CTkButton(self,text='停止 F9',height=32,font=BODY_FONT,fg_color='#236D62',command=stop)
         self.stop_button.grid(row=2,column=0,padx=16,pady=(4,10),sticky='ew')
+        self.retry_button=ct.CTkButton(self,text='重新寻色 F7',height=30,font=BODY_FONT,
+            fg_color='#28364A',state='disabled',command=self.request_retry)
         self.activity=ct.CTkProgressBar(self.content,height=4,mode='indeterminate',progress_color='#62D7BD')
         self.activity.grid(row=1,column=0,padx=8,pady=6,sticky='ew')
         self.elapsed=ct.CTkLabel(self.content,text='',font=SMALL_FONT,anchor='w',text_color='#94A4B8',wraplength=350)
@@ -220,6 +224,9 @@ class SearchOverlay(ct.CTkToplevel):
         self._dismissed=False
         self._native_run=False
         self._native_candidate_run=False;self._native_candidate_batch=None;self._native_candidate_closed=False
+        self._retry_enabled=False;self._retry_pending=False
+        self.retry_button.configure(state='disabled');self.retry_button.grid_forget()
+        if passive:self.retry_button.grid(row=3,column=0,padx=16,pady=(0,10),sticky='ew')
         self.stop_button.configure(text='停止 F9',command=self.stop_action)
         # Older callers pass passive=True for native runs. Controls must stay
         # reachable while reading/planning; Game scopes suppress the surface
@@ -249,12 +256,22 @@ class SearchOverlay(ct.CTkToplevel):
         A new begin() explicitly opens the next session.
         """
         self._dismissed=True;self.phase='stopped';self.batch_id=None;self.selection_sent=True
+        self._retry_enabled=False
+        if getattr(self,'retry_button',None) is not None:self.retry_button.configure(state='disabled')
         for button in self.candidate_rows.values():button.configure(state='disabled')
         if hasattr(self,'activity'):self.activity.stop()
         if getattr(self,'_heartbeat_job',None):self.after_cancel(self._heartbeat_job);self._heartbeat_job=None
         if getattr(self,'_native_job',None):self.after_cancel(self._native_job);self._native_job=None
         if getattr(self,'native',None) is not None:unregister_overlay(self.native)
         self.withdraw()
+    def mark_retry_requested(self):
+        self._retry_enabled=False;self._retry_pending=True
+        self.retry_button.configure(state='disabled')
+        self.render('正在重试','等待当前动作结束后，缩小画板并重新搜索。')
+    def request_retry(self):
+        if (not self._retry_enabled or self._retry_pending or getattr(self,'_dismissed',False)
+                or not callable(self.retry_action)):return
+        self.mark_retry_requested();self.retry_action()
     def render(self,title,body):
         value=(title,body)
         if value==self._text:return
@@ -441,6 +458,28 @@ class SearchOverlay(ct.CTkToplevel):
             ct.CTkLabel(self.results,text=tr(text),justify='left',anchor='w').pack(fill='x',padx=8,pady=8)
     def handle(self,kind,data):
         if getattr(self,'_dismissed',False):return
+        if kind in ('native_candidates','native_candidate_ready','native_candidate_selected','native_candidate_closed'):
+            return
+        if kind=='native_retry_available':
+            self._native_run=True
+            self._retry_enabled=bool(data.get('enabled')) and not self._retry_pending
+            self.retry_button.configure(state='normal' if self._retry_enabled and callable(self.retry_action) else 'disabled')
+            self.retry_button.grid(row=3,column=0,padx=16,pady=(0,10),sticky='ew')
+            if data.get('waiting_for_retry'):
+                body='可按 F7 或点击浮窗重试；剩余时间不足时保留当前颜色。' if data.get('enabled') else '剩余时间不足以完成重试，已保留当前颜色。'
+                if data.get('verified') and data.get('screenshot_verified') and data.get('current_colors'):
+                    body+='\n'+'当前实测颜色：'+' / '.join(c or '—' for c in data['current_colors'])
+                self.render('本轮寻色已完成',body)
+            return
+        if kind=='native_retry_reset':
+            self._native_run=True;self._retry_enabled=False
+            self.retry_button.configure(state='disabled')
+            status=data.get('status')
+            self._retry_pending=status not in ('searching','rejected')
+            if status=='zooming':self.render('正在重试','正在缩小画板并重新搜索。')
+            elif status=='searching':self.render('重新搜索目标颜色','沿用本局剩余时间重新寻色；F9 可停止。')
+            elif status=='rejected':self.render('暂时无法重试','剩余时间不足以完成重试，已保留当前颜色。')
+            return
         if kind=='region_layout':
             self.rules=list(data['rules'])
             if data.get('region_count')==2:

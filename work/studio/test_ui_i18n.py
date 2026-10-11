@@ -64,7 +64,8 @@ class UiLanguageTests(unittest.TestCase):
     def test_tutorial_step_is_short_and_tips_cover_matching_behavior(self):
         section=dict(TUTORIAL)['3. 选择匹配模式']
         self.assertIn('六位色码完全一致',section)
-        self.assertEqual(len([heading for heading,_ in TUTORIAL if heading.startswith('Tips ')]),4)
+        self.assertEqual(len([heading for heading,_ in TUTORIAL if heading.startswith('Tips ')]),5)
+        self.assertTrue(any('F7' in body and '重试' in body for _,body in TUTORIAL))
         tips=dict(TUTORIAL)
         self.assertIn('优先级',tips['Tips 1 · 寻色与结果'])
         self.assertIn('皮革、木材',tips['Tips 2 · 材质限制'])

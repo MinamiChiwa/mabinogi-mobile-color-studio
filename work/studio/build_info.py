@@ -5,8 +5,8 @@ import json
 from pathlib import Path
 import sys
 
-APP_VERSION = '0.4.1'
-POLICY_REVISION = 'native-typed-discovery-interactive-overlay-v18'
+APP_VERSION = '0.4.2rc1'
+POLICY_REVISION = 'native-same-round-retry-physical-eyedropper-v19'
 
 
 def source_identity(root):

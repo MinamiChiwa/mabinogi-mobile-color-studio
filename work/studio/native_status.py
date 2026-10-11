@@ -20,6 +20,10 @@ def candidate_reason_text(reason):
 
 def result_text(data):
     reason=data.get('stop_reason')
+    if reason=='retry_minimum_unconfirmed':
+        return ('重试缩放未完成确认','画板缩小后的状态未能确认，已停止重试。请以游戏当前颜色为准。')
+    if reason=='input_outcome_unknown':
+        return ('操作状态未完成确认','未能确认鼠标操作和释放状态，已停止后续动作。请以游戏当前颜色为准。')
     if reason=='initial_validation_timeout':
         return ('游戏初始化检查超时','进程或窗口检查尚未完成。请在游戏普通界面重试，并附上本次诊断记录。')
     if reason=='discovery_read_failure':

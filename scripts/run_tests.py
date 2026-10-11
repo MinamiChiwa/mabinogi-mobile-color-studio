@@ -20,7 +20,7 @@ test_app_data test_build_info test_core test_dpi_layout test_display_geometry
 test_hotkeys test_input_gestures test_window_target test_platform_dpi
 test_runtime_i18n_coverage test_ui_i18n test_ui_performance
 test_native_ui_completion test_native_ui_hit_testing test_responsive_geometry
-test_native_candidate_ui
+test_native_retry_ui test_native_retry_bridge
 test_overlay_native test_runner_strategy test_native_live_layout
 test_native_live_presentation test_native_live_ui test_native_live_runner
 test_native_live_service test_native_live_timer_policy test_native_live_session_budget
@@ -49,6 +49,7 @@ EXTRA_CURRENT_MODULES = frozenset(('test_profile_store', 'test_profile_ui',
 # deleted or disabled in unittest discovery; quick intentionally does not repeat
 # every recorded global search and every legacy image-atlas route on each edit.
 RESEARCH_MODULES = frozenset('''
+test_native_candidates
 test_analyze_quality_gate test_app_atlas test_atlas_adapter test_atlas_bound_route
 test_atlas_budget_review test_atlas_capture_worker test_atlas_checkpoint_recovery
 test_atlas_compromise_recovery test_atlas_end_to_end test_atlas_execution
@@ -124,7 +125,7 @@ DESKTOP_TEST_PREFIXES = (
     'test_resize_surface.',
     'test_profile_ui.',
     'test_native_ui_hit_testing.',
-    'test_native_candidate_ui.',
+    'test_native_retry_ui.',
     'test_responsive_geometry.ResponsiveGeometryTests.',
     'test_overlay_native.NativeOverlayWorkerTests.',
 )
@@ -133,7 +134,7 @@ QUICK_DESKTOP_TEST_IDS = frozenset((
     'test_resize_surface.ResizeSurfaceTests.test_sizing_surface_restores_live_controls_at_latest_width',
     'test_profile_ui.ProfileUITests.test_current_settings_autosave_including_incomplete_input',
     'test_native_ui_hit_testing.NativeUIHitTestingTests.test_native_finished_releases_main_hit_regions_and_next_run_reopens_overlay',
-    'test_native_candidate_ui.NativeCandidateUITests.test_completion_releases_main_controls_and_reopens_only_read_only_candidates',
+    'test_native_retry_ui.NativeRetryUITests.test_finish_hides_retry_surface_and_releases_main_window_controls',
 ))
 
 

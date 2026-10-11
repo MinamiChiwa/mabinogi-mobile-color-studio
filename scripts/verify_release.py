@@ -23,7 +23,8 @@ def verify(release,source):
     assert manifest.get('git_commit'), 'Git commit missing from build manifest'
     archive=CArchiveReader(str(release/'ColorStudio.exe'));pyz=archive.open_embedded_archive('PYZ.pyz')
     required={'app','build_info','profile_store','ui_presets','ui_dialogs','ui_strings','region_priority','dye_regions','process_access',
-              'candidate_ranking','resize_surface','native_status','native_input_compile',
+              'candidate_ranking','resize_surface','native_status','native_input_compile','eyedropper','eyedropper_native',
+              'native_live.retry','native_live.session_deadline',
               'native_live.controller','native_live.same_session_dye_planner','native_live.compromise',
               'native_live.candidate_selection','native_live.collect_dye_validation',
               'native_live.native_provider_backend','native_live.scan_live_dye',

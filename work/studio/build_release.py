@@ -1,6 +1,6 @@
 from pathlib import Path
 import subprocess,sys,shutil,pefile,json
-from build_info import source_identity
+from build_info import source_identity,APP_VERSION
 root=Path(__file__).resolve().parent
 workspace=root.parent.parent
 identity=source_identity(root)
@@ -53,7 +53,7 @@ shutil.copy2(root/'native-window-check.ps1',out/'ColorStudio/native-window-check
 shutil.copy2(root/'WINDOW_CHECK.zh-CN.md',out/'ColorStudio/WINDOW_CHECK.zh-CN.md')
 for name in ('WINDOW_CHECK.zh-TW.md','WINDOW_CHECK.en.md'):
     shutil.copy2(root/name,out/'ColorStudio'/name)
-notes=workspace/'docs/release-notes-0.4.1.md'
+notes=workspace/('docs/release-notes-'+APP_VERSION.split('rc')[0]+'.md')
 if notes.exists():shutil.copy2(notes,out/'ColorStudio/RELEASE_NOTES.md')
 # Development validation reports remain in the workspace. Distributions
 # contain current user documentation and one current verification summary.

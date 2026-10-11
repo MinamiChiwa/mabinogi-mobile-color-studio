@@ -45,7 +45,7 @@ class FixtureIO:
         self.pose=replay_native_route(self.pose,[record],self.geometry,self.settings,
             wheel_delta_per_step=1.,sample_policy='all_recorded_points')['final_pose']
         if self.wrong_pose:self.pose['position'][0]+=.001
-        return dict(completed=True,input_source='explicit_simulation',gesture=record,
+        return dict(completed=True,released=True,input_source='explicit_simulation',gesture=record,
             actual_trace=[dict(actual_client=list(p)) for p in record['points']])
     def release(self):self.releases+=1
 

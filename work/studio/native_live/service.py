@@ -110,7 +110,12 @@ def run_native_search(owner,rules,*,mode='search',target=None,activate=False,**u
             'refinement_planning':'search','refinement_search_progress':'search'}.get(name)
         with (folder/'native-events.jsonl').open('a',encoding='utf-8') as stream:
             stream.write(json.dumps(row,ensure_ascii=False)+'\n')
+        if name in ('native_retry_available','native_retry_reset'):
+            owner.event(name,**{key:value for key,value in row.items() if key!='event'})
+            return
         if name in ('native_candidates','native_candidate_ready','native_candidate_selected','native_candidate_closed'):
+            # Legacy diagnostic events never create predicted native choices.
+            return
             owner.event(name,**{key:value for key,value in row.items() if key!='event'})
             return
         message={'native_validate':'正在检查当前游戏与取色数据。','search':'正在计算可执行的目标方案。',
@@ -154,8 +159,10 @@ def run_native_search(owner,rules,*,mode='search',target=None,activate=False,**u
             rules=normalize_target_rules(bind_region_rules(rules,count));result['rules']=rules
             settings=InputSettings(**baseline['baseline']['motion']['settings'])
             adapter=ProjectClosedLoopIO(backend,baseline,folder/'native-actions',stop=owner.stop)
-            choice=getattr(owner,'wait_candidate_choice',None)
-            options=dict(candidate_choice=choice) if callable(choice) else {}
+            retry=getattr(owner,'consume_retry_request',None)
+            options=dict(retry_requested=retry) if callable(retry) else {}
+            extension=baseline.get('timer_deadline_extension')
+            if isinstance(extension,dict):options['timer_deadline_extension']=extension
             result.update(run_goal_loop(adapter,session,settings,rules,
                 engineering_deadline=baseline['session_deadline_monotonic'],event=event,**options))
     except InterruptedError as exc:result.update(stop_reason='interrupted',error=str(exc))

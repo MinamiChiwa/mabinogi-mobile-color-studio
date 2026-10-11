@@ -37,6 +37,21 @@ def dye_frame(count=2, missing=None, board_visible=True):
 
 
 class NativeTwoRegionVisualTests(unittest.TestCase):
+    def test_scaled_card_glyphs_are_normalized_before_template_match(self):
+        """The archived glyph asset is 81px-card evidence; 100px cards must decode too."""
+        asset = _load()
+        labels = asset['labels_160']; patterns = asset['patterns_160']
+        code = '#F9F6F6'
+        reference = np.full((81, 81, 3), 255, np.uint8)
+        for position, char in enumerate(code):
+            glyph = patterns[np.where(labels == char)[0][0]] > .5
+            glyph = cv2.resize(glyph.astype(np.uint8), (8, 12), interpolation=cv2.INTER_NEAREST)
+            x = 7 + position * 9
+            reference[62:74, x:x + 8][glyph.astype(bool)] = 0
+        scaled = cv2.resize(reference, (100, 100), interpolation=cv2.INTER_CUBIC)
+        result = read_card_glyphs(scaled, (0, 0, 100, 100), deadline=100., clock=lambda: 1.)
+        self.assertEqual(result['hex'], code)
+
     def test_visible_translation_uses_both_actual_material_halves(self):
         image=np.full((300,300,3),80,np.uint8)
         image[180:185,74:79]=(255,0,0);image[180:185,224:229]=(0,255,0)

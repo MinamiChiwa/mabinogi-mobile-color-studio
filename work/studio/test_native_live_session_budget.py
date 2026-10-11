@@ -39,6 +39,12 @@ class NativeSessionBudgetTests(unittest.TestCase):
         result,events=self.collect(True)
         self.assertAlmostEqual(result['session_deadline_monotonic'],91.)
         self.assertTrue(result['existing_active_palette'])
+        self.assertEqual(result['timer_deadline_extension']['deadline_source'],
+                         'existing_active_unknown_age')
+        self.assertAlmostEqual(result['timer_deadline_extension']['initial_deadline'],91.)
+        self.assertAlmostEqual(result['timer_deadline_extension']['maximum_deadline'],111.)
+        self.assertEqual(result['timer_deadline_extension']['process_identity'],[7,8,9,'fixture'])
+        self.assertEqual(result['timer_deadline_extension']['session_token'],['same'])
     def test_shorter_caller_deadline_is_not_extended(self):
         for existing in (False,True):
             result,_=self.collect(existing,20.)

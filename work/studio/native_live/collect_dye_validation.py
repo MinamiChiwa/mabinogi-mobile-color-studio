@@ -20,7 +20,8 @@ def collect_validation_session(backend, *, wait_seconds=300.,session_seconds=90.
     result=dict(stop_reason='not_started',samples=[],errors=[],inputs_sent=0,ready_for_input=False,
         existing_active_palette=False,
         actual_corner_measurement_verified=False,screenshot_hex_verified=False,server_confirmation_verified=False,
-        phase='initial_validation',phase_seconds=dict(process_identity=0.,window_context=0.,discovery=0.))
+        phase='initial_validation',phase_seconds=dict(process_identity=0.,window_context=0.,discovery=0.),
+        timer_deadline_extension=None)
     check();start=clock();deadline=start+30.
     class Expired(Exception):pass
     class DiscoveryBlocked(Exception):pass
@@ -161,6 +162,14 @@ def collect_validation_session(backend, *, wait_seconds=300.,session_seconds=90.
                     stable_observed_seconds=dwell))
                 if settled and dwell>=dwell_seconds-1e-9:
                     result['baseline']=observation;result['stop_reason']='passive_baseline_collected'
+                    if result['existing_active_palette']:
+                        initial=result['session_deadline_monotonic']
+                        result['timer_deadline_extension']=dict(
+                            deadline_source='existing_active_unknown_age',
+                            initial_deadline=initial,
+                            maximum_deadline=initial+min(session_seconds,110.)-min(session_seconds,90.),
+                            process_identity=copy.deepcopy(identity),
+                            session_token=copy.deepcopy(observation['session_token']))
                     emit('baseline_collected',client_board_candidate=mapping.get('client_board_candidate'),
                          session_deadline_monotonic=deadline,ready_for_input=False)
                     break

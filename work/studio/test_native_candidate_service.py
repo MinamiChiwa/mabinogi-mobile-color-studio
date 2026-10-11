@@ -1,4 +1,4 @@
-"""Native alternatives remain in the same IO lifetime and selection queue."""
+"""Native retry uses the same IO lifetime and does not publish predictions."""
 import tempfile
 import threading
 import unittest
@@ -11,12 +11,12 @@ from window_target import WindowTarget
 
 
 class NativeCandidateServiceTests(unittest.TestCase):
-    def test_candidate_event_and_choice_callback_keep_original_batch_and_adapter(self):
+    def test_retry_event_and_callback_keep_original_adapter_and_hide_predictions(self):
         events=[];calls=[]
-        def choose(batch_id,deadline):
-            calls.append((batch_id,deadline))
-            return 'other'
-        owner=SimpleNamespace(stop=threading.Event(),wait_candidate_choice=choose,
+        def retry():
+            calls.append(True)
+            return True
+        owner=SimpleNamespace(stop=threading.Event(),consume_retry_request=retry,
             event=lambda kind,**data:events.append((kind,data)))
         backend=MagicMock()
         adapter=SimpleNamespace(input_attempts=0,release=lambda:None)
@@ -25,12 +25,14 @@ class NativeCandidateServiceTests(unittest.TestCase):
             baseline={'motion':{'settings':{}}},session_deadline_monotonic=100.)
         def loop(io,session,settings,rules,**kwargs):
             self.assertIs(io,adapter)
-            self.assertTrue(callable(kwargs.get('candidate_choice')),
-                'The production service must connect the native candidate choice queue')
-            self.assertEqual(kwargs['candidate_choice']('same-batch',10.),'other')
+            self.assertNotIn('candidate_choice',kwargs)
+            self.assertTrue(callable(kwargs.get('retry_requested')))
+            self.assertTrue(kwargs['retry_requested']())
             kwargs['event'](dict(event='native_candidates',batch_id='same-batch',
                 candidates=[dict(id='other',colors=['#101010']*2,deltas=[1.,2.])],region_count=2))
             kwargs['event'](dict(event='native_candidate_closed',batch_id='same-batch',reason='expired'))
+            kwargs['event'](dict(event='native_retry_available',enabled=True,effective_deadline=100.))
+            kwargs['event'](dict(event='native_retry_reset',status='searching',epoch=1))
             return dict(stop_reason='target_observed',accepted=True,verified=True,
                 actual_colors=['#000000']*2,actual_deltas=[0.,0.])
         with tempfile.TemporaryDirectory() as tmp:
@@ -44,12 +46,11 @@ class NativeCandidateServiceTests(unittest.TestCase):
                  patch.object(service,'run_goal_loop',side_effect=loop):
                 result=service.run_native_search(owner,[dict(enabled=True,exact=True,colors=['#000000'],tolerance=0.)]*3)
         self.assertEqual(result['stop_reason'],'target_observed')
-        self.assertEqual(calls,[('same-batch',10.)])
+        self.assertEqual(calls,[True])
         candidates=[data for kind,data in events if kind=='native_candidates']
-        self.assertEqual(len(candidates),1)
-        self.assertEqual(candidates[0]['batch_id'],'same-batch')
-        self.assertEqual(candidates[0]['region_count'],2)
-        self.assertTrue(any(kind=='native_candidate_closed' for kind,_ in events))
+        self.assertEqual(candidates,[])
+        self.assertTrue(any(kind=='native_retry_available' for kind,_ in events))
+        self.assertTrue(any(kind=='native_retry_reset' for kind,_ in events))
         backend.close.assert_called_once()
 
 

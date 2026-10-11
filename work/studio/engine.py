@@ -99,6 +99,16 @@ class Runner:
         self.atlas_runner=atlas_runner
         self.native_runner=native_runner
         self.candidate_choices=queue.Queue()
+        self.retry_requests=threading.Event()
+        self._retry_lock=threading.Lock()
+    def request_retry(self):
+        """Request a native same-round retry without setting the stop flag."""
+        with self._retry_lock:
+            if not self.stop.is_set():self.retry_requests.set()
+    def consume_retry_request(self):
+        with self._retry_lock:
+            if self.stop.is_set() or not self.retry_requests.is_set():return False
+            self.retry_requests.clear();return True
     def choose_candidate(self,batch_id,candidate_id):
         """Thread-safe UI bridge for the currently published atlas batch."""
         self.candidate_choices.put((batch_id,candidate_id))

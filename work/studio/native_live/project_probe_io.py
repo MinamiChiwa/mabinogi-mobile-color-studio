@@ -108,7 +108,7 @@ def read_probe_frame(image,*,deadline,check=lambda:None,clock=time.monotonic,pre
                 pixels=image[y:y+ch,x:x+cw]
                 key=(pixels.shape,hashlib.sha256(pixels.tobytes()).hexdigest())
                 value=card_cache.get(key)
-                if isinstance(value,str) and re.fullmatch('#[0-9A-F]{6}',value) and _swatch_distance(value,sample)<3:
+                if isinstance(value,str) and re.fullmatch('#[0-9A-F]{6}',value) and _swatch_distance(value,sample)<=3:
                     codes[index]=value;cache_hits[index]=True
             keys.append(key);guard()
         if hex_fallback is None:
@@ -128,7 +128,11 @@ def read_probe_frame(image,*,deadline,check=lambda:None,clock=time.monotonic,pre
                 sample=samples[index]
                 value=result.get('hex')
                 distance=_swatch_distance(value,sample) if isinstance(value,str) and re.fullmatch('#[0-9A-F]{6}',value) else None
-                accepted=result.get('glyphs_unambiguous') is True and distance is not None and distance<3
+                # A complete agreeing two-threshold text read can survive the
+                # exact RGB-distance boundary (e.g. 125% rendering 250,244,244
+                # for the independently decoded #F9F6F6). Ordinary OCR retains
+                # its strict gate in read_codes; no swatch generates HEX text.
+                accepted=result.get('glyphs_unambiguous') is True and distance is not None and distance<=3
                 fallback_reads.append(dict(card_index=index,**result,swatch_distance=distance,swatch_accepted=accepted))
                 if accepted:codes[index]=value
             if any(code is None for code in codes):
@@ -139,7 +143,7 @@ def read_probe_frame(image,*,deadline,check=lambda:None,clock=time.monotonic,pre
         if card_cache is not None:
             for key,code,sample in zip(keys,codes,samples):
                 guard()
-                if isinstance(code,str) and re.fullmatch('#[0-9A-F]{6}',code) and _swatch_distance(code,sample)<3:
+                if isinstance(code,str) and re.fullmatch('#[0-9A-F]{6}',code) and _swatch_distance(code,sample)<=3:
                     # Native-filled omissions never reach this screenshot cache.
                     card_cache.pop(key,None);card_cache[key]=code
                     while len(card_cache)>96:card_cache.pop(next(iter(card_cache)))
@@ -184,6 +188,7 @@ class ProjectProbeIO:
     def __init__(self,backend,baseline,folder,*,game=None,stop=None,f9_pressed=None):
         self.backend=backend;self.reference=baseline;self.folder=Path(folder);self.folder.mkdir(parents=True,exist_ok=True)
         self.stop=stop or threading.Event();self.sent_any=False;self.deadline=baseline['session_deadline_monotonic'];self.previous_timer=None
+        self.accepted_session_deadline=baseline['session_deadline_monotonic']
         if game is None:
             from platform_win import Game
             from window_target import WindowTarget
@@ -204,6 +209,8 @@ class ProjectProbeIO:
         while True:
             if self.stop.is_set() or self.f9_pressed():self.stop.set();raise InterruptedError('F9/stop requested')
             if time.monotonic()>=self.deadline:raise TimeoutError('Probe deadline expired')
+            retry_check=getattr(self,'retry_check',None)
+            if retry_check is not None:retry_check()
             try:
                 self.original_game_check();return
             except Exception as exc:
@@ -213,15 +220,32 @@ class ProjectProbeIO:
                 time.sleep(min(.1,max(0.,focus_end-time.monotonic())))
 
     def check(self,deadline):
-        self.deadline=min(deadline,self.reference['session_deadline_monotonic']);self._input_guard()
+        self.deadline=min(deadline,getattr(self,'accepted_session_deadline',self.reference['session_deadline_monotonic']));self._input_guard()
         if list(self.backend.process_identity())!=list(self.reference['baseline']['process_identity']):raise ValueError('Process identity changed')
         state=self.backend.probe(self.reference['instance_address'],self.deadline,self._input_guard)
         if state.get('active') is not True or json.dumps(state['session_token'])!=json.dumps(self.reference['baseline']['session_token']):
             raise ValueError('Active palette session changed')
 
+    def set_verified_session_deadline(self,deadline,evidence):
+        """Accept only the collector-bound timer pair, preserving its fixed cap."""
+        from .session_deadline import verified_timer_extension
+        if not isinstance(evidence,dict) or evidence.get('timer_grace_until')!=getattr(self,'timer_grace_until',None):
+            raise ValueError('Unbound timer extension evidence')
+        if evidence.get('checkpoint',{}).get('binding')!=_binding(self.last_observation):
+            raise ValueError('Timer extension checkpoint binding changed')
+        self.check(getattr(self,'accepted_session_deadline',self.reference['session_deadline_monotonic']))
+        approved=verified_timer_extension(evidence.get('checkpoint'),evidence.get('frames'),
+            initial_engineering_deadline=self.reference['session_deadline_monotonic'],
+            current_deadline=getattr(self,'accepted_session_deadline',self.reference['session_deadline_monotonic']),
+            extension=self.reference.get('timer_deadline_extension'),timer_grace_until=self.timer_grace_until,
+            now=time.monotonic())
+        if approved is None or approved['deadline']!=deadline:raise ValueError('Unapproved timer extension')
+        self.accepted_session_deadline=deadline
+
     def checkpoint(self,label,deadline):
         self.check(deadline)
-        record=record_action_checkpoint(self.backend,self.reference,label,timeout_seconds=min(5,max(.01,deadline-time.monotonic())),
+        reference=dict(self.reference,session_deadline_monotonic=self.deadline)
+        record=record_action_checkpoint(self.backend,reference,label,timeout_seconds=min(5,max(.01,deadline-time.monotonic())),
             check=self._input_guard)
         path=self.folder/(label+'.checkpoint.json');path.write_text(json.dumps(record,indent=2),encoding='utf-8')
         if record.get('checkpoint_valid') is not True:raise ValueError('Checkpoint failed: '+record['stop_reason'])
@@ -301,4 +325,8 @@ class ProjectProbeIO:
 
     def release(self):
         if self.sent_any:
-            self.game.send(4);self.game.send(16)
+            errors=[]
+            for flag in (4,16):
+                try:self.game.send(flag)
+                except Exception as exc:errors.append(str(exc))
+            if errors:raise RuntimeError('; '.join(errors))

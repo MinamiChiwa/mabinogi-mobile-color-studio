@@ -7,6 +7,7 @@ STAGES={
     'export':'保存颜色板','validate':'检查拼图质量','search':'搜索目标颜色',
     'similarity':'计算旋转与缩放','ready':'准备候选方案','position':'移动到目标位置','verify':'复核游戏色码',
     'observe':'读取当前游戏色码','restore':'恢复已测最佳颜色',
+    'retry':'重新搜索目标颜色',
 }
 
 

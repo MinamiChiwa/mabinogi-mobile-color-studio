@@ -17,6 +17,8 @@ from native_input_route_search import _needed
 from dye_regions import session_region_count,bind_region_rules
 from .candidate_selection import (candidate_id,candidate_observation,present_candidates,
     compile_candidate_selection,CandidateUnavailable,exact_observed_rules,actual_colors)
+from .retry import RetryRequested,minimum_scale_route,at_minimum_scale
+from .session_deadline import verified_timer_extension
 
 
 class GoalStop(Exception):pass
@@ -24,29 +26,45 @@ class GoalStop(Exception):pass
 
 def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.monotonic,
         max_rounds=64,max_actions=64,planner=plan_from_checkpoint,event=lambda row:None,pause=time.sleep,
-        candidate_choice=None):
+        candidate_choice=None,retry_requested=None,timer_deadline_extension=None):
     count=session_region_count(session)
     rules=normalize_target_rules(bind_region_rules(rules,count))
     if (type(max_rounds) is not int or not 1<=max_rounds<=64 or type(max_actions) is not int or not 1<=max_actions<=64
         or not math.isfinite(engineering_deadline)):
         raise ValueError('Invalid native execution limits')
     start=clock();end=engineering_deadline;timer_grace_until=start+EARLY_TIMER_GRACE_SECONDS
+    initial_engineering_deadline=engineering_deadline
+    qualified_timer_frame=None;qualified_timer_checkpoint=None
     backend_binding=None;previous_timer=None;current=None;context=None
     result=dict(rules=rules,region_count=count,stop_reason='not_started',accepted=False,target_exact=False,verified=False,
         planning_rounds=[],steps=[],observations=[],actual_input_attempts=0,
-        server_confirmation_verified=False,initial_visual_retries=0,observation_retries=0,compromise_selected=False)
+        server_confirmation_verified=False,initial_visual_retries=0,observation_retries=0,compromise_selected=False,
+        retry_epochs=0,retries=[])
     compromise_route=None;compromise_template=None;best_observed=None
     target_route=None;target_template=None
     candidate_rows=[];candidate_observations={};batch_id='native-'+str(time.monotonic_ns())
     if candidate_choice is not None and not callable(candidate_choice):raise ValueError('Invalid candidate choice callback')
-    costs=dict(native=[],visual=[],input=[])
+    if retry_requested is not None and not callable(retry_requested):raise ValueError('Invalid retry callback')
+    if candidate_choice is not None and retry_requested is not None:raise ValueError('Candidate selection and retry are exclusive')
+    retry_suppressed=True;retry_pending=False;planning_count=0
+    previous_retry_check=getattr(io,'retry_check',None)
+    costs=dict(native=[],visual=[],input=[],closing_visual=[])
     io.timer_grace_until=timer_grace_until
     def emit(name,**data):event(dict(event=name,at_monotonic=clock(),**data))
+    def check_retry():
+        nonlocal retry_pending
+        if retry_requested is not None and not retry_suppressed:
+            if retry_pending or retry_requested():
+                retry_pending=True;raise RetryRequested('user_retry')
+    if retry_requested is not None:io.retry_check=check_retry
     def guard(phase_deadline=None):
         until=end if phase_deadline is None else min(end,phase_deadline)
         io.check(until)
+        check_retry()
         if phase_deadline is not None and clock()>=until:raise TimeoutError('observation/input phase deadline')
         if clock()+8.>=end:raise GoalStop('insufficient_time')
+    def planning_guard(phase_deadline=None):
+        getattr(io,'planning_check',io.check)(end if phase_deadline is None else min(end,phase_deadline));check_retry()
     def route_allowance(row):
         route=row['input_route'];count=len(route)
         native=max(1.5,1.5*max(costs['native'][-3:],default=0.)+.3)
@@ -62,7 +80,7 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
         if count and clock()+allowance+(visual if include_revalidation else 0.)>=end:
             raise GoalStop('insufficient_time')
     def observe(label,phase_deadline=None):
-        nonlocal end,backend_binding,previous_timer,current
+        nonlocal end,backend_binding,previous_timer,current,qualified_timer_frame,qualified_timer_checkpoint
         current=None
         guard(phase_deadline);began=clock();until=end if phase_deadline is None else min(end,phase_deadline)
         before=io.input_backend(until)
@@ -84,6 +102,28 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
         frames=copy.deepcopy(frames)
         for frame in frames:frame['timer_advisory']=True
         _frames(cp,frames)
+        # Metadata distinguishes the conservative unknown-age startup cap from
+        # an intentional caller limit. IO independently validates this pair.
+        if timer_deadline_extension is not None and callable(getattr(io,'set_verified_session_deadline',None)):
+            pairs=[frames]
+            if (qualified_timer_checkpoint is not None and qualified_timer_frame is not None
+                    and all(qualified_timer_checkpoint[key]==cp[key] for key in ('binding','pose','client_hex'))):
+                pairs.extend(([qualified_timer_frame,frame] for frame in frames))
+            for pair in pairs:
+                approved=verified_timer_extension(cp,pair,initial_engineering_deadline=initial_engineering_deadline,
+                    current_deadline=end,extension=timer_deadline_extension,timer_grace_until=timer_grace_until,now=clock())
+                if approved is not None:
+                    io.set_verified_session_deadline(approved['deadline'],approved['evidence'])
+                    end=approved['deadline']
+                    result.setdefault('deadline_extensions',[]).append(copy.deepcopy(approved))
+                    emit('native_deadline_corrected',effective_deadline=end,maximum_deadline=timer_deadline_extension['maximum_deadline'])
+                    break
+            qualified=[frame for frame in frames if frame.get('screenshot_hex_verified') is True
+                and frame.get('screenshot_hex')==cp['client_hex'] and frame.get('hex_source')==['screenshot']*count
+                and frame.get('timer_confidence')=='two_pass_agree' and frame.get('captured_monotonic',0.)>=timer_grace_until]
+            if qualified:
+                qualified_timer_frame=copy.deepcopy(qualified[-1]);qualified_timer_checkpoint=copy.deepcopy(cp)
+            else:qualified_timer_frame=qualified_timer_checkpoint=None
         for frame in frames:
             seconds,when=frame['remaining_seconds'],frame['captured_monotonic']
             if when<timer_grace_until:
@@ -102,6 +142,7 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
             else:frame['timer_policy']='unknown_advisory'
         current=dict(checkpoint=cp,frames=frames)
         result['observations'].append(dict(label=label,checkpoint=cp,frames=frames,input_before=before,input_after=after))
+        costs['closing_visual'].append(max(0.,clock()-began))
         if not label.startswith('initial'):costs['visual'].append(max(0.,clock()-began))
         guard(phase_deadline);return cp,frames
     def observe_resilient(label,phase_deadline=None):
@@ -153,9 +194,20 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
         emit('action',kind=gesture['kind'],purpose=purpose)
         performer=(getattr(io,'perform_protected_candidate',io.perform_candidate)
             if phase_deadline is not None and purpose in ('refine','restore_refinement','select_candidate','restore_selection') else io.perform_candidate)
-        began=clock();receipt=performer(gesture,label,until);step['receipt']=receipt
+        began=clock()
+        try:receipt=performer(gesture,label,until)
+        except RetryRequested as exc:
+            costs['input'].append(max(0.,clock()-began))
+            receipt=getattr(exc,'receipt',None)
+            if receipt is not None:step['receipt']=receipt
+            elif getattr(exc,'input_not_started',False):
+                step['input_not_started']=True;result['actual_input_attempts']-=1
+            else:raise GoalStop('input_outcome_unknown') from exc
+            raise
+        step['receipt']=receipt
         costs['input'].append(max(0.,clock()-began-gesture['input_seconds']))
         if receipt.get('completed') is not True:raise GoalStop('input_outcome_unknown')
+        if retry_requested is not None and receipt.get('released') is not True:raise GoalStop('input_outcome_unknown')
         trace=receipt.get('actual_trace')
         trace_ok=(isinstance(trace,list) and len(trace)==len(gesture['points']) and not any(
             row.get('actual_client') is None or np.max(np.abs(np.asarray(row['actual_client'])-point))>1
@@ -172,7 +224,7 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
         else:
             after=observe_native(label+'_native_after',until);after_frames=None
             measured=assess_native_feedback(context,after,rules,expected_pose=expected)
-            if measured['observed_target_accepted'] and purpose not in ('select_candidate','restore_selection'):
+            if measured['observed_target_accepted'] and purpose not in ('select_candidate','restore_selection','retry_reset'):
                 # Confirm an early target hit visually. A valid bound native
                 # pose residual only rebases subsequent input; it does not
                 # repeat the costly screenshot/OCR phase mid-route.
@@ -189,6 +241,128 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
             step['model_response_warning']='model_response_mismatch'
             measured['stop_reason']='replan_required'
         return after,after_frames,measured
+
+    def retry_fields():
+        fields=dict(effective_deadline=end,epoch=result['retry_epochs'])
+        if current is not None:
+            fields.update(current_colors=list(current['checkpoint']['client_hex']),
+                verified=True,screenshot_verified=bool(current.get('frames') and context and
+                    assess_feedback(context,current['checkpoint'],current['frames'],rules)['screenshot_verified']))
+        else:fields.update(current_colors=[None]*count,verified=False,screenshot_verified=False)
+        return fields
+    def retry_allowance(route):
+        native=max(1.5,1.5*max(costs['native'][-3:],default=0.)+.3)
+        visual=max(4.,1.5*max(costs['closing_visual'][-3:],default=0.)+.5)
+        preparation=max(.6,1.5*max(costs['input'][-3:],default=0.)+.25)
+        # A retry admits the complete reset, a useful bounded new search and
+        # two ordinary gestures with measured final readback before any wheel.
+        reset=sum(g['input_seconds']+preparation+native for g in route)
+        return native+reset+visual+15.+2*(preparation+.5)+native+visual+8.25
+    def retry_available(reason,*,waiting=False):
+        if retry_requested is None:return
+        enabled=(planning_count<max_rounds and result['actual_input_attempts']<max_actions
+            and clock()+retry_allowance([])<end)
+        emit('native_retry_available',enabled=enabled,reason=reason if enabled else
+            ('action_limit' if result['actual_input_attempts']>=max_actions else
+             'round_limit' if planning_count>=max_rounds else 'insufficient_retry_time'),waiting_for_retry=waiting,**retry_fields())
+    def wait_for_retry():
+        nonlocal cp,frames,current,retry_suppressed
+        if retry_requested is None:return False
+        retry_available(result['stop_reason'],waiting=True)
+        budget_disabled=clock()+retry_allowance([])>=end
+        while True:
+            visual=max(4.,1.5*max(costs['closing_visual'][-3:],default=0.)+.5)
+            native=max(1.5,1.5*max(costs['native'][-3:],default=0.)+.3)
+            close=visual+native+8.25
+            if clock()+close>=end:break
+            if not budget_disabled and clock()+retry_allowance([])>=end:
+                emit('native_retry_available',enabled=False,reason='insufficient_retry_time',waiting_for_retry=True,**retry_fields())
+                budget_disabled=True
+            try:
+                io.check(end);check_retry()
+            except RetryRequested:return True
+            except Exception:
+                if current is not None:result['last_verified_retry']=copy.deepcopy(current)
+                current=None
+                raise
+            pause(min(.1,max(0.,end-close-clock())))
+        emit('native_retry_available',enabled=False,reason='session_closing',**retry_fields())
+        # Finish the waiting session from a new actual pose and screenshots.
+        # A normal waiting deadline never overwrites a measured target hit.
+        retry_suppressed=True
+        try:
+            if clock()+8.<end:
+                cp,frames=observe_resilient('retry_wait_closed')
+                measured=assess_feedback(context,cp,frames,rules)
+                result['accepted']=measured['observed_target_accepted']
+                if result['accepted']:result['stop_reason']='target_observed'
+                elif result['stop_reason']=='target_observed':result['stop_reason']='compromise_observed'
+            else:
+                # No final independent read means the cached match is stale.
+                if current is not None:result['last_verified_retry']=copy.deepcopy(current)
+                current=None;result['accepted']=False;result['verified']=False
+                if result['stop_reason']=='target_observed':result['stop_reason']='insufficient_time'
+        finally:retry_suppressed=False
+        return False
+    def reset_retry():
+        nonlocal cp,frames,current,best_observed,retry_suppressed,retry_pending
+        nonlocal target_route,target_template,compromise_route,compromise_template
+        retry_pending=False;retry_suppressed=True
+        epoch=result['retry_epochs']+1
+        attempt=dict(epoch=epoch,requested_monotonic=clock(),effective_deadline=end,status='requested')
+        result['retries'].append(attempt)
+        def reject(reason):
+            nonlocal cp,frames
+            if current is None or not current.get('frames'):
+                cp,frames=observe_resilient('retry_'+str(epoch)+'_rejected')
+            attempt.update(status='rejected',reason=reason)
+            emit('native_retry_reset',status='rejected',reason=reason,**retry_fields())
+            return False
+        try:
+            if result['steps']:
+                last=result['steps'][-1]
+                receipt=last.get('receipt')
+                if receipt is not None and (receipt.get('completed') is not True and
+                        not (receipt.get('interrupted') is True and receipt.get('released') is True)):
+                    raise GoalStop('input_outcome_unknown')
+                if receipt is not None and receipt.get('released') is not True:
+                    raise GoalStop('input_outcome_unknown')
+            if planning_count>=max_rounds:return reject('round_limit')
+            if result['actual_input_attempts']>=max_actions:return reject('action_limit')
+            if clock()+retry_allowance([])>=end:return reject('insufficient_retry_time')
+            fresh=observe_native('retry_'+str(epoch)+'_reference')
+            try:route=minimum_scale_route(fresh['pose'],geometry,settings)
+            except ValueError:return reject('unsupported_retry_settings')
+            if len(route)+2>max_actions-result['actual_input_attempts']:
+                cp,frames=observe_resilient('retry_'+str(epoch)+'_rejected')
+                return reject('insufficient_retry_actions')
+            if clock()+retry_allowance(route)>=end:
+                cp,frames=observe_resilient('retry_'+str(epoch)+'_rejected')
+                return reject('insufficient_retry_time')
+            cp=fresh;frames=None
+            emit('native_retry_available',enabled=False,reason='retry_resetting',**retry_fields())
+            emit('native_retry_reset',status='zooming',reason='user_retry',**retry_fields())
+            for index,gesture in enumerate(route):
+                prior=cp['pose']['scale']
+                cp,frames,feedback=submit(gesture,'retry_'+str(epoch)+'_zoom_'+str(index),cp,
+                    'retry_reset',visual_required=False)
+                if at_minimum_scale(cp['pose'],settings):break
+                if cp['pose']['scale']>=prior:raise GoalStop('retry_minimum_unconfirmed')
+            if not at_minimum_scale(cp['pose'],settings):raise GoalStop('retry_minimum_unconfirmed')
+            cp,frames=observe_resilient('retry_'+str(epoch)+'_after')
+            if not at_minimum_scale(cp['pose'],settings):raise GoalStop('retry_minimum_unconfirmed')
+            # A deliberate retry owns a new measured anchor. Returning to a
+            # previous epoch's best would undo the user's requested zoom out.
+            best_observed=copy.deepcopy(current)
+            target_route=target_template=compromise_route=compromise_template=None
+            result.update(retry_epochs=epoch,accepted=False,stop_reason='not_started',compromise_selected=False)
+            attempt.update(status='searching',actual_pose=copy.deepcopy(cp['pose']),actual_colors=list(cp['client_hex']))
+            emit('native_retry_reset',status='searching',reason='user_retry',**retry_fields())
+            return True
+        finally:
+            retry_suppressed=False
+            # Repeated presses during the reset are coalesced into this reset.
+            if retry_requested is not None:retry_requested()
 
     def retain_candidates(plan):
         nonlocal candidate_rows
@@ -262,7 +436,7 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
             try:
                 compiled=compile_candidate_selection(context,fresh,rules,row,
                     deadline=min(clock()+6.,end-18.),clock=clock,
-                    check=lambda:getattr(io,'planning_check',io.check)(end))
+                    check=planning_guard)
                 route=compiled['input_route'];returns=compiled['prefix_recoveries']
                 outward,visual=route_allowance(compiled)
                 return_allowance=max((route_allowance(recovery)[0] for recovery in returns),default=0.)
@@ -342,7 +516,7 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                 if not recovery['prediction']['predicted_accepted']:
                     recovery=find_recovery(context,cp,baseline,anchor_rules,
                         deadline=min(clock()+2.,end-8.),clock=clock,
-                        check=lambda:getattr(io,'planning_check',io.check)(end),preferred_routes=(preferred,))
+                        check=planning_guard,preferred_routes=(preferred,))
                 if recovery is None:continue
                 allowance,_=route_allowance(recovery)
                 if len(recovery['input_route'])>max_actions-result['actual_input_attempts'] or clock()+allowance>=end:break
@@ -430,7 +604,7 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
             stats={};search_started=clock()
             try:
                 row=find_refinement(context,baseline,rules,deadline=search_end,clock=clock,
-                    check=lambda:getattr(io,'planning_check',io.check)(min(end,search_end)),excluded=excluded,
+                    check=lambda:planning_guard(search_end),excluded=excluded,
                     stats=stats,progress=lambda update:emit('refinement_search_progress',**update))
             except TimeoutError:
                 stop('local_search_timeout');return
@@ -541,7 +715,7 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                 if candidate is None:
                     try:
                         candidate=find_recovery(context,cp,baseline,rules,deadline=search_until,clock=clock,
-                            check=lambda:getattr(io,'planning_check',io.check)(min(end,search_until)),
+                            check=lambda:planning_guard(search_until),
                             preferred_routes=(*pending_returns,*(r['input_route'] for r in reversed(returns))))
                     except TimeoutError as exc:
                         transaction.setdefault('recovery_search_errors',[]).append(str(exc));continue
@@ -585,32 +759,13 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
             transaction['status']='recovery_unconfirmed'
             raise GoalStop('refinement_recovery_unconfirmed')
         stop('insufficient_protected_actions')
-    try:
-        guard();visual_end=min(end,clock()+EARLY_TIMER_GRACE_SECONDS)
-        for attempt in range(120):
-            if clock()>=visual_end:raise GoalStop('initial_visual_timeout')
-            try:
-                cp,frames=observe('initial' if attempt==0 else 'initial_retry_'+str(attempt),visual_end)
-                if clock()>=visual_end:raise GoalStop('initial_visual_timeout')
-                break
-            except (VisualNotReady,TimeoutError) as exc:
-                guard()
-                if clock()>=visual_end:raise GoalStop('initial_visual_timeout')
-                result['initial_visual_retries']+=1
-                emit('initial_visual_wait',attempt=attempt+1,error=str(exc),waiting_deadline=visual_end)
-                pause(min(.25,max(0.,visual_end-clock())))
-        else:raise GoalStop('initial_visual_timeout')
-        geometry=InputGeometry(cp['board'],cp['local_size'],'windows_legacy_mouse_pixels',cp.get('pixel_mapping'))
-        context=bind_planning_context(session,cp,geometry,settings,wheel_delta_per_step=1.,calibration_evidence=dict(
-            source='native_live_repeated_input_backend',viewport_origin=backend_binding['viewport_origin'],
-            viewport_scale=backend_binding['viewport_scale'],backend_during_actions_synchronously_recorded=True))
-        if settings.move_threshold!=0.:raise GoalStop('unsupported_input_settings')
-        result['initial']=copy.deepcopy(current)
-        initial_score=score_codes(cp['client_hex'],rules)
-        initial_metrics=quality_fields(initial_score,rules,verified=True)
-        result.update(initial_maximum=initial_metrics['maximum'],initial_average=initial_metrics['average'])
-        best_observed=copy.deepcopy(current)
-        for number in range(max_rounds):
+    def execute_search():
+        nonlocal cp,frames,current,end,best_observed,planning_count
+        nonlocal target_route,target_template,compromise_route,compromise_template
+        while planning_count<max_rounds:
+            number=planning_count;planning_count+=1
+            search_cap=25.
+            retry_available('searching')
             guard();observed=assess_feedback(context,cp,frames,rules)
             emit('observed',colors=cp['client_hex'],remaining_seconds=frames[-1]['remaining_seconds'])
             if observed['stop_reason']=='target_visual_unconfirmed':raise GoalStop('target_visual_unconfirmed')
@@ -620,32 +775,39 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                     grid=PoseGrid((x-.04,x+.04),(y-.02,y+.02),9,5,
                         (s*.99,s,s*1.01,s*.9999),(p['rotation_degrees'],))
                     plan=planner(context,cp,frames,rules,grid,now=clock(),engineering_deadline=end,
-                        time_budget_seconds=min(25.,max(.01,end-clock()-15)),clock=clock,
-                        check=lambda:getattr(io,'planning_check',io.check)(end),collect_candidates=True)
+                        time_budget_seconds=min(search_cap,max(.01,end-clock()-15)),clock=clock,
+                        check=planning_guard,collect_candidates=True)
                     result['planning_rounds'].append(plan);retain_candidates(plan)
                 result.update(stop_reason='target_observed',accepted=True);break
             if result['actual_input_attempts']>=max_actions:raise GoalStop('action_limit')
             pose=cp['pose'];x,y=pose['position'];scale=pose['scale']
             grid=PoseGrid((x-.04,x+.04),(y-.02,y+.02),9,5,
                 (scale*.99,scale,scale*1.01,scale*.9999),(pose['rotation_degrees'],))
+            search_cap=25.
+            if result['retry_epochs']:
+                native=max(1.5,1.5*max(costs['native'][-3:],default=0.)+.3)
+                visual=max(4.,1.5*max(costs['closing_visual'][-3:],default=0.)+.5)
+                preparation=max(.6,1.5*max(costs['input'][-3:],default=0.)+.25)
+                route_reserve=2*(preparation+.5)+native+2*visual+8.25
+                search_cap=min(25.,max(.01,end-clock()-route_reserve))
             emit('planning',round=number,purpose='compromise' if compromise_route is not None else 'target')
             if target_route is not None:
                 plan=rebase_compromise_plan(context,cp,frames,rules,target_route,target_template,
-                    now=clock(),check=lambda:getattr(io,'planning_check',io.check)(end),purpose='target')
+                    now=clock(),check=planning_guard,purpose='target')
                 if plan['candidate'] is None:
                     target_route=target_template=None
                     plan=planner(context,cp,frames,rules,grid,now=clock(),engineering_deadline=end,
-                        time_budget_seconds=min(25.,max(.01,end-clock()-15)),clock=clock,
-                        check=lambda:getattr(io,'planning_check',io.check)(end),
+                        time_budget_seconds=min(search_cap,max(.01,end-clock()-15)),clock=clock,
+                        check=planning_guard,
                         **({'collect_candidates':True} if candidate_choice is not None else {}))
             elif compromise_route is None:
                 plan=planner(context,cp,frames,rules,grid,now=clock(),engineering_deadline=end,
-                    time_budget_seconds=min(25.,max(.01,end-clock()-15)),clock=clock,
-                    check=lambda:getattr(io,'planning_check',io.check)(end),
+                    time_budget_seconds=min(search_cap,max(.01,end-clock()-15)),clock=clock,
+                    check=planning_guard,
                     **({'collect_candidates':True} if candidate_choice is not None else {}))
             else:
                 plan=rebase_compromise_plan(context,cp,frames,rules,compromise_route,compromise_template,
-                    now=clock(),check=lambda:getattr(io,'planning_check',io.check)(end))
+                    now=clock(),check=planning_guard)
             result['planning_rounds'].append(plan)
             retain_candidates(plan)
             purpose='target'
@@ -732,7 +894,7 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                 grid=PoseGrid((x-.04,x+.04),(y-.02,y+.02),9,5,(s*.99,s,s*1.01,s*.9999),(p['rotation_degrees'],))
                 recovery_plan=plan_from_checkpoint(context,fresh,fresh_frames,restore_rules,grid,now=clock(),
                     engineering_deadline=end,time_budget_seconds=min(4.,max(.01,end-clock()-12)),clock=clock,
-                    check=lambda:getattr(io,'planning_check',io.check)(end))
+                    check=planning_guard)
                 result['restoration_rounds'].append(recovery_plan)
                 candidate=recovery_plan['candidate']
                 if candidate is None:break
@@ -788,6 +950,50 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                 result['last_verified_candidate']=copy.deepcopy(current)
                 current=None
             raise
+    try:
+        guard();visual_end=min(end,clock()+EARLY_TIMER_GRACE_SECONDS)
+        for attempt in range(120):
+            if clock()>=visual_end:raise GoalStop('initial_visual_timeout')
+            try:
+                cp,frames=observe('initial' if attempt==0 else 'initial_retry_'+str(attempt),visual_end)
+                if clock()>=visual_end:raise GoalStop('initial_visual_timeout')
+                break
+            except (VisualNotReady,TimeoutError) as exc:
+                guard()
+                if clock()>=visual_end:raise GoalStop('initial_visual_timeout')
+                result['initial_visual_retries']+=1
+                emit('initial_visual_wait',attempt=attempt+1,error=str(exc),waiting_deadline=visual_end)
+                pause(min(.25,max(0.,visual_end-clock())))
+        else:raise GoalStop('initial_visual_timeout')
+        geometry=InputGeometry(cp['board'],cp['local_size'],'windows_legacy_mouse_pixels',cp.get('pixel_mapping'))
+        context=bind_planning_context(session,cp,geometry,settings,wheel_delta_per_step=1.,calibration_evidence=dict(
+            source='native_live_repeated_input_backend',viewport_origin=backend_binding['viewport_origin'],
+            viewport_scale=backend_binding['viewport_scale'],backend_during_actions_synchronously_recorded=True))
+        if settings.move_threshold!=0.:raise GoalStop('unsupported_input_settings')
+        result['initial']=copy.deepcopy(current)
+        initial_score=score_codes(cp['client_hex'],rules)
+        initial_metrics=quality_fields(initial_score,rules,verified=True)
+        result.update(initial_maximum=initial_metrics['maximum'],initial_average=initial_metrics['average'])
+        best_observed=copy.deepcopy(current)
+        retry_suppressed=False
+        while True:
+            should_retry=False
+            try:
+                execute_search()
+                should_retry=wait_for_retry()
+            except RetryRequested:should_retry=True
+            except GoalStop as exc:
+                reason=str(exc)
+                if retry_requested is None or reason not in ('not_found_in_budget','insufficient_time','round_limit','action_limit'):
+                    raise
+                result['stop_reason']=reason
+                try:should_retry=wait_for_retry()
+                except RetryRequested:should_retry=True
+            if not should_retry:break
+            while should_retry:
+                if reset_retry():break
+                should_retry=wait_for_retry()
+            if not should_retry:break
     except GoalStop as exc:result['stop_reason']=str(exc)
     except InterruptedError as exc:result.update(stop_reason='interrupted',error=str(exc))
     except TimeoutError as exc:result.update(stop_reason='insufficient_time',error=str(exc))
@@ -797,6 +1003,7 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
         result.update(stop_reason='internal_error',error=type(exc).__name__+': '+str(exc),
                       error_traceback=traceback.format_exc())
     finally:
+        if retry_requested is not None:io.retry_check=previous_retry_check
         try:io.release()
         except Exception as exc:result['release_error']=str(exc)
     if current is not None and current.get('frames'):
@@ -804,7 +1011,7 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
         result['screenshot_verified']=assess_feedback(context,current['checkpoint'],current['frames'],rules)['screenshot_verified'] if context else False
         result.update(verified=True,actual_colors=score['colors'],actual_deltas=score['deltas'],
             target_exact=score['target_exact'],current=current,remaining_seconds=current['frames'][-1]['remaining_seconds'])
-        if candidate_choice is not None:
+        if candidate_choice is not None or retry_requested is not None:
             result['accepted']=bool(score['accepted'] and result['screenshot_verified'])
             result['actual_colors']=list(current['checkpoint']['client_hex'])
         if candidate_choice is not None:

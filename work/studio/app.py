@@ -376,9 +376,6 @@ class App(ct.CTk):
         self.status=ct.CTkLabel(status,text='就绪 · 请先选择游戏窗口和目标颜色',font=BODY_FONT,anchor='w',justify='left',wraplength=720,text_color=INK);self.status.grid(row=0,column=0,padx=18,pady=(12,5),sticky='ew')
         self.detail=ct.CTkLabel(status,text='',font=SMALL_FONT,text_color=MUTED,wraplength=720,anchor='w',justify='left')
         self.detail.grid(row=1,column=0,padx=18,pady=(0,8),sticky='ew');self.detail.grid_remove()
-        self.candidates_button=ct.CTkButton(status,text='查看本轮候选',width=150,height=30,font=SMALL_FONT,
-            fg_color='#28364A',command=self.show_native_candidate_results)
-        self._native_candidates_available=False
         label=ct.CTkLabel(intro,text='适用于港澳台服瑪奇Mobile。游戏中使用本工具可能存在风险，建议谨慎使用。',font=SMALL_FONT,text_color=MUTED,wraplength=320,justify='left',anchor='w');label.pack(fill='x',pady=(0,8));self.intro_labels.append(label)
         self.footer=ct.CTkLabel(self.page,text='F9 随时停止并释放鼠标  ·  切换窗口停止寻色  ·  不自动开启下一瓶染色剂',font=SMALL_FONT,text_color=MUTED,wraplength=340,justify='right');self.footer.grid(row=5,column=0,padx=BODY_SIDE_PADDING,pady=(0,8),sticky='e')
         self._layout_columns=None;self._layout_content_width=None;self._layout_width=None;self._pending_layout_width=None;self._resize_layout_job=None;self._topbars_compact=None
@@ -695,7 +692,7 @@ class App(ct.CTk):
         target=self.selected_window
         self.active_rules=rules
         self._native_candidate_batch=None;self._native_candidate_closed=False
-        self.set_native_candidate_results_available(False)
+        self._retry_enabled=False
         self.active_mode=mode
         self.busy=True;self.start.configure(state='disabled');self.status.configure(text='正在识别游戏界面…')
         session_root=DATA/'sessions'
@@ -714,35 +711,26 @@ class App(ct.CTk):
                          kwargs={'strategy':runtime_strategy},daemon=True).start()
     def select_candidate(self,batch_id,candidate_id):
         if self.runner:self.runner.choose_candidate(batch_id,candidate_id)
-    def set_native_candidate_results_available(self,available):
-        self._native_candidates_available=bool(available)
-        button=getattr(self,'candidates_button',None)
-        if button is None:return
-        if self._native_candidates_available:
-            button.grid(row=2,column=0,padx=18,pady=(0,8),sticky='w')
-        else:
-            # CTk replays its last grid() on scaling. grid_forget() also clears
-            # that record, so an unavailable result cannot reappear after DPI
-            # or density changes; showing supplies the complete layout again.
-            button.grid_forget()
-    def show_native_candidate_results(self):
-        if not self.busy and getattr(self,'_native_candidates_available',False) and self.overlay is not None:
-            self.overlay.reopen_native_candidates()
+    def request_native_retry(self):
+        if (self.runner and self.busy and self.search_strategy.get()=='native'
+                and getattr(self,'_retry_enabled',False)):
+            self._retry_enabled=False
+            if self.overlay is not None:self.overlay.mark_retry_requested()
+            self.runner.request_retry()
     def stop(self):
         if self.runner:self.runner.stop.set()
         self._native_candidate_closed=True
-        self.set_native_candidate_results_available(False)
+        self._retry_enabled=False
         self.status.configure(text='正在停止并释放鼠标…' if self.busy else '已停止自动染色，可重新开始。')
         if self.overlay is not None:self.overlay.dismiss()
     def finish_run(self):
         stopped=self.runner is not None and self.runner.stop.is_set()
-        self.busy=False;self.runner=None;self.start.configure(state='normal')
+        self.busy=False;self.runner=None;self._retry_enabled=False;self.start.configure(state='normal')
         if stopped:
             self.status.configure(text='已停止自动染色，可重新开始。')
             if self.overlay is not None:self.overlay.dismiss()
-            self.set_native_candidate_results_available(False)
     def hotkey_loop(self):
-        keys=[(1,0x77),(2,0x78)]
+        keys=[(1,0x77),(2,0x78),(3,0x76)]
         if not getattr(sys,'frozen',False):keys.append((5,0x75))
         def receive(kind,data):
             if kind=='hotkey' and data['id']==2 and self.runner:self.runner.stop.set()
@@ -765,11 +753,12 @@ class App(ct.CTk):
         if k=='hotkey':
             if d['id']==1:self.go(activate=True)
             elif d['id']==2:self.stop()
+            elif d['id']==3:self.request_native_retry()
             elif d['id']==5:self.go('recovery_test')
         elif k=='hotkey_status':
-            names={1:'F8',2:'F9',5:'F6'}
+            names={1:'F8',2:'F9',3:'F7',5:'F6'}
             failed=[names[i] for i in d['failed']]
-            text=(tr('快捷键已就绪：F8 开始 / F9 停止') if not failed else
+            text=(tr('快捷键已就绪：F8 开始 / F7 重试 / F9 停止') if not failed else
                   tr('全局注册不可用：')+', '.join(failed)+tr('；F9 仍通过轮询停止，其他操作请使用按钮。'))
             self.footer.configure(text=text)
         elif k=='window_bound':
@@ -795,46 +784,29 @@ class App(ct.CTk):
             from ui_progress import progress_text
             title,body=progress_text(d)
             self.status.configure(text=tr(title));self.set_detail(tr(body))
-        elif k in ('native_candidates','native_candidate_ready'):
-            if (getattr(self,'_native_candidate_closed',False) or
-                    (getattr(self,'_native_candidate_batch',None) is not None and
-                     d.get('batch_id')!=self._native_candidate_batch)):return
-            self._native_candidate_batch=d['batch_id']
-            if k=='native_candidates':self._native_candidate_closed=False
-            self.status.configure(text=tr('本轮候选方案'))
-            self.set_detail(tr('当前颜色已复核，可选择其他方案。') if k=='native_candidate_ready'
-                            else tr('候选按区域优先级与色差排序'))
-            candidate_id=d.get('current_candidate_id')
-            measured=d.get('observations',{}).get(candidate_id,{})
-            if measured.get('verified'):
-                for card,color in zip(self.cards,measured.get('actual_colors') or []):
+        elif k=='native_retry_available':
+            self._retry_enabled=bool(d.get('enabled'))
+            if d.get('verified') and d.get('screenshot_verified'):
+                for card,color in zip(self.cards,d.get('current_colors') or []):
                     card.current.configure(text=tr('当前颜色  ')+(color or tr('读取失败')))
-            self.set_native_candidate_results_available(bool(d.get('candidates')))
-        elif k in ('native_candidate_selected','native_candidate_closed'):
-            if d.get('batch_id')!=getattr(self,'_native_candidate_batch',None):return
+            if d.get('waiting_for_retry'):
+                self.status.configure(text=tr('本轮寻色已完成'))
+                self.set_detail(tr('可按 F7 或点击浮窗重试；剩余时间不足时保留当前颜色。' if d.get('enabled')
+                    else '剩余时间不足以完成重试，已保留当前颜色。'))
+        elif k=='native_retry_reset':
+            self._retry_enabled=False
             status=d.get('status')
-            if k=='native_candidate_closed' or status=='expired':
-                self._native_candidate_closed=True
-                if d.get('verified') and d.get('screenshot_verified'):
-                    for card,color in zip(self.cards,d.get('actual_colors') or d.get('current_colors') or []):
-                        card.current.configure(text=tr('当前颜色  ')+(color or tr('读取失败')))
-                self.status.configure(text=tr('已保留当前方案'))
-                self.set_detail(tr('候选选择已结束，以下方案仅供查看。'))
-            elif status=='positioning':
-                self.status.configure(text=tr('正在定位所选方案'))
-                self.set_detail(tr('正在核对当前游戏色码。'))
-            elif status in ('observed','current','restored') and d.get('screenshot_verified'):
-                for card,color in zip(self.cards,d.get('actual_colors') or []):
-                    card.current.configure(text=tr('当前颜色  ')+(color or tr('读取失败')))
-                self.status.configure(text=tr('所选方案已复核'))
-                self.set_detail(tr('当前颜色已复核，可选择其他方案。'))
+            if status=='zooming':
+                self.status.configure(text=tr('正在重试'))
+                self.set_detail(tr('正在缩小画板并重新搜索。'))
+            elif status=='searching':
+                self.status.configure(text=tr('重新搜索目标颜色'))
+                self.set_detail(tr('沿用本局剩余时间重新寻色；F9 可停止。'))
             elif status=='rejected':
-                from native_status import candidate_reason_text
-                self.status.configure(text=tr('已保留当前方案'))
-                self.set_detail(tr(candidate_reason_text(d.get('reason'))))
-            elif status=='recovery_unconfirmed':
-                self._native_candidate_closed=True
-                self.status.configure(text=tr('已停止自动移动'));self.set_detail(tr('请以游戏当前颜色为准。'))
+                self.status.configure(text=tr('暂时无法重试'))
+                self.set_detail(tr('剩余时间不足以完成重试，已保留当前颜色。'))
+        elif k in ('native_candidates','native_candidate_ready','native_candidate_selected','native_candidate_closed'):
+            return
         elif k=='native_result':
             if d.get('region_count') in (2,3):self.apply_region_layout(d)
             from native_status import result_text

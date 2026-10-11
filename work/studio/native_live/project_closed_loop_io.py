@@ -46,7 +46,7 @@ class ProjectClosedLoopIO(ProjectProbeIO):
         super().__init__(*args,**kwargs);self.input_reference=None;self.input_attempts=0;self.hex_fallback=read_card_glyphs
         self._planning_probe_at=None
     def planning_check(self,deadline):
-        self.deadline=min(deadline,self.reference['session_deadline_monotonic'])
+        self.deadline=min(deadline,getattr(self,'accepted_session_deadline',self.reference['session_deadline_monotonic']))
         self._input_guard()
         now=time.monotonic()
         if self._planning_probe_at is None or now-self._planning_probe_at>=.25 or now<self._planning_probe_at:
@@ -79,6 +79,13 @@ class ProjectClosedLoopIO(ProjectProbeIO):
             if self.input_attempts==before:raise InputNotStarted(str(exc)) from exc
             raise
     def _perform_candidate(self,record,label,deadline,*,feedback_reserve_seconds):
+        from .retry import RetryRequested
+        before=self.input_attempts
+        try:return self._perform_candidate_checked(record,label,deadline,feedback_reserve_seconds=feedback_reserve_seconds)
+        except RetryRequested as exc:
+            if self.input_attempts==before:exc.input_not_started=True
+            raise
+    def _perform_candidate_checked(self,record,label,deadline,*,feedback_reserve_seconds):
         if not isinstance(label,str) or not re.fullmatch(r'[a-z][a-z0-9_]{0,47}',label):raise ValueError('Bad input label')
         self.check(deadline)
         if self.input_attempts>=64:raise ValueError('Maximum input attempt accounting reached')
@@ -103,7 +110,21 @@ class ProjectClosedLoopIO(ProjectProbeIO):
             self._performing_input=True
             receipt['completed']=bool(self.game.perform_gesture(gesture))
             return receipt
+        except Exception as exc:
+            from .retry import RetryRequested
+            if isinstance(exc,RetryRequested):
+                receipt['interrupted']=True
+                exc.receipt=receipt
+            raise
         finally:
             self._performing_input=False
+            # The controller may start a retry only after both buttons have
+            # actually been released, including a partially emitted gesture.
+            release_errors=[]
+            for flag in (4,16):
+                try:self.game.send(flag)
+                except Exception as exc:release_errors.append(str(exc))
+            receipt['released']=not release_errors
+            if release_errors:receipt['release_error']='; '.join(release_errors)
             receipt.update(finished_monotonic=time.monotonic(),actual_trace=self.game.last_input_trace)
             (self.folder/(label+'.input.json')).write_text(json.dumps(receipt,indent=2),encoding='utf-8')
