@@ -9,6 +9,8 @@
 - `python scripts/run_tests.py --suite research`：历史搜索矩阵、候选分布、旧图像路线和完整研究回放。
 - `python scripts/run_tests.py --suite full`：所有已发现测试，仅用于版本审计或框架升级。
 
+当前选择规模为 quick 535、release 577、research 1131、full 1695。最近 quick 实跑为 529 通过、6 个可选样本跳过、零失败，约 61 秒；旧 quick 为 735 项、约 480 秒。历史 rc10 路线回放从 quick/release 移到 research/full，节省了主要耗时。
+
 新测试不会自动进入 quick。测试选择报告会列出未分类模块；确认它属于当前产品合同后，再加入 `QUICK_MODULES` 或 `QUICK_TEST_IDS`。历史回放应放在 research，避免每次改 UI 或输入保护都重新运行旧路线。
 
 发布前只需保留源码、三语 README、`TESTING.md`、`VERIFICATION.md`、当前版本 release notes 和最近一次验证报告。用户配置、游戏会话、截图和原始压缩包不能进入 Git 或发布包。
