@@ -1,5 +1,15 @@
 # Current verification scope
 
+## Candidate 0.4.2rc4: Three-second tail and global white-route recovery (2026-10-11)
+
+Policy: `native-three-second-tail-global-route-v22`. The latest rc3 three-white session retained a two-white plus near-white mathematical pose but no complete executable route under the old 12-degree compiler. The first measured compromise was far from white; the retry stopped with two-pass countdown frames still at 26/25 seconds. The palette remained active, so this was conservative budgeting rather than natural round expiry.
+
+The shared time policy now uses one three-second game-tail reserve. Fresh new rounds are capped at 117 seconds; an already-open unknown-age board starts with a 90-second conservative cap and can gain at most 27 seconds only from strong same-binding two-pass countdown evidence. The original 30-second advisory grace and retry epoch are preserved. Input, native read, screenshot, return and session checks are charged separately from this tail; no duplicate eight/ten-second idle padding is used.
+
+Global periodic approaches may opt into smooth rotations up to 90 degrees while generic compilation keeps its historical 12-degree default and micro candidates. Every proposed route is fully replayed, descriptor-validated, and remains unverified until actual game HEX is read. Completed measured candidates survive finite CPU search exhaustion; a longer late route without a protected return is deferred while shorter safe routes continue. A completed endpoint can reuse its fresh screenshot after a binding/pose probe, with standard five-second freshness and post-check verification.
+
+Final frozen release profile: 777 tests, 776 passed, one optional private OCR fixture skipped, zero failures/errors; 616.581 seconds total. This includes the saved three-white audit, 90-degree compiler replay, actual tail/deadline policy, paid reference observation, guard-cost accounting, late-route refusal, and continued rc10 route tests. No live game capture, input or dye item was used. Public release remains 0.4.1.
+
 ## Candidate 0.4.2rc3: Retry budgets from the actual reset route (2026-10-11)
 
 Policy: `native-measured-retry-reset-budget-v21`. The supplied desktop rc2 session requested retry with 48.594 seconds before its engineering cutoff. After a fresh native read, 47.516 remained. The original formula required 55.569 seconds for four reset groups, fixed 15-second search and assumed future gestures/reads, while the button used an empty reset route. The refusal did not establish that a retry was physically impossible.
