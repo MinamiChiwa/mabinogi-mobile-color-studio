@@ -1,3 +1,12 @@
+# Release 0.4.2 — labeled retry and signed update bootstrap (2026-10-12)
+
+- Retry search is explicitly marked Testing only in Simplified Chinese, Traditional Chinese and English. The actual button fits and remains accessible at100%,150%,200% scaling in all three languages. Search behavior is unchanged by this label.
+- Release regression:678 selected,675 passed,3 skipped,zero failures/errors;195.387 seconds total. Two required original rc16 similarity captures and one supplemental historical OCR archive are unavailable, so release_complete remains false. Publication does not convert those missing checks into passing evidence. Korean live dye/input validation remains pending.
+- Update asset ownership now includes the two shipped Korean launchers and guide, while rejecting arbitrary scripts and player data.31 focused asset/manifest/translation checks passed. Independent review found no blocker in this release diff.
+- Official bootstrap uses an Ed25519 production public key. The private key is held outside source/packages in current-user Windows DPAPI storage.0.4.1 users upgrade manually once; subsequent signed file updates and offline imports preserve settings and records.
+
+Release notes compare GitHub v0.4.1 with v0.4.2. Package, signatures and upload checks are recorded in `docs/verification-release-0.4.2.md` and local release evidence. No game input or dye consumable was used in this release preparation.
+
 # Local candidate 0.4.2rc13 — retry retention and measured route admission (2026-10-12)
 
 - The recorded retry had 63.313 seconds left at admission and 32.797 after reset/search. Its selected ten-action route needed about 34 seconds with measured input/readback, despite a 9.2-second model estimate. This was a route-budget failure, not a blanket inability to retry with 60 seconds left.

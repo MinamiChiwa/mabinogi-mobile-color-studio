@@ -108,7 +108,7 @@ class SearchOverlay(ct.CTkToplevel):
         self.copy.grid(row=0,column=0,padx=8,pady=4,sticky='ew')
         self.stop_button=ct.CTkButton(self,text='停止 F9',height=32,font=BODY_FONT,fg_color='#236D62',command=stop)
         self.stop_button.grid(row=2,column=0,padx=16,pady=(4,10),sticky='ew')
-        self.retry_button=ct.CTkButton(self,text='重新寻色 F7',height=30,font=BODY_FONT,
+        self.retry_button=ct.CTkButton(self,text='重新寻色（仅供测试） F7',height=30,font=BODY_FONT,
             fg_color='#28364A',state='disabled',command=self.request_retry)
         self.activity=ct.CTkProgressBar(self.content,height=4,mode='indeterminate',progress_color='#62D7BD')
         self.activity.grid(row=1,column=0,padx=8,pady=6,sticky='ew')

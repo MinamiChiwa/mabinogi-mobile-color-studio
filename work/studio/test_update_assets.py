@@ -11,6 +11,20 @@ class UpdateAssetTests(unittest.TestCase):
     seed=bytes.fromhex('9d61b19deffd5a60ba844af492ec2cc4' '4449c5697b326919703bac031cae7f60')
     public=bytes.fromhex('d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a')
 
+    def test_packaged_korean_launchers_and_guide_are_owned_but_other_scripts_are_not(self):
+        from updater.manifest import ManifestError,validate_relative_path
+        from scripts.verify_update_assets import verify_assets
+        from _updater_test_support import KEYS
+        paths=('Korean-preflight.cmd','Korean-validation.cmd','docs/korean-validation.md')
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp)/'app';root.mkdir();(root/'ColorStudio.exe').write_bytes(b'exe')
+            for name in paths:
+                target=root/name;target.parent.mkdir(exist_ok=True);target.write_bytes(b'official validation entry')
+            out=Path(temp)/'assets';build_assets(root,out,'0.4.2','stable',self.seed)
+            self.assertEqual(verify_assets(out,root,trusted_keys=KEYS)['files'],4)
+            for name in ('User-launcher.cmd','docs/personal.md','data/custom.cmd'):
+                with self.subTest(name=name),self.assertRaises(ManifestError):validate_relative_path(name)
+
     def test_missing_package_cannot_generate_empty_signed_release(self):
         with tempfile.TemporaryDirectory() as temp,self.assertRaises(ValueError):
             build_assets(Path(temp)/'missing',Path(temp)/'out','0.4.3','stable',self.seed)

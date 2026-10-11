@@ -72,4 +72,4 @@ Distribute the entire `outputs/release/ColorStudio` directory. Personal profiles
 
 ## Updates
 
-Bootstrap versions can check GitHub from the main window. You decide when to download and install. File updates keep settings, presets and all data. A full offline update can be imported when GitHub is unreachable. Older releases need one manual bootstrap upgrade. Development candidates have no production update key and are not an official update source.
+Bootstrap versions can check GitHub from the main window. You decide when to download and install. File updates keep settings, presets and all data. A full offline update can be imported when GitHub is unreachable. Older releases need one manual bootstrap upgrade. The official 0.4.2 package includes update signature verification. Retry search is labeled Testing only.
