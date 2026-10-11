@@ -67,5 +67,13 @@ class LosslessFloatVectorTests(unittest.TestCase):
         for point in (np.array([1e-38,-1e-38],np.float32),np.array([3e38,-3e38],np.float32)):
             np.testing.assert_array_equal(response._vector(point),point)
 
+    def test_masked_array_cannot_hide_nonfinite_data_or_change_return_type(self):
+        with self.assertRaises(ValueError):
+            response._vector(np.ma.array([np.inf,0],mask=[True,False],dtype=np.float32))
+        point=np.ma.array([.1,.2],mask=[True,False],dtype=np.float32)
+        result=response._vector(point)
+        self.assertIs(type(result),np.ndarray)
+        np.testing.assert_array_equal(result,np.array([.1,.2],dtype=np.float32))
+
 
 if __name__=='__main__':unittest.main()

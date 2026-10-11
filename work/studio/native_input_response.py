@@ -13,7 +13,7 @@ F = np.float32
 
 
 def _vector(value):
-    if isinstance(value,np.ndarray) and value.dtype==np.float32:
+    if type(value) is np.ndarray and value.dtype==np.float32:
         # Native replay already owns float32 points. Finite float32 values
         # cannot exceed their dtype range; retain shape/finite checks and a
         # distinct buffer without allocating a widened vector on every event.
