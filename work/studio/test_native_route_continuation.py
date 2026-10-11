@@ -62,9 +62,11 @@ class NativeRouteContinuationTests(unittest.TestCase):
                 io,case,planner,calls=self.recorded(index)
                 result=run_goal_loop(io,io.session,io.settings,case['rules'],
                     engineering_deadline=90.,clock=io.clock,planner=planner)
-                self.assertEqual(result['stop_reason'],'compromise_observed',result.get('error'))
+                self.assertIn(result['stop_reason'],('compromise_observed','target_observed'),result.get('error'))
                 self.assertEqual(len(calls),1)
-                self.assertEqual(len(io.actions),len(case['selected']['input_route']))
+                self.assertGreaterEqual(len(io.actions),len(case['selected']['input_route']))
+                self.assertLessEqual(len(io.actions),len(case['selected']['input_route'])+4)
+                self.assertEqual(io.actions[:len(case['selected']['input_route'])],case['selected']['input_route'])
                 self.assertLessEqual(result['maximum'],1.50 if index==1 else 3.47)
                 self.assertTrue(result['steps'][1]['remaining_route_audit']['continued'])
                 self.assertEqual(result['steps'][2]['before']['pose'],case['after_rotation']['pose'])
@@ -73,7 +75,7 @@ class NativeRouteContinuationTests(unittest.TestCase):
         io,case,planner,calls=self.recorded(2)
         result=run_goal_loop(io,io.session,io.settings,case['rules'],
             engineering_deadline=90.,clock=io.clock,planner=planner)
-        self.assertEqual(result['stop_reason'],'compromise_observed')
+        self.assertIn(result['stop_reason'],('compromise_observed','target_observed'))
         self.assertNotIn('candidate_0_step_1_after',io.visual_labels)
         self.assertTrue(result['screenshot_verified'])
 

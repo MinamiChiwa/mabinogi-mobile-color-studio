@@ -126,8 +126,9 @@ class ControllerFrameBudgetRecoveryTests(unittest.TestCase):
             with self.subTest(purpose=purpose):
                 io=FixtureIO();result=self.run_io(io,purpose=purpose,engineering_deadline=12.)
                 self.assertEqual(io.actions,[])
-                self.assertEqual(result['stop_reason'],'insufficient_time')
+                self.assertEqual(result['stop_reason'],'compromise_observed')
                 self.assertTrue(result['verified'])
+                self.assertFalse(result['accepted'])
 
     def test_postinput_local_frame_timeout_recovers_without_repeating_input(self):
         io=FixtureIO();original=io.frames;failed=[]
