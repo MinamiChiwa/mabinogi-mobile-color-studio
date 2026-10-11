@@ -9,7 +9,7 @@ from .same_session_dye_planner import (normalize_target_rules,bind_planning_cont
     plan_from_checkpoint,validate_plan_reference,assess_native_feedback,_frames,EARLY_TIMER_GRACE_SECONDS,EXECUTION_RESERVE_SECONDS,
     audit_candidate_endpoint)
 from .read_dye_input_backend import input_backend_binding
-from .project_closed_loop_io import validate_research_gesture,InputNotStarted
+from .project_closed_loop_io import validate_research_gesture,validate_retry_reset_route,InputNotStarted
 from .dye_visual_readiness import VisualNotReady
 from .compromise import rebase_compromise_plan,observed_quality,predicted_quality,quality_fields
 from .refinement import find_refinement,find_recovery
@@ -240,10 +240,13 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
             input_before=before,input_after=after,screenshot_verified=False))
         emit('native_observed',colors=cp['client_hex'],label=label,screenshot_verified=False)
         guard(phase_deadline);costs['native'].append(max(0.,clock()-began));return cp
-    def submit(gesture,label,fresh,purpose,*,visual_required=True,phase_deadline=None):
+    def submit(gesture,label,fresh,purpose,*,visual_required=True,phase_deadline=None,retry_route=None):
         nonlocal current
-        validate_research_gesture(gesture,geometry.board)
-        expected=replay_native_route(fresh['pose'],[gesture],geometry,settings,
+        if retry_route is None:validate_research_gesture(gesture,geometry.board)
+        elif (purpose!='retry_reset' or not visual_required or
+                json.dumps(validate_retry_reset_route(retry_route,geometry.board).record(),sort_keys=True)!=json.dumps(gesture,sort_keys=True)):
+            raise ValueError('Invalid continuous retry reset')
+        expected=replay_native_route(fresh['pose'],[gesture] if retry_route is None else retry_route,geometry,settings,
             wheel_delta_per_step=1.,sample_policy='all_recorded_points')['final_pose']
         began=clock()
         try:guard(phase_deadline)
@@ -259,10 +262,11 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
         if result['actual_input_attempts']>=max_actions:raise GoalStop('action_limit')
         current=None;result['actual_input_attempts']+=1
         step=dict(before=fresh,requested_gesture=gesture,expected_pose=expected,purpose=purpose);result['steps'].append(step)
+        if retry_route is not None:step['requested_route']=copy.deepcopy(retry_route)
         emit('action',kind=gesture['kind'],purpose=purpose)
         performer=(getattr(io,'perform_protected_candidate',io.perform_candidate)
             if phase_deadline is not None and purpose in ('refine','restore_refinement','select_candidate','restore_selection') else io.perform_candidate)
-        try:receipt=performer(gesture,label,until)
+        try:receipt=(performer(gesture,label,until) if retry_route is None else io.perform_retry_reset(retry_route,label,until))
         except RetryRequested as exc:
             costs['input'].append(max(0.,clock()-began))
             receipt=getattr(exc,'receipt',None)
@@ -354,7 +358,8 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                     retry_route_cache[key]=minimum_scale_route(checkpoint['pose'],geometry,settings)
                 route=retry_route_cache[key]
             except ValueError as exc:route_error=str(exc)
-        budget=retry_budget(route,costs,include_reference=include_reference)
+        budget=retry_budget(route,costs,include_reference=include_reference,
+            continuous=callable(getattr(io,'perform_retry_reset',None)))
         budget.update(phase=phase,at_monotonic=clock(),remaining_seconds=end-clock(),effective_deadline=end,
             epoch=result['retry_epochs'],reset_route_known=route_known,reset_wheel_steps=[g['wheel_steps'] for g in route],
             remaining_actions=max_actions-result['actual_input_attempts'],remaining_rounds=max_rounds-planning_count,
@@ -483,14 +488,31 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
             cp=fresh;frames=None
             emit('native_retry_available',enabled=False,reason='retry_resetting',**retry_fields())
             emit('native_retry_reset',status='zooming',reason='user_retry',**retry_fields())
-            for index,gesture in enumerate(route):
-                prior=cp['pose']['scale']
-                cp,frames,feedback=submit(gesture,'retry_'+str(epoch)+'_zoom_'+str(index),cp,
-                    'retry_reset',visual_required=False)
-                if at_minimum_scale(cp['pose'],settings):break
-                if cp['pose']['scale']>=prior:raise GoalStop('retry_minimum_unconfirmed')
+            if route and callable(getattr(io,'perform_retry_reset',None)):
+                correction=0
+                while route:
+                    prior=cp['pose']['scale']
+                    gesture=validate_retry_reset_route(route,geometry.board).record()
+                    label='retry_'+str(epoch)+('_correction_'+str(correction) if correction else '')
+                    cp,frames,feedback=submit(gesture,label,cp,'retry_reset',retry_route=route)
+                    if at_minimum_scale(cp['pose'],settings):break
+                    if cp['pose']['scale']>=prior:raise GoalStop('retry_minimum_unconfirmed')
+                    # Missed wheel events are repaired from the actual endpoint,
+                    # never by repeating the original route or trusting its pose.
+                    budget=retry_assessment('correction',include_reference=False,checkpoint=cp)
+                    record_retry_budget(budget)
+                    if not budget['enabled']:raise GoalStop('retry_minimum_unconfirmed')
+                    route=minimum_scale_route(cp['pose'],geometry,settings)
+                    correction+=1;attempt['correction_passes']=correction
+            else:
+                for index,gesture in enumerate(route):
+                    prior=cp['pose']['scale']
+                    cp,frames,feedback=submit(gesture,'retry_'+str(epoch)+'_zoom_'+str(index),cp,
+                        'retry_reset',visual_required=False)
+                    if at_minimum_scale(cp['pose'],settings):break
+                    if cp['pose']['scale']>=prior:raise GoalStop('retry_minimum_unconfirmed')
             if not at_minimum_scale(cp['pose'],settings):raise GoalStop('retry_minimum_unconfirmed')
-            cp,frames=observe_resilient('retry_'+str(epoch)+'_after')
+            if frames is None:cp,frames=observe_resilient('retry_'+str(epoch)+'_after')
             if not at_minimum_scale(cp['pose'],settings):raise GoalStop('retry_minimum_unconfirmed')
             # A deliberate retry owns a new measured anchor. Returning to a
             # previous epoch's best would undo the user's requested zoom out.

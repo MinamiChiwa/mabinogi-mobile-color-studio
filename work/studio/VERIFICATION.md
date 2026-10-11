@@ -1,3 +1,12 @@
+# Local candidate 0.4.2rc10 — continuous retry zoom (2026-10-12)
+
+- Same-anchor downward retry wheels share one preparation and one final complete scale/color observation. Windows still receives individual -120 events at the established 18 ms cadence, with one 100 ms settle at the end. Ordinary route input validation remains unchanged.
+- Actual scale controls correction after missed events; an unconfirmed minimum or input outcome cannot start a new search. F9, focus, geometry and deadline checks remain active at every notch. Search coverage, priorities, best-result retention, initial OCR grace and the three-second tail are unchanged.
+- Quick: 591 selected, 590 passed, one optional historical OCR fixture skipped, zero failures/errors; 70.109 seconds total. Continuous retry coverage includes two/three regions, a lost last notch, unknown input, Windows per-notch cancellation and unchanged standard wheel bounds. Related controller/recovery/IO suites: 100 passed before the final correction addition; counts overlap.
+- Saved-session float32 replay has the same endpoint with grouped or individual notches. Measured-cost simulation reduces reset from 17.153 to 7.742 seconds; this is an estimate, not a new live-round measurement. No new dye round or public release. Original rc16 similarity fixtures remain missing, so no complete release verdict is claimed.
+
+Evidence: `outputs/native-integration/verification/retry-continuous-2026-10-12/` in the development workspace. Details: `docs/verification-retry-continuous-2026-10-12.md`.
+
 # Close/startup race fix (2026-10-12)
 
 - A queued close during CTk's first mainloop titlebar update caused a destroyed-WM exception. App now enters the Tk event loop without that nested pump, cancels pending callbacks on shutdown and avoids duplicate destruction. A fresh-process regression and three frozen EXE close timings pass with exit 0.

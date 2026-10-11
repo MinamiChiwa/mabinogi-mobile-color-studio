@@ -1,5 +1,5 @@
 """Narrow extension of existing project IO for the known-target protocol."""
-import json,re,time
+import copy,json,re,time
 from pathlib import Path
 import numpy as np
 from .project_probe_io import ProjectProbeIO
@@ -41,6 +41,22 @@ def validate_research_gesture(record,board):
     return gesture
 
 
+def validate_retry_reset_route(route,board):
+    """Only coalesce bounded downward wheels at the safe board centre.
+
+    The model keeps its <=32-notch records. Windows still receives individual
+    -120 events at the established cadence, with a single settle at the end.
+    This exception never broadens ordinary search gesture validation.
+    """
+    if not isinstance(route,(list,tuple)) or not 1<=len(route)<=64:
+        raise ValueError('Bounded retry wheel route required')
+    l,t,r,b=board;anchor=(round((l+r)/2),round((t+b)/2))
+    gestures=[validate_research_gesture(record,board) for record in route]
+    if any(g.kind!='wheel' or g.wheel_steps>=0 or g.anchor!=anchor for g in gestures):
+        raise ValueError('Retry requires downward wheels at the board centre')
+    return PointerGesture('wheel',(anchor,),wheel_steps=sum(g.wheel_steps for g in gestures))
+
+
 class ProjectClosedLoopIO(ProjectProbeIO):
     def __init__(self,*args,**kwargs):
         prepare_hex_assets()
@@ -78,6 +94,10 @@ class ProjectClosedLoopIO(ProjectProbeIO):
         # against the already protected session deadline. An extra idle footer
         # here would deduct the game's end allowance a second time.
         return self._perform_candidate(record,label,deadline,feedback_reserve_seconds=0.)
+    def perform_retry_reset(self,route,label,deadline):
+        route=copy.deepcopy(route)
+        gesture=validate_retry_reset_route(route,self.last_observation['window_mapping_candidate']['client_board_candidate'])
+        return self._perform_candidate(gesture.record(),label,deadline,feedback_reserve_seconds=0.,retry_route=route)
     def perform_protected_candidate(self,record,label,deadline):
         # The controller has already reserved complete return/verification
         # phases outside this deadline; do not reserve the same eight twice.
@@ -86,19 +106,23 @@ class ProjectClosedLoopIO(ProjectProbeIO):
         except TimeoutError as exc:
             if self.input_attempts==before:raise InputNotStarted(str(exc)) from exc
             raise
-    def _perform_candidate(self,record,label,deadline,*,feedback_reserve_seconds):
+    def _perform_candidate(self,record,label,deadline,*,feedback_reserve_seconds,retry_route=None):
         from .retry import RetryRequested
         before=self.input_attempts
-        try:return self._perform_candidate_checked(record,label,deadline,feedback_reserve_seconds=feedback_reserve_seconds)
+        try:return self._perform_candidate_checked(record,label,deadline,feedback_reserve_seconds=feedback_reserve_seconds,
+            retry_route=retry_route)
         except RetryRequested as exc:
             if self.input_attempts==before:exc.input_not_started=True
             raise
-    def _perform_candidate_checked(self,record,label,deadline,*,feedback_reserve_seconds):
+    def _perform_candidate_checked(self,record,label,deadline,*,feedback_reserve_seconds,retry_route=None):
         if not isinstance(label,str) or not re.fullmatch(r'[a-z][a-z0-9_]{0,47}',label):raise ValueError('Bad input label')
         self.session_status_label=label
         self.check(deadline)
         if self.input_attempts>=64:raise ValueError('Maximum input attempt accounting reached')
-        gesture=validate_research_gesture(record,self.last_observation['window_mapping_candidate']['client_board_candidate'])
+        board=self.last_observation['window_mapping_candidate']['client_board_candidate']
+        gesture=(validate_research_gesture(record,board) if retry_route is None else validate_retry_reset_route(retry_route,board))
+        if json.dumps(gesture.record(),sort_keys=True)!=json.dumps(record,sort_keys=True):
+            raise ValueError('Retry route and actual gesture differ')
         if time.monotonic()+gesture.duration+feedback_reserve_seconds>=self.deadline:raise TimeoutError('Input/feedback reserve insufficient')
         first=self.input_backend(self.deadline)
         fresh=self.backend.observe_motion(self.reference['instance_address'],self.deadline,self._input_guard,
@@ -116,6 +140,7 @@ class ProjectClosedLoopIO(ProjectProbeIO):
         started=time.monotonic();self.sent_any=True;self.input_attempts+=1
         receipt=dict(input_source='project_windows_sendinput',gesture=gesture.record(),started_monotonic=started,
             input_backend_before=first,completed=False)
+        if retry_route is not None:receipt['model_route']=retry_route
         try:
             self._performing_input=True
             receipt['completed']=bool(self.game.perform_gesture(gesture))

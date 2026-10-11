@@ -1,6 +1,8 @@
-# 0.4.2rc9 — 本地更新接入与重试焦点修复
+# 0.4.2rc10 — 重试连续缩小与本地更新
 
 ## 简体中文
+
+- 重试缩小改为同一锚点连续滚动，去掉分组间的完整回读和重复准备；结束后核对实际缩放与颜色，漏收滚轮时按实际位置补齐。保留逐格滚轮节奏、F9 和最终核验，不减少搜索范围或放宽精准标准。
 
 - 主窗接入用户决定的 GitHub 文件更新与离线导入，保留全部 data；具备正式公钥与签名清单的引导版本才支持正式更新。独立更新器具备健康检查与失败恢复，本轮仅本地验证，未发布。
 - 重试前恢复已绑定游戏的焦点，激活失败时允许再次点击；记录未知客户端构建指纹，并制定韩服及其他服务器适配计划。韩服尚未实测支持。
@@ -33,6 +35,8 @@
 
 ## 繁體中文
 
+- 重試縮小改為同一錨點連續滾動，移除分組間的完整回讀與重複準備；結束後核對實際縮放與顏色，漏收滾輪時依實際位置補齊。保留逐格滾輪節奏、F9 與最終核驗，不縮減搜尋範圍或放寬精準標準。
+
 - 主畫面接入由使用者決定的 GitHub 檔案更新與離線匯入，保留全部 data；具備正式公鑰與簽名清單的引導版本才支援正式更新。獨立更新器具備健康檢查與失敗恢復，本次僅本機驗證，未發布。
 - 重試前恢復已綁定遊戲的焦點，啟用失敗時可再次點擊；記錄未知客戶端版本指紋，並制定韓服與其他伺服器適配計畫。韓服尚未實測支援。
 
@@ -63,6 +67,8 @@
 重試不增加遊戲時間、不消耗新道具，不自動開啟或套用染色。有限搜尋無法保證多色精準成功。本機候選版尚未完成新一局實機驗收。
 
 ## English
+
+- Retry now zooms out continuously at one anchor, without full readback and repeated preparation between groups. Actual scale and colors are verified at the end; missed wheel events are corrected from the measured position. Per-notch pacing, F9, search coverage and exact-match requirements are preserved.
 
 - Adds user-controlled GitHub file updates and offline imports while keeping all data. Official updates require a bootstrap with a production public key and signed ownership manifest. The independent updater supports health checks and recovery; this candidate is locally verified and unpublished.
 - Retry restores focus to the bound game and stays available when activation fails. Unknown client build fingerprints and a multi-server adaptation plan are added; Korean native search is not yet validated.

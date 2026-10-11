@@ -31,16 +31,20 @@ def phase_allowances(costs,*,closing=False):
     return native,visual,preparation
 
 
-def retry_budget(route,costs,*,include_reference):
+def retry_budget(route,costs,*,include_reference,continuous=False):
     """Admit a real reset and useful search, then audit any target route itself.
 
-    The native reference is paid once. Each reset group still owns its measured
-    preparation and actual native readback; the reset endpoint owns one complete
-    visual read. A search result never inherits authorization to execute input.
+    A continuous reset pays one preparation and the final complete visual read.
+    Adapters without that input boundary retain per-group preparation/readback.
+    A search result never inherits authorization to execute input.
     """
     native,visual,preparation=phase_allowances(costs,closing=True)
-    duration=sum(g['input_seconds'] for g in route)
-    reset=duration+len(route)*(preparation+native)
+    actions=len(route);duration=sum(g['input_seconds'] for g in route)
+    if continuous and route:
+        duration=PointerGesture('wheel',tuple(map(tuple,route[0]['points'])),
+            wheel_steps=sum(g['wheel_steps'] for g in route)).duration
+        actions=1
+    reset=duration+actions*preparation+(0. if continuous else actions*native)
     reference=native if include_reference else 0.
     minimum_search=MINIMUM_USEFUL_SEARCH_SECONDS;closing=0.
     return dict(native_allowance_seconds=native,visual_allowance_seconds=visual,
@@ -48,7 +52,8 @@ def retry_budget(route,costs,*,include_reference):
         reset_allowance_seconds=reset,reference_allowance_seconds=reference,
         minimum_search_seconds=minimum_search,closing_guard_seconds=closing,
         required_seconds=reference+reset+visual+minimum_search+closing,
-        reset_actions=len(route),required_actions=len(route)+1)
+        reset_mode='continuous_wheel' if continuous else 'observed_groups',
+        reset_actions=actions,required_actions=actions+1)
 
 
 def at_minimum_scale(pose,settings):
