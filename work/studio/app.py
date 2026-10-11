@@ -1,5 +1,9 @@
-import platform_win  # Set physical-pixel awareness before Tk or capture initializes.
 import sys
+if __name__=='__main__':
+    from update_bootstrap import dispatch
+    _bootstrap_exit=dispatch()
+    if _bootstrap_exit is not None:raise SystemExit(_bootstrap_exit)
+import platform_win  # Set physical-pixel awareness before Tk or capture initializes.
 if __name__=='__main__' and '--native-preflight' in sys.argv:
     from native_preflight import main as native_preflight_main
     raise SystemExit(native_preflight_main([arg for arg in sys.argv[1:] if arg!='--native-preflight']))
@@ -18,7 +22,7 @@ from palette_viewer import PaletteViewer
 from search_overlay import SearchOverlay
 from hotkeys import run_hotkeys
 from window_picker import WindowPicker
-from window_target import resolve_target
+from window_target import resolve_target,WindowTarget,activate_target_window
 from atlas_service import AtlasService
 from atlas_live_adapter import callbacks as atlas_callbacks
 from result_history import describe_result,read_history,save_result
@@ -147,7 +151,9 @@ def build_runner(emit,folder,strategy='native',entry=None,entry_size=None):
 ct.set_appearance_mode('dark'); ct.set_default_color_theme('blue')
 BG='#10151F'; PANEL='#192230'; INK='#EDF3FA'; MUTED='#94A4B8'; ACCENT='#62D7BD'
 FONT=FONT_FAMILY
-DATA=resolve_data_directory(
+from update_bootstrap import active_data_directory,installation_root
+_update_data=active_data_directory(installation_root()) if getattr(sys,'frozen',False) else None
+DATA=_update_data or resolve_data_directory(
     (Path(sys.executable).resolve().parent if getattr(sys,'frozen',False)
      else Path(__file__).resolve().parent)/'data'
 )
@@ -180,7 +186,7 @@ class Card(ct.CTkFrame):
         self.preview_frame.grid_columnconfigure(1,weight=1)
         self.swatch.configure(width=110)
         self.swatch.grid(row=0,column=0,sticky='ew',padx=(0,4))
-        ct.CTkButton(self.preview_frame,text='⌖  屏幕吸管',width=110,height=30,fg_color='#28364A',hover_color='#364D63',font=SMALL_FONT,command=lambda:pick_screen(self.winfo_toplevel(),self.target.set)).grid(row=0,column=1,sticky='ew',padx=(4,0))
+        ct.CTkButton(self.preview_frame,text='⌖  屏幕吸管',width=110,height=30,fg_color='#28364A',hover_color='#364D63',font=SMALL_FONT,command=lambda:self.winfo_toplevel().pick_color(self.target.set)).grid(row=0,column=1,sticky='ew',padx=(4,0))
         self.palette=ct.CTkLabel(self.preview_frame,text='',height=38)
         self.palette.grid(row=1,column=0,columnspan=2,sticky='ew',pady=(3,0))
         self.palette.bind('<Button-1>',self.open_palette)
@@ -287,7 +293,13 @@ class Card(ct.CTkFrame):
         if self._palette_pixels is not None and getattr(self,'_display_key',None):
             PaletteViewer(self.winfo_toplevel(),self._palette_pixels,self._display_key[0],PALETTE_POOL)
     def pick(self):
-        v=colorchooser.askcolor(parent=self,title=tr(f'区域 {self.index+1} · 选择目标颜色'))[1]
+        owner=self.winfo_toplevel()
+        updater=owner.__dict__.get('updater')
+        if updater is not None:
+            if updater.service.state in ('installing','waiting_for_exit'):return
+            owner._color_selecting=True;updater.set_busy(True)
+        try:v=colorchooser.askcolor(parent=self,title=tr(f'区域 {self.index+1} · 选择目标颜色'))[1]
+        finally:owner._color_selecting=False
         if v:self.target.set(v.upper())
     def rule(self):
         if not self.enabled.get():return {'enabled':False,'colors':[],'exact':True,'tolerance':0}
@@ -299,8 +311,9 @@ class App(ct.CTk):
         super().__init__();self.title(f"{tr('染色工坊 · 瑪奇 Mobile')}  v{APP_VERSION}");self.geometry('1120x800');self.minsize(MIN_WINDOW_WIDTH,560);self.configure(fg_color=BG)
         self._resize_redraw=TopLevelResizeRedrawOptimization()
         self.after(100,self.fit_screen)
-        self.selected_window=None;self.overlay=None;self.active_rules=None;self.history=read_history(DATA/'history.json');self.best_summary=None
+        self.selected_window=None;self._bound_target=None;self.overlay=None;self.active_rules=None;self.history=read_history(DATA/'history.json');self.best_summary=None
         self.q=queue.Queue();self.runner=None;self.busy=False;self.picking=False;self.keys={};self.cards=[]
+        self._update_health_pending='--update-ready' in sys.argv
         # The page follows the resizable native window. Its fixed-size card
         # viewport remains centered inside the responsive page.
         self.grid_columnconfigure(0,weight=1); self.grid_rowconfigure(0,weight=1)
@@ -388,12 +401,32 @@ class App(ct.CTk):
         if self.history:self.display_best(self.history[0])
         self._hotkeys_stop=threading.Event()
         self._hotkey_thread=threading.Thread(target=self.hotkey_loop,daemon=True)
-        self._hotkey_thread.start()
+        if not self._update_health_pending:self._hotkey_thread.start()
         self.after(30,self.tick);self.protocol('WM_DELETE_WINDOW',self.close)
         self.bind('<Configure>',self.schedule_layout,add='+')
         i18n.on_language(self,self.refresh_language)
         self.after(150,self.reflow)
         self._resize_surface=NativeResizeSurface(self)
+        from updater.runtime import UpdateRuntime
+        from updater.ui_update import UpdateUI
+        self.updater=UpdateRuntime(installation_root(),DATA,APP_VERSION,lambda event:self.q.put(('update',event)))
+        self.update_ui=UpdateUI(self,self.updater,self.links)
+        if self._update_health_pending:
+            self.withdraw()
+            from update_bootstrap import signal_ready
+            self._update_transaction=Path(sys.argv[sys.argv.index('--update-ready')+1])
+            self.after_idle(lambda:signal_ready(self._update_transaction))
+            self.start.configure(state='disabled');self.after(100,self._await_update_commit)
+        elif getattr(sys,'frozen',False):self.after(3000,self.updater.check)
+    def _await_update_commit(self):
+        try:state=json.loads((self._update_transaction/'state.json').read_text(encoding='utf-8'))
+        except (OSError,ValueError):state={}
+        if state.get('status')=='committed':
+            self._update_health_pending=False;self._hotkey_thread.start();self.deiconify();self.start.configure(state='normal');self.after(3000,self.updater.check)
+        else:
+            from update_bootstrap import helper_alive
+            if not helper_alive(self._update_transaction):self.close();return
+            self.after(100,self._await_update_commit)
     def schedule_layout(self,event):
         if event.widget!=self:return
         try:scaling=self.page._get_widget_scaling()
@@ -499,12 +532,14 @@ class App(ct.CTk):
         self._layout_width=int(width)
     def refresh_language(self):
         self.title(f"{tr('染色工坊 · 瑪奇 Mobile')}  v{APP_VERSION}")
+        if hasattr(self,'update_ui'):self.update_ui.refresh()
         if hasattr(self,'toolbar_buttons'):self.toolbar_buttons[-1].set(i18n.language)
         self.refresh_window_label()
         if hasattr(self,'strategy_menu'):
             self.strategy_menu.configure(values=[str(tr('精准寻色')),str(tr('图像寻色'))])
             self.strategy_menu.set(str(tr('精准寻色' if self.search_strategy.get()=='native' else '图像寻色')))
     def change_search_strategy(self,value):
+        if getattr(self,'_update_health_pending',False):return
         if self.busy:
             self.strategy_menu.set(str(tr('精准寻色' if self.search_strategy.get()=='native' else '图像寻色')))
             return
@@ -527,6 +562,7 @@ class App(ct.CTk):
         else:text=tr('游戏窗口 · ')+target.title
         self.window_button.configure(text=text if len(text)<=34 else text[:31]+'…')
     def pick_window(self):
+        if hasattr(self,'updater') and self.updater.service.state in ('installing','waiting_for_exit'):return
         if self.busy:
             self.status.configure(text='请先按 F9 停止，再更换游戏窗口。');return
         def selected(target):
@@ -535,10 +571,18 @@ class App(ct.CTk):
             self.selected_window=target
             self.refresh_window_label()
             self.status.configure(text='窗口选择已更新，下次开始时生效。')
-        WindowPicker(self,self.selected_window,selected)
+        self._window_selecting=True
+        if hasattr(self,'updater'):self.updater.set_busy(True)
+        picker=WindowPicker(self,self.selected_window,selected)
+        picker.bind('<Destroy>',lambda event:setattr(self,'_window_selecting',False) if event.widget is picker else None,add='+')
+    def pick_color(self,callback):
+        if hasattr(self,'updater'):
+            if self.updater.service.state in ('installing','waiting_for_exit'):return
+            self.updater.set_busy(True)
+        pick_screen(self,callback)
     def change_language(self,value):
         i18n.set_language(value)
-        save_settings(DATA/'settings.json',language=value)
+        if not getattr(self,'_update_health_pending',False):save_settings(DATA/'settings.json',language=value)
     def display_best(self,row):
         self.best_summary=row
         for index,c in enumerate(self.cards):
@@ -648,6 +692,7 @@ class App(ct.CTk):
         self.cards[index].priority.set(rank);self.cards[index].priority_menu.set(str(rank))
         self.schedule_autosave()
     def schedule_autosave(self,*_):
+        if getattr(self,'_update_health_pending',False):return
         if getattr(self,'_loading_profile',False):return
         job=getattr(self,'_autosave_job',None)
         if job is not None:
@@ -655,6 +700,7 @@ class App(ct.CTk):
             except tk.TclError:pass
         self._autosave_job=self.after(300,self.flush_autosave)
     def flush_autosave(self):
+        if getattr(self,'_update_health_pending',False):return True
         job=getattr(self,'_autosave_job',None)
         if job is not None:
             try:self.after_cancel(job)
@@ -677,6 +723,10 @@ class App(ct.CTk):
             self.set_detail(tr('当前设置无法读取，原文件已保留。'))
         self.apply_profile(profile,persist=False)
     def go(self,mode='search',activate=False):
+        if getattr(self,'_update_health_pending',False):return
+        if hasattr(self,'updater'):
+            if self.updater.service.state in ('installing','waiting_for_exit'):return
+            self.updater.set_busy(True)
         if self.busy:
             self.status.configure(text='任务已启动，正在等待或寻色；按 F9 停止。');return
         if self.picking:return
@@ -693,6 +743,7 @@ class App(ct.CTk):
         self.active_rules=rules
         self._native_candidate_batch=None;self._native_candidate_closed=False
         self._retry_enabled=False
+        self._bound_target=None
         self.active_mode=mode
         self.busy=True;self.start.configure(state='disabled');self.status.configure(text='正在识别游戏界面…')
         session_root=DATA/'sessions'
@@ -714,6 +765,14 @@ class App(ct.CTk):
     def request_native_retry(self):
         if (self.runner and self.busy and self.search_strategy.get()=='native'
                 and getattr(self,'_retry_enabled',False)):
+            target=self._bound_target or self.selected_window
+            try:
+                if target is not None and not activate_target_window(target):
+                    self.set_detail(tr('请先返回游戏窗口，再点击重试。'))
+                    return
+            except (OSError,RuntimeError):
+                self.set_detail(tr('请先返回游戏窗口，再点击重试。'))
+                return
             self._retry_enabled=False
             if self.overlay is not None:self.overlay.mark_retry_requested()
             self.runner.request_retry()
@@ -725,7 +784,7 @@ class App(ct.CTk):
         if self.overlay is not None:self.overlay.dismiss()
     def finish_run(self):
         stopped=self.runner is not None and self.runner.stop.is_set()
-        self.busy=False;self.runner=None;self._retry_enabled=False;self.start.configure(state='normal')
+        self.busy=False;self.runner=None;self._retry_enabled=False;self._bound_target=None;self.start.configure(state='normal')
         if stopped:
             self.status.configure(text='已停止自动染色，可重新开始。')
             if self.overlay is not None:self.overlay.dismiss()
@@ -737,6 +796,8 @@ class App(ct.CTk):
             self.q.put((kind,data))
         run_hotkeys(platform_win.u,ctypes,platform_win.W,self._hotkeys_stop,receive,keys)
     def tick(self):
+        updater=self.__dict__.get('updater')
+        if updater is not None:updater.set_busy(self.busy or self.__dict__.get('picking',False) or self.__dict__.get('_window_selecting',False) or self.__dict__.get('_color_selecting',False))
         try:
             for _ in range(50):
                 if self.q.empty():break
@@ -750,7 +811,8 @@ class App(ct.CTk):
                 except Exception:self.report_callback_exception(*sys.exc_info())
         finally:self.after(60,self.tick)
     def handle_event(self,k,d):
-        if k=='hotkey':
+        if k=='update':self.update_ui.handle(d)
+        elif k=='hotkey':
             if d['id']==1:self.go(activate=True)
             elif d['id']==2:self.stop()
             elif d['id']==3:self.request_native_retry()
@@ -762,6 +824,7 @@ class App(ct.CTk):
                   tr('全局注册不可用：')+', '.join(failed)+tr('；F9 仍通过轮询停止，其他操作请使用按钮。'))
             self.footer.configure(text=text)
         elif k=='window_bound':
+            if d.get('pid') is not None:self._bound_target=WindowTarget(int(d['hwnd']),int(d['pid']),d['title'])
             self.set_detail(tr('正在识别窗口：')+d['title'])
             prefix=tr('自动检测')+' · ' if self.selected_window is None else tr('游戏窗口 · ')
             label=prefix+d['title']
@@ -901,6 +964,7 @@ class App(ct.CTk):
             self.region_note.configure(text='已识别 2 个染色区域，区域 3 本局不可用。');self.region_note.grid()
         else:self.region_note.grid_remove()
     def close(self):
+        if hasattr(self,'updater'):self.updater.cancel()
         if self.busy:self.stop();self.after(250,self.close)
         else:
             if not getattr(self,'_profile_read_failed',False) or getattr(self,'_autosave_job',None) is not None:self.flush_autosave()

@@ -14,6 +14,9 @@ RULES=[dict(enabled=True,exact=True,colors=['#000000'],tolerance=0.,priority=i+1
 @unittest.skipUnless(sys.platform=='win32','Retry UI requires Windows')
 class NativeRetryUITests(unittest.TestCase):
     def setUp(self):
+        import app
+        from unittest.mock import patch
+        language=patch.object(app.i18n,'language','简体中文');language.start();self.addCleanup(language.stop)
         self.helper=hit_testing.NativeUIHitTestingTests();self.helper.setUp()
         self.addCleanup(self.helper.doCleanups)
         self.ui=self.helper.ui;self.requests=[]
@@ -37,6 +40,28 @@ class NativeRetryUITests(unittest.TestCase):
         self.assertEqual(len(self.requests),2)
         self.assertFalse(self.ui.runner.stop.is_set())
         self.assertEqual(self.ui.current_profile(),before)
+
+    def test_retry_button_reactivates_bound_game_before_request(self):
+        import app
+        from unittest.mock import patch
+        self.ui.selected_window=SimpleNamespace(hwnd=1234,pid=88,title='game')
+        self.emit('native_retry_available',dict(enabled=True,effective_deadline=999999999.))
+        button=getattr(self.ui.overlay,'retry_button',None)
+        with patch.object(app,'activate_target_window',create=True) as activate:
+            button.invoke()
+        activate.assert_called_once_with(self.ui.selected_window)
+        self.assertEqual(self.requests,[True])
+
+    def test_failed_activation_keeps_retry_available_instead_of_stranding_overlay(self):
+        import app
+        from unittest.mock import patch
+        self.ui._bound_target=app.WindowTarget(50,123,'Game')
+        self.emit('native_retry_available',dict(enabled=True))
+        with patch.object(app,'activate_target_window',return_value=False):
+            self.ui.overlay.retry_button.invoke()
+        self.assertEqual(self.requests,[])
+        self.assertEqual(self.ui.overlay.retry_button.cget('state'),'normal')
+        self.assertFalse(self.ui.overlay._retry_pending)
     def test_retry_rejected_or_preparing_cannot_issue_duplicate_or_partial_requests(self):
         self.emit('native_retry_available',dict(enabled=True,effective_deadline=999999999.))
         button=getattr(self.ui.overlay,'retry_button',None)
@@ -91,9 +116,14 @@ class NativeRetryUITests(unittest.TestCase):
                 self.assertNotIn('14527',body)
                 self.assertEqual('区域 3' in body,len(colors)==3)
             self.assertIn(colors[0],str(self.ui.cards[0].current.cget('text')))
+            # Finish the initial stage/layout frame before counting redraws
+            # caused by repeated identical progress events.
+            self.helper.pump(.1)
             stage_started=overlay._stage_started
-            with patch.object(overlay,'resize_surface',wraps=overlay.resize_surface) as resize:
-                for n in range(3):self.emit('native_progress',dict(event,examined=15000+n))
+            with patch.object(overlay,'schedule_surface_resize',wraps=overlay.schedule_surface_resize) as resize:
+                for n in range(3):
+                    repeated=dict(event,examined=15000+n)
+                    overlay.handle('native_progress',repeated);self.ui.handle_event('native_progress',repeated)
                 resize.assert_not_called()
             self.assertEqual(overlay._stage_started,stage_started)
             self.assertEqual(overlay.candidate_rows,{})

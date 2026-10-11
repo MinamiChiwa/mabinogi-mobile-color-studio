@@ -42,3 +42,7 @@ JSON 报告包含选择清单、通过／跳过／失败／错误数、逐项耗
 ## 最新结果
 
 当前 rc5 结果及时间见 [维护记录](docs/maintenance-2026-10-11.md)；机器负载影响时长，以 JSON 为准。旧版本逐次测试计数可从 Git 历史查阅，不在本文件重复追加。
+
+## 更新专项
+
+日常 quick 增加清单、路径、版本、差异、网络状态和用户控制契约；文件事务、独立锁、离线资产与实际 Tk 对话框在 release。单独运行：`python -m unittest discover -s work/studio -p "test_updater*.py"`；发布资产另运行 `test_update_assets`。所有测试使用临时/隔离目录，不操作游戏，不消耗道具。冻包演练脚本 `scripts/smoke_frozen_update.py` 只接受新建隔离目录和测试签名包，不能指向桌面工具。正式签名和实际发布另行验收。

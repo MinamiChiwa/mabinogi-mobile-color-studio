@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import sys
 
-APP_VERSION = '0.4.2rc8'
+APP_VERSION = '0.4.2rc9'
 POLICY_REVISION = 'native-retained-prefix-v24'
 
 
@@ -13,10 +13,10 @@ def source_identity(root):
     """Hash production Python sources only; never include settings or captures."""
     digest = hashlib.sha256()
     root=Path(root)
-    files=list(root.glob('*.py'))+list((root/'native_live').rglob('*.py'))
+    files=list(root.glob('*.py'))+list((root/'native_live').rglob('*.py'))+list((root/'updater').rglob('*.py'))
     files+=list((root/'native_live/assets').glob('*'))
     for path in sorted(p for p in files if p.is_file()):
-        if path.name.startswith('test_'):
+        if path.name.startswith(('test_','_updater_test_')) or path.name=='update_recovery_identity.py':
             continue
         digest.update(path.relative_to(root).as_posix().encode('utf-8') + b'\0')
         digest.update(path.read_bytes())

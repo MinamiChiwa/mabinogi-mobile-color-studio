@@ -1,6 +1,9 @@
-# 0.4.2rc8 — 细化期间展示当前实测配色
+# 0.4.2rc9 — 本地更新接入与重试焦点修复
 
 ## 简体中文
+
+- 主窗接入用户决定的 GitHub 文件更新与离线导入，保留全部 data；具备正式公钥与签名清单的引导版本才支持正式更新。独立更新器具备健康检查与失败恢复，本轮仅本地验证，未发布。
+- 重试前恢复已绑定游戏的焦点，激活失败时允许再次点击；记录未知客户端构建指纹，并制定韩服及其他服务器适配计划。韩服尚未实测支持。
 
 - 扩大细化搜索期间展示当前游戏实测颜色及各区域色差，并说明计算期间色板可能保持不动。找到更好的可执行方案才继续移动；满意当前效果可按 F9 停止搜索，再到游戏内确认染色。不显示预测候选或递增路线计数，不改变寻色策略与时间预算。
 
@@ -30,6 +33,9 @@
 
 ## 繁體中文
 
+- 主畫面接入由使用者決定的 GitHub 檔案更新與離線匯入，保留全部 data；具備正式公鑰與簽名清單的引導版本才支援正式更新。獨立更新器具備健康檢查與失敗恢復，本次僅本機驗證，未發布。
+- 重試前恢復已綁定遊戲的焦點，啟用失敗時可再次點擊；記錄未知客戶端版本指紋，並制定韓服與其他伺服器適配計畫。韓服尚未實測支援。
+
 - 擴大細化搜尋期間顯示目前遊戲實測顏色及各區域色差，並說明計算期間色板可能保持不動。找到更好的可執行方案才繼續移動；滿意目前效果可按 F9 停止搜尋，再到遊戲內確認染色。不顯示預測候選或遞增路線計數，不變更尋色策略與時間預算。
 
 - 加速啟動及等待階段的色板檢查，大塊資料改為對齊位址批次比較，仍涵蓋所有候選並在結束時複驗。準備時間會隨遊戲狀態及電腦效能變化。
@@ -57,6 +63,9 @@
 重試不增加遊戲時間、不消耗新道具，不自動開啟或套用染色。有限搜尋無法保證多色精準成功。本機候選版尚未完成新一局實機驗收。
 
 ## English
+
+- Adds user-controlled GitHub file updates and offline imports while keeping all data. Official updates require a bootstrap with a production public key and signed ownership manifest. The independent updater supports health checks and recovery; this candidate is locally verified and unpublished.
+- Retry restores focus to the bound game and stays available when activation fails. Unknown client build fingerprints and a multi-server adaptation plan are added; Korean native search is not yet validated.
 
 - Shows the current measured game colors and each region's color difference during extended refinement. Explains why the board may remain still while a better executable route is calculated. Press F9 when satisfied, then confirm dyeing in the game. No predicted alternatives or growing route counts are shown; search behavior and time budgets are unchanged.
 

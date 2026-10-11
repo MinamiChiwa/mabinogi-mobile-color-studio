@@ -42,6 +42,9 @@ test_native_periodic_scale_compile
 test_native_periodic_large_rotation test_native_planner_tail test_native_planner_candidate_budget
 test_dye_regions test_eyedropper test_native_input_backend_mapping
 test_run_tests
+test_updater_manifest test_updater_plan test_updater_network test_updater_offline
+test_updater_service test_updater_ui test_updater_bootstrap test_updater_runtime
+test_native_build_adapters
 '''.split())
 
 # Add a current feature here once its tests have been reviewed for this profile.
@@ -129,6 +132,19 @@ QUICK_EXCLUDED_TEST_IDS = frozenset((
 # Release includes independent recorded double/triple targets, a complete
 # protected improvement/return, exact/compromise reporting, and the legacy path.
 RELEASE_TEST_IDS = (
+    'test_updater_transaction.TransactionTests.test_crash_after_backup_recovers_program_and_user_data_idempotently',
+    'test_updater_transaction.TransactionTests.test_crash_after_new_file_rename_recovers_even_before_done_log',
+    'test_updater_transaction.TransactionTests.test_health_failure_restores_owned_files_without_touching_data',
+    'test_updater_windows.WindowsUpdateTests.test_lock_is_released_after_process_crash',
+    'test_updater_windows.WindowsUpdateTests.test_active_lock_rejects_another_instance',
+    'test_update_assets.UpdateAssetTests.test_delta_offline_import_reuses_local_files_and_rejects_wrong_base',
+    'test_update_assets.UpdateAssetTests.test_asset_verifier_rejects_bad_signature_and_extra_application_file',
+    'test_update_assets.UpdateAssetTests.test_many_small_resources_are_bundled_and_each_file_is_still_verified',
+    'test_update_assets.UpdateAssetTests.test_missing_package_cannot_generate_empty_signed_release',
+    'test_updater_transaction.TransactionTests.test_every_journal_boundary_recovers_old_program_and_unknown_files',
+    'test_updater_helper.HelperTests.test_helper_revalidates_prepared_files_and_rejects_tampered_operations',
+    'test_updater_helper.HelperTests.test_commit_journal_failure_stops_ready_child_before_restoring_files',
+    'test_update_assets.UpdateAssetTests.test_delta_rename_with_identical_contents_includes_required_target_blob',
     'test_native_periodic_black.PeriodicBlackTests.test_rc8_failed_session_reaches_double_black_with_the_production_entry',
     'test_native_live_refinement.RecordedRc12RefinementTests.test_triple_exact_basin_is_found_with_finer_angle_and_pivot_routes',
     'test_native_live_refinement.RecordedRc11RefinementTests.test_saved_rc11_improves_with_two_rotations_and_no_wheel_inverse_assumption',
@@ -144,6 +160,7 @@ RELEASE_TEST_IDS = (
 )
 
 DESKTOP_TEST_PREFIXES = (
+    'test_updater_desktop.',
     'test_native_session_status_ui.',
     'test_two_region_ui.',
     'test_resize_surface.',
@@ -171,7 +188,7 @@ def flatten(suite):
 
 
 def discover_tests():
-    for path in (STUDIO, ROOT / 'scripts'):
+    for path in (ROOT, STUDIO, ROOT / 'scripts'):
         if str(path) not in sys.path:
             sys.path.insert(0, str(path))
     loader = unittest.TestLoader()

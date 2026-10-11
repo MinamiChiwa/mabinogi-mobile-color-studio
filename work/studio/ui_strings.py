@@ -258,6 +258,8 @@ EN.update({
 '方案名称请输入 1 至 60 个字符。':'Enter a preset name of 1 to 60 characters.',
 '此方案名称已存在，请使用其他名称。':'That preset name already exists. Choose a different name.',
 })
+EN.update({'请先返回游戏窗口，再点击重试。':'Return to the game window, then retry.'})
+TW.update({'请先返回游戏窗口，再点击重试。':'請先返回遊戲視窗，再點擊重試。'})
 TW.update({
 '已停止自动染色':'已停止自動染色',
 '色板状态读取不稳定':'色板狀態讀取不穩定',

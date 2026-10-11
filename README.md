@@ -69,3 +69,7 @@ python work/studio/build_release.py
 ```
 
 产物为 `outputs/release/ColorStudio` 完整目录。个人配置、会话和截图不进入发布包或 Git。当前验证范围见 [验证记录](work/studio/VERIFICATION.md)，版本变化见 GitHub Release。
+
+## 自动更新
+
+具备更新器的引导版本可在主界面检查 GitHub 更新，经用户决定下载和安装。按文件差异下载，保留设置、方案和全部 data；网络不通时可导入完整离线更新包。旧版需要首次手动升级。开发候选尚未配置正式更新公钥，不能作为正式更新源。详见 [更新说明](docs/automatic-updates.md)。

@@ -5,6 +5,13 @@ from window_target import (WindowTarget,choose_auto,resolve_target,valid_target,
 from platform_win import Game,Interrupted
 
 class WindowTargetTests(unittest.TestCase):
+    def test_visual_strategy_window_event_without_pid_keeps_window_label_working(self):
+        import app
+        from types import SimpleNamespace
+        owner=SimpleNamespace(selected_window=None,_bound_target=None,set_detail=lambda value:None,
+            window_button=MagicMock())
+        app.App.handle_event(owner,'window_bound',dict(hwnd=123,title='Game'))
+        self.assertIn('Game',owner.window_button.configure.call_args.kwargs['text'])
     def test_title_variants_and_process_fallback(self):
         for title in ('瑪奇 Mobile','瑪奇Mobile','瑪奇　Ｍｏｂｉｌｅ','玛奇 mobile','Mabinogi Mobile'):
             w=WindowTarget(10,20,title)

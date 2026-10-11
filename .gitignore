@@ -142,3 +142,8 @@ VALIDATION.md
 !/work/studio/native_live/assets/dye_timer_hourglass.json
 !/work/studio/native_live/assets/dye_timer_hourglass.png
 !/work/studio/native-window-check.ps1
+
+# Signed updater sources only; generated assets and private keys remain local.
+!/work/studio/updater/
+/work/studio/updater/*
+!/work/studio/updater/*.py

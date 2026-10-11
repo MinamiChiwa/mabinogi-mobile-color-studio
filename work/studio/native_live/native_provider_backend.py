@@ -17,6 +17,7 @@ from .read_dye_window_mapping import read_pixel_mapping,validate_pixel_mapping
 from .read_native_mouse_diagnostic import read_native_mouse_cache
 from .map_unity_window import map_unity_geometry_to_client
 from .build_layout import resolve_build_files
+from .build_adapters import select_adapter,BuildUnsupported
 from ctypes import wintypes
 
 EXPECTED_BUILD='1675c2131534d0ab2fc053af8a2e394d326ba7d22eff0019734be96b1808678f'
@@ -57,11 +58,14 @@ class CurrentBuildBackend:
             self.version = hashlib.sha256(self.build_files['gameassembly'].read_bytes()).hexdigest()
             self.metadata_version = hashlib.sha256(self.build_files['metadata'].read_bytes()).hexdigest()
             self.unityplayer_version = hashlib.sha256(self.build_files['unityplayer'].read_bytes()).hexdigest()
+            self.adapter=select_adapter(dict(gameassembly=self.version,metadata=self.metadata_version,unityplayer=self.unityplayer_version))
+        except BuildUnsupported as exc:
+            self.build_diagnostic={'hashes':exc.hashes,'adapter':'unsupported','inputs_sent':0}
+            self.reader.close();raise
         except BaseException:
             self.reader.close();raise
-        if self.version!=EXPECTED_BUILD or self.metadata_version!=EXPECTED_METADATA:
-            self.reader.close()
-            raise ValueError('Unsupported game/metadata build for static object walk')
+        self.build_diagnostic={'hashes':dict(gameassembly=self.version,metadata=self.metadata_version,unityplayer=self.unityplayer_version),
+            'adapter':self.adapter.adapter_id,'inputs_sent':0}
         self.base = self.reader.base
         self.scans = self.exports = 0
 
@@ -75,7 +79,7 @@ class CurrentBuildBackend:
     def _bind(self, check):
         self.reader.guard = check
         check()
-        cls = self.reader.u64(self.base + 0x106c9010)
+        cls = self.reader.u64(self.base + getattr(getattr(self,'adapter',None),'palette_class_rva',0x106c9010))
         if cls in (0,UNINITIALIZED_DYE_CLASS_TOKEN):
             raise DyeClassUnavailable('Dye class not initialized',class_value=cls)
         if cls < 0x100000000 or self.reader.class_name(cls) != 'MM.Client.Presentation.UI.Instances.StageScene.Dyeing.DyeingPaletteInstanceImpl':

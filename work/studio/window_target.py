@@ -21,6 +21,8 @@ u.GetWindowTextW.argtypes=[W.HWND,W.LPWSTR,C.c_int];u.GetWindowTextW.restype=C.c
 u.IsWindowVisible.argtypes=[W.HWND];u.IsWindowVisible.restype=W.BOOL
 u.IsWindow.argtypes=[W.HWND];u.IsWindow.restype=W.BOOL
 u.GetForegroundWindow.restype=W.HWND
+u.SetForegroundWindow.argtypes=[W.HWND];u.SetForegroundWindow.restype=W.BOOL
+u.ShowWindow.argtypes=[W.HWND,C.c_int];u.ShowWindow.restype=W.BOOL
 k.OpenProcess.argtypes=[W.DWORD,W.BOOL,W.DWORD];k.OpenProcess.restype=W.HANDLE
 k.QueryFullProcessImageNameW.argtypes=[W.HANDLE,W.DWORD,W.LPWSTR,C.POINTER(W.DWORD)];k.QueryFullProcessImageNameW.restype=W.BOOL
 k.CloseHandle.argtypes=[W.HANDLE]
@@ -55,7 +57,7 @@ def normalized_title(title):
     return ''.join(unicodedata.normalize('NFKC',title).casefold().split())
 
 def choose_auto(windows,foreground=0):
-    aliases={'瑪奇mobile','玛奇mobile','mabinogimobile'}
+    aliases={'瑪奇mobile','玛奇mobile','mabinogimobile','마비노기모바일'}
     candidates=[w for w in windows if normalized_title(w.title) in aliases or w.executable.casefold()=='mabinogimobile.exe']
     if len(candidates)==1:return candidates[0]
     active=[w for w in candidates if w.hwnd==foreground]
@@ -65,6 +67,22 @@ def choose_auto(windows,foreground=0):
 
 def valid_target(target):
     return bool(u.IsWindow(target.hwnd)) and window_pid(target.hwnd)==target.pid
+
+def activate_target_window(target):
+    """Return the bound game window to the foreground after an overlay click.
+
+    The retry button is deliberately usable without activating the overlay,
+    but Windows can still leave the game unfocused on some DPI/window-manager
+    combinations. Reasserting the already validated HWND before the worker
+    consumes the request prevents the input guard from treating the button
+    click as a session failure.
+    """
+    if target is None or not valid_target(target):
+        return False
+    if u.IsIconic(target.hwnd):
+        u.ShowWindow(target.hwnd,9)  # SW_RESTORE
+    u.SetForegroundWindow(target.hwnd)
+    return int(u.GetForegroundWindow())==int(target.hwnd)
 
 def resolve_target(target=None):
     if target is None:return choose_auto(list_windows(),u.GetForegroundWindow())

@@ -32,8 +32,10 @@ def verify(release,source):
               'native_live.project_probe_io','native_live.project_closed_loop_io','native_live.service',
               'native_live.read_dye_window_mapping','native_live.runtime_read','overlay_native','search_overlay'}
     comparisons={}
-    for path in [*source.glob('*.py'),*(source/'native_live').rglob('*.py')]:
-        if path.name.startswith('test_'):continue
+    required.update({'update_bootstrap','updater.runtime','updater.manifest','updater.trust','updater.ui_update',
+        'updater.download','updater.discovery','updater.offline','updater.paths','native_live.build_adapters'})
+    for path in [*source.glob('*.py'),*(source/'native_live').rglob('*.py'),*(source/'updater').rglob('*.py')]:
+        if path.name.startswith(('test_','_updater_test_')) or path.name=='update_recovery_identity.py':continue
         name=path.relative_to(source).with_suffix('').as_posix().replace('/','.')
         if name.endswith('.__init__'):name=name[:-9]
         if name!='app' and name not in pyz.toc:continue
@@ -49,6 +51,10 @@ def verify(release,source):
              (p.name in prohibited or p.name.endswith(('.checkpoint.json','.input.json','.visual_failure.json')))]
     assert not private,private
     assert not (release/'data').exists() and not (release/'_internal/fixtures').exists()
+    assert (release/'ColorStudioUpdater.exe').is_file(),'Independent update helper missing'
+    recovery_code=pyz.extract('update_recovery_identity')
+    helper_digest=hashlib.sha256((release/'ColorStudioUpdater.exe').read_bytes()).hexdigest()
+    assert helper_digest in recovery_code.co_consts,'Embedded recovery helper identity mismatch'
     return dict(build=manifest,production_modules=len(comparisons),module_comparisons=comparisons,
                 assets_match=assets,personal_data_absent=True,
                 executable_sha256=hashlib.sha256((release/'ColorStudio.exe').read_bytes()).hexdigest())

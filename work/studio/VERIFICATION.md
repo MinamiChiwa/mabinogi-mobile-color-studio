@@ -1,3 +1,13 @@
+# Local candidate 0.4.2rc9 — update bootstrap and retry focus (2026-10-12)
+
+- Main-window GitHub/offline update controls are implemented in Simplified Chinese, Traditional Chinese and English. Checks do not download/install; search/picking/window selection pause downloads and block installs.
+- Updates use cryptography Ed25519, signed ownership, SHA-256, bounded resource bundles, an independent onefile helper, same-volume backups and write-ahead recovery. A frozen test upgrade committed successfully and a broken target executable rolled back; application/user/unknown-file hashes were verified.
+- Native retry now activates the bound game before requesting reset; activation failure keeps the retry button usable. Search/timer/input policy is unchanged.
+- Korean title discovery and unknown-build fingerprints are supported. Korean game layouts/input are not yet validated; no Korean native-search support claim is made.
+- Production candidates do not contain a test signing key. A maintained production public key, signed bootstrap ownership and release assets must be provisioned before public updater use.
+- Latest quick baseline: 578 selected, 577 passed, one optional historical OCR skip, zero failures. The full release verdict is still incomplete because two required original rc16 similarity fixtures are unavailable; an existing three-second route test passed separately after failing under concurrent build load.
+- No game input, new dye session, desktop replacement, remote push or public release. Details: docs/verification-auto-update-2026-10-12.md in the development workspace.
+
 # Current verification scope
 
 ## Local candidate 0.4.2rc8 (2026-10-11)

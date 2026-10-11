@@ -33,6 +33,7 @@ def _prepare(pid,folder,check,hwnd=None):
         if isinstance(files,dict):diagnostic['build_files']={k:str(v) for k,v in files.items()}
         diagnostic['build_hashes']={k:v for k in ('version','metadata_version','unityplayer_version')
             if isinstance((v:=getattr(backend,k,None)),str)}
+        if isinstance(getattr(backend,'build_diagnostic',None),dict):diagnostic['build_diagnostic']=backend.build_diagnostic
         if hwnd is not None:backend.window_hwnd=hwnd
         end=time.monotonic()+10.
         diagnostic['stage']='window_context';save()
@@ -50,6 +51,9 @@ def _prepare(pid,folder,check,hwnd=None):
         return backend,dict(window_context=window,input_backend=branch,timer_assets=timer,hex_assets=glyphs,
             pixel_mapping_diagnostics=diagnostic.get('pixel_mapping_diagnostics',{}))
     except BaseException as exc:
+        from .build_adapters import BuildUnsupported
+        if isinstance(exc,BuildUnsupported):diagnostic['build_diagnostic']=dict(hashes=exc.hashes,adapter='unsupported',inputs_sent=0)
+        if backend is not None and isinstance(getattr(backend,'build_diagnostic',None),dict):diagnostic['build_diagnostic']=backend.build_diagnostic
         diagnostic['error']=type(exc).__name__+': '+str(exc)
         if isinstance(exc,ProcessReadDenied):
             diagnostic.update(stage='process_access',process_access=exc.diagnostic)

@@ -272,7 +272,9 @@ class SearchOverlay(ct.CTkToplevel):
     def request_retry(self):
         if (not self._retry_enabled or self._retry_pending or getattr(self,'_dismissed',False)
                 or not callable(self.retry_action)):return
-        self.mark_retry_requested();self.retry_action()
+        # The parent marks pending only after the bound game regained focus.
+        # A failed activation must leave this button available for another try.
+        self.retry_action()
     def render(self,title,body):
         value=(title,body)
         if value==self._text:return
