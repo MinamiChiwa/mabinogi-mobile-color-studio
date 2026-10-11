@@ -13,6 +13,13 @@ F = np.float32
 
 
 def _vector(value):
+    if isinstance(value,np.ndarray) and value.dtype==np.float32:
+        # Native replay already owns float32 points. Finite float32 values
+        # cannot exceed their dtype range; retain shape/finite checks and a
+        # distinct buffer without allocating a widened vector on every event.
+        if value.shape!=(2,) or not np.isfinite(value).all():
+            raise ValueError('Two finite float32 coordinates required')
+        return value.copy()
     v = np.asarray(value, dtype=np.float64)
     if v.shape != (2,) or not np.isfinite(v).all() or np.max(np.abs(v)) > np.finfo(np.float32).max:
         raise ValueError('Two finite float32 coordinates required')

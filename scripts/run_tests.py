@@ -18,6 +18,7 @@ PROFILES = ('quick', 'release', 'research', 'full')
 QUICK_MODULES = frozenset('''
 test_app_data test_build_info test_core test_dpi_layout test_display_geometry
 test_hotkeys test_input_gestures test_window_target test_platform_dpi
+test_lossless_scoring
 test_screen_mapping
 test_runtime_i18n_coverage test_ui_i18n test_ui_performance
 test_native_ui_completion test_native_ui_hit_testing test_responsive_geometry

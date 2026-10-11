@@ -1,3 +1,12 @@
+# Local candidate 0.4.2rc11 — lossless computation speedup (2026-10-12)
+
+- Pure canonical RGB/LAB distance reuse is bounded and owns immutable target tuples; mutated alternatives are re-evaluated. Replay float32 vectors retain checks and buffer ownership while avoiding redundant float64 conversion.
+- Saved route and 80 randomized references: complete replay trace, diagnostics, endpoint and guard counts equal the prior implementation. 816 exact/LAB colour-pair results are identical. Fixed microbenchmarks: replay 1.18x; repeated colour distances 4.02x. These are not whole-round speed claims.
+- Quick: 596 selected, 595 passed, one optional OCR fixture skip, no failures/errors (75.701 seconds total). Focused final contracts: 60 passed. A stale recorded compromise test now verifies the existing superior-prefix retention policy instead of requiring a worse suffix and unnecessary return; no production strategy was changed for that test.
+- No live game input or public release. Required historical rc16 similarity evidence remains missing.
+
+Evidence: `outputs/native-integration/verification/lossless-speed-2026-10-12/`; report: `docs/verification-lossless-speed-2026-10-12.md`.
+
 # Local candidate 0.4.2rc10 — continuous retry zoom (2026-10-12)
 
 - Same-anchor downward retry wheels share one preparation and one final complete scale/color observation. Windows still receives individual -120 events at the established 18 ms cadence, with one 100 ms settle at the end. Ordinary route input validation remains unchanged.

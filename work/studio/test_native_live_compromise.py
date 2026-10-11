@@ -152,7 +152,7 @@ class NativeCompromiseTests(unittest.TestCase):
         self.assertEqual(c.actions,[])
         self.assertEqual(result['stop_reason'],'insufficient_compromise_actions')
         self.assertNotEqual(result['outcome'],'compromise')
-    def test_better_measured_intermediate_is_restored_after_a_worse_final_pose(self):
+    def test_better_measured_intermediate_is_retained_before_a_worse_final_pose(self):
         self.module();c=self.io
         from native_live.controller import run_goal_loop
         from native_live.same_session_dye_planner import _plan_fingerprint,_json
@@ -170,23 +170,22 @@ class NativeCompromiseTests(unittest.TestCase):
             plan.update(candidate=None,compromise_candidate=row,normalized_rules=rules,
                 rules_fingerprint=hashlib.sha256(_json(rules).encode()).hexdigest(),result_classification='not_found_in_budget')
             plan['plan_fingerprint']=_plan_fingerprint(plan);return plan
-        result=run_goal_loop(c,c.session,c.settings,self.rules,engineering_deadline=90.,clock=c.clock,planner=forced)
+        # This recorded test owns prefix retention, not another global/local
+        # solver matrix. The worse suffix is now rejected before moving.
+        with patch('native_live.controller.find_refinement',return_value=None):
+            result=run_goal_loop(c,c.session,c.settings,self.rules,engineering_deadline=90.,clock=c.clock,planner=forced)
         self.assertTrue(result['best_current'])
         self.assertLess(result['maximum'],result['initial_maximum'])
-        # The compiler may need a drag plus a non-reciprocal wheel pair for
-        # the return. Verify the complete measured return rather than impose
-        # an obsolete two-gesture route ceiling.
         original_steps=[s for s in result['steps'] if s['purpose'] not in ('refine','restore_refinement')]
-        self.assertGreater(len(original_steps),2)
+        self.assertEqual(len(original_steps),1,'A worse suffix must not overwrite the verified prefix')
         self.assertTrue(all(s['receipt']['completed'] is True for s in original_steps))
         restored=[s for s in original_steps if s['purpose']=='restore_best']
-        self.assertTrue(restored)
-        self.assertEqual(restored[-1]['after']['client_hex'],original_steps[0]['after']['client_hex'])
-        self.assertTrue(restored[-1]['screenshot_verified'])
-        self.assertEqual(len(restored[-1]['after_frames']),2)
-        self.assertTrue(all(frame['hex']==restored[-1]['after']['client_hex']
-            for frame in restored[-1]['after_frames']))
-        for step in restored:
+        self.assertFalse(restored,'A retained prefix needs no return gesture')
+        self.assertEqual(result['actual_colors'],original_steps[0]['after']['client_hex'])
+        self.assertEqual(len(result['current']['frames']),2)
+        self.assertTrue(all(frame['hex']==original_steps[0]['after']['client_hex']
+            for frame in result['current']['frames']))
+        for step in original_steps:
             replayed=replay_native_route(step['before']['pose'],[step['requested_gesture']],
                 c.geometry,c.settings,wheel_delta_per_step=1.,sample_policy='all_recorded_points')['final_pose']
             self.assertEqual(step['after']['pose'],replayed)

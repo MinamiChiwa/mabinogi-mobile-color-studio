@@ -5,6 +5,7 @@ from pathlib import Path
 import itertools, re, sys, os, shutil, subprocess, io, shlex, time
 import unicodedata
 from collections import Counter
+from functools import lru_cache
 import cv2
 import numpy as np
 import pytesseract
@@ -126,15 +127,37 @@ def normalize_hex(value):
     return '#'+s
 
 def rgb(value):
-    s=normalize_hex(value)[1:]; return tuple(int(s[i:i+2],16) for i in (0,2,4))
+    return _rgb_normalized(normalize_hex(value))
+
+@lru_cache(maxsize=8192)
+def _rgb_normalized(value):
+    s=value[1:]; return tuple(int(s[i:i+2],16) for i in (0,2,4))
 
 def lab(rgb_values):
     arr=np.asarray(rgb_values,np.float32)/255
     return cv2.cvtColor(arr.reshape(1,-1,3),cv2.COLOR_RGB2LAB).reshape(-1,3)
 
-def error(color,targets,exact):
+@lru_cache(maxsize=512)
+def _target_lab(targets):
+    values=lab([rgb(t) for t in targets]);values.setflags(write=False)
+    return values
+
+def _uncached_color_distance(color,targets,exact):
     if exact: return min(max(abs(a-b) for a,b in zip(rgb(color),rgb(t))) for t in targets)
-    return float(np.min(np.linalg.norm(lab([rgb(color)])-lab([rgb(t) for t in targets]),axis=1)))
+    target=_target_lab(targets) if len(targets)<=64 else lab([rgb(t) for t in targets])
+    return float(np.min(np.linalg.norm(lab([rgb(color)])-target,axis=1)))
+
+@lru_cache(maxsize=8192)
+def _color_distance(color,targets,exact):
+    return _uncached_color_distance(color,targets,exact)
+
+def error(color,targets,exact):
+    # Own canonical values, never a mutable caller list or a palette/rule result.
+    # The arithmetic stays identical; only pure colour conversions/distances
+    # are reused. Large alternative sets bypass bounded caches.
+    color=normalize_hex(color);targets=tuple(normalize_hex(t) for t in targets)
+    compute=_color_distance if len(targets)<=64 else _uncached_color_distance
+    return compute(color,targets,bool(exact))
 
 def accepted(colors,rules):
     if len(rules) not in (2,3) or len(colors)!=len(rules) or not any(rule['enabled'] for rule in rules):return False

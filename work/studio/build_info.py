@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import sys
 
-APP_VERSION = '0.4.2rc10'
+APP_VERSION = '0.4.2rc11'
 POLICY_REVISION = 'native-retained-prefix-v24'
 
 
