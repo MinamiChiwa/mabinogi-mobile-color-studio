@@ -5,8 +5,8 @@ import json
 from pathlib import Path
 import sys
 
-APP_VERSION = '0.4.2rc6'
-POLICY_REVISION = 'native-actual-route-budget-v23'
+APP_VERSION = '0.4.2rc7'
+POLICY_REVISION = 'native-retained-prefix-v24'
 
 
 def source_identity(root):

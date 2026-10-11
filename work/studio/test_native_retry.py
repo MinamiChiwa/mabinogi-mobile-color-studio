@@ -161,25 +161,18 @@ class NativeRetryTests(unittest.TestCase):
         result=self.run_loop(io,lambda:False,lambda row:None,deadline=10.)
         self.assertFalse(result['accepted']);self.assertFalse(result['verified'])
         self.assertIsNone(result['current']);self.assertIn('last_verified_retry',result)
-    def test_late_forward_route_runs_and_expired_drift_read_cannot_claim_old_best(self):
+    def test_late_forward_route_retains_better_prefix_before_worse_suffix(self):
         from native_input_compile import native_drag_gesture
         from native_live.same_session_dye_planner import _json
         import hashlib
         io=RetryIO();io.rules=[dict(enabled=True,exact=True,colors=['#FFFFFF'],tolerance=0.) for _ in range(3)]
-        checkpoint=io.checkpoint;frames=io.frames;perform=io.perform_candidate
+        checkpoint=io.checkpoint;frames=io.frames
         route=[native_drag_gesture(io.geometry,io.settings,dx,0).record() for dx in (-5,-1)]
         def measured_checkpoint(label,deadline):
             io.t+=1.073;return checkpoint(label,deadline)
         def measured_frames(label,deadline):
             io.t+=2.898;return frames(label,deadline)
-        def bad_landing(record,label,deadline):
-            before=copy.deepcopy(io.pose);receipt=perform(record,label,deadline)
-            if len(io.actions)==2:
-                drift=native_drag_gesture(io.geometry,io.settings,11,0).record()
-                io.pose=replay_native_route(before,[drift],io.geometry,io.settings,
-                    wheel_delta_per_step=1.,sample_policy='all_recorded_points')['final_pose']
-            return receipt
-        io.checkpoint=measured_checkpoint;io.frames=measured_frames;io.perform_candidate=bad_landing
+        io.checkpoint=measured_checkpoint;io.frames=measured_frames
         def planner(context,cp,frames,rules,grid,**kw):
             final=replay_native_route(cp['pose'],route,io.geometry,io.settings,
                 wheel_delta_per_step=1.,sample_policy='all_recorded_points')['final_pose']
@@ -194,10 +187,12 @@ class NativeRetryTests(unittest.TestCase):
             plan['plan_fingerprint']=_plan_fingerprint(plan);return plan
         with patch('native_live.controller.find_refinement',return_value=None):
             result=self.run_loop(io,lambda:False,lambda row:None,planner=planner,deadline=17.)
-        self.assertEqual(len(io.actions),2,'A hypothetical return must not block the fitting forward route')
-        self.assertEqual(result['stop_reason'],'insufficient_time')
-        self.assertFalse(result['verified']);self.assertFalse(result['accepted'])
-        self.assertEqual(result['actual_colors'],[None]*3)
+        self.assertEqual(len(io.actions),1,'The better intermediate landing must not be overwritten by the suffix')
+        self.assertEqual(result['stop_reason'],'compromise_observed')
+        self.assertTrue(result['verified']);self.assertTrue(result['best_current'])
+        self.assertFalse(result['accepted'])
+        self.assertEqual(result['actual_colors'],io.colors())
+        self.assertLess(result['maximum'],result['initial_maximum'])
         self.assertNotIn('late_route_decisions',result)
     def test_twenty_second_replanned_four_action_route_reaches_target_without_return_budget(self):
         io=RetryIO(scale=.5);plans=[];pending=[False];sent=[False]

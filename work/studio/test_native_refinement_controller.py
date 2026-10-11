@@ -142,6 +142,63 @@ class ProtectedRefinementControllerTests(unittest.TestCase):
         self.assertTrue(self.io.actions,result.get('error'))
         self.assertEqual(result['refinement_attempts'][0]['status'],'promoted')
         self.assertTrue(result['best_current']);self.assertTrue(result['verified'])
+
+    def recorded_prefix_case(self):
+        import json
+        from pathlib import Path
+        from test_support import read_local_fixture_text,load_local_palette_session
+        from native_input_response import InputGeometry,InputSettings
+        folder=Path(__file__).parent/'fixtures/native_live/rc6_prefix_best'
+        case=json.loads(read_local_fixture_text(folder/'case.json',encoding='utf-8'))
+        self.io.session=load_local_palette_session(folder/'palette')
+        self.io.cp=case['initial'];self.io.pose=copy.deepcopy(self.io.cp['pose'])
+        self.io.settings=InputSettings(**case['settings'])
+        self.io.geometry=InputGeometry(self.io.cp['board'],self.io.cp['local_size'],'windows_legacy_mouse_pixels')
+        self.rules=case['rules']
+        return case
+
+    def test_recorded_double_white_prefix_is_kept_before_worse_second_rotation(self):
+        case=self.recorded_prefix_case();calls=[]
+        def refine(context,cp,rules,**kw):
+            calls.append(copy.deepcopy(cp))
+            if len(calls)>1:return None
+            row=self.candidate(context,cp,case['candidate']['input_route'])
+            row['prefix_recoveries']=case['prefix_recoveries'];return row
+        result=self.run_loop(refine=refine)
+        self.assertEqual(len(self.io.actions),1)
+        self.assertEqual(result['actual_colors'],case['best_colors'])
+        self.assertTrue(result['screenshot_verified']);self.assertTrue(result['best_current'])
+        self.assertEqual(calls[1]['client_hex'],case['best_colors'])
+
+    def test_recorded_global_route_keeps_better_intermediate_double_white(self):
+        case=self.recorded_prefix_case();original=self.plan
+        def plan(context,cp,frames,rules,grid,**kw):
+            row=original(context,cp,frames,rules,grid,**kw)
+            row['compromise_candidate']=self.candidate(context,cp,case['candidate']['input_route'])
+            row['plan_fingerprint']=_plan_fingerprint(row);return row
+        self.plan=plan
+        result=self.run_loop(refine=lambda *a,**kw:None)
+        self.assertEqual(len(self.io.actions),1)
+        self.assertEqual(result['actual_colors'],case['best_colors'])
+        self.assertTrue(result['screenshot_verified']);self.assertTrue(result['best_current'])
+
+    def test_recorded_prefix_confirmation_failure_recovers_without_claiming_double_white(self):
+        case=self.recorded_prefix_case();original=self.io.frames;calls=[]
+        def frames(label,deadline):
+            if '_prefix_best' in label:
+                calls.append(label);raise TimeoutError('OCR observation deadline expired')
+            return original(label,deadline)
+        self.io.frames=frames
+        def refine(context,cp,rules,**kw):
+            self.refiner_calls+=1
+            if self.refiner_calls>1:return None
+            row=self.candidate(context,cp,case['candidate']['input_route'])
+            row['prefix_recoveries']=case['prefix_recoveries'];return row
+        result=self.run_loop(refine=refine)
+        self.assertEqual(len(calls),3)
+        self.assertEqual(result['refinement_attempts'][0]['status'],'restored')
+        self.assertEqual(result['actual_colors'],case['initial']['client_hex'])
+        self.assertTrue(result['screenshot_verified']);self.assertTrue(result['best_current'])
     def test_late_global_short_route_executes_without_hypothetical_return_budget(self):
         original=self.plan
         def plan(context,cp,frames,rules,grid,**kw):

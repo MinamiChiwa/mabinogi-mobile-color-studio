@@ -309,6 +309,31 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
             measured['stop_reason']='replan_required'
         return after,after_frames,measured
 
+    def retain_superior_prefix(checkpoint,visual_frames,feedback,suffix,baseline_quality,label,phase_deadline=None):
+        """Keep a better intermediate landing before a worse remaining route.
+
+        Native feedback triggers a visual check only when this landing beats
+        both the retained anchor and the remaining route from its actual pose.
+        This avoids decoding every intermediate action or discarding a gain
+        merely because it occurred before the planned endpoint.
+        """
+        def better_than_suffix(reference):
+            actual=observed_quality(reference['client_hex'],rules)
+            if actual>=baseline_quality:return False
+            guard(phase_deadline)
+            replay=replay_native_route(reference['pose'],suffix,geometry,settings,
+                wheel_delta_per_step=1.,sample_policy='all_recorded_points')
+            return actual<predicted_quality(score_native_pose(session,replay['final_pose'],rules),rules)
+        if not suffix or not better_than_suffix(checkpoint):
+            return checkpoint,visual_frames,feedback,False
+        if not visual_frames:
+            checkpoint,visual_frames=observe_resilient(label+'_prefix_best',phase_deadline)
+            feedback=assess_feedback(context,checkpoint,visual_frames,rules)
+        retained=bool(feedback['screenshot_verified'] and better_than_suffix(checkpoint))
+        if retained:
+            emit('route_prefix_retained',colors=checkpoint['client_hex'],remaining_gestures=len(suffix))
+        return checkpoint,visual_frames,feedback,retained
+
     def retry_fields():
         fields=dict(effective_deadline=end,epoch=result['retry_epochs'])
         if current is not None:
@@ -798,6 +823,12 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                         reference,'refine',visual_required=index==len(route)-1,phase_deadline=phase_end)
                     completed_prefix=index+1;reference=cp
                     if feedback['observed_target_accepted']:break
+                    cp,frames,feedback,retained=retain_superior_prefix(cp,frames,feedback,
+                        route[index+1:],quality,'refine_'+str(len(result['refinement_attempts'])-1),phase_end)
+                    reference=cp
+                    if retained:
+                        transaction['retained_prefix_length']=completed_prefix
+                        break
                     if index<len(route)-1:
                         measured_return=reaudited(cp,returns[index]['input_route'])
                         transaction.setdefault('prefix_return_audits',[]).append(measured_return)
@@ -1007,11 +1038,17 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                     'candidate_'+str(number) if gesture_index==0 else
                     'candidate_'+str(number)+'_step_'+str(gesture_index),
                     route_fresh,purpose,visual_required=gesture_index==len(route)-1)
+                cp,frames,feedback,retained=retain_superior_prefix(cp,frames,feedback,
+                    route[gesture_index+1:],observed_quality(best_observed['checkpoint']['client_hex'],rules),
+                    'candidate_'+str(number))
                 if (current.get('frames') and feedback['screenshot_verified'] and
                         observed_quality(cp['client_hex'],rules)<observed_quality(best_observed['checkpoint']['client_hex'],rules)):
                     best_observed=copy.deepcopy(current)
                 if feedback['observed_target_accepted']:
                     result.update(stop_reason='target_observed',accepted=True);break
+                if retained:
+                    result['stop_reason']='compromise_observed'
+                    break
                 if result['steps'][-1].get('model_response_warning'):
                     suffix=route[gesture_index+1:]
                     if suffix:

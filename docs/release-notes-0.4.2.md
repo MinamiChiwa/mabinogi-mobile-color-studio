@@ -1,6 +1,8 @@
-# 0.4.2rc6 — 路线执行与时间预算修正
+# 0.4.2rc7 — 保留路线中途更优结果
 
 ## 简体中文
+
+- 修复两步细化中第一步已取得双白、第二步却将其覆盖的问题。中途落点优于保留结果且剩余路线预测更差时，追加一次实际色码确认，保留该落点，并从新基准继续细化；不增加逐动作截图或缩短时限。
 
 - 修复已找到的旋转与滚轮路线被拦截、转而在初始位置不断细化的问题。移除细化约 4 秒的阶段硬截止，读取与恢复可使用真实剩余时间；持续读色超时进入实际落点恢复。
 
@@ -24,6 +26,8 @@
 
 ## 繁體中文
 
+- 修正兩步細化中第一步已取得雙白、第二步卻將其覆蓋的問題。中途落點優於保留結果且剩餘路線預測更差時，追加一次實際色碼確認，保留該落點，並從新基準繼續細化；不增加逐動作截圖或縮短時限。
+
 - 修正已找到的旋轉與滾輪路線被攔截、轉而在初始位置持續細化的問題。移除細化約 4 秒的階段硬截止，讀取與恢復可使用實際剩餘時間；持續讀色逾時會進入實際落點恢復。
 
 - 精簡日常與發布回歸，歷史搜尋矩陣移至研究集合；發布檢查不會將必要樣本缺失後的跳過誤報為完整通過。
@@ -45,6 +49,8 @@
 重試不增加遊戲時間、不消耗新道具，不自動開啟或套用染色。有限搜尋無法保證多色精準成功。本機候選版尚未完成新一局實機驗收。
 
 ## English
+
+- Keeps a better intermediate result instead of overwriting it with a worse route endpoint. If live feedback beats the retained result and the predicted remaining route, one visual confirmation promotes that landing as the next refinement anchor. No screenshot is added to every action and time limits are unchanged.
 
 - Fixes a blocked rotation/wheel route that caused repeated refinement at the initial position. Removes the roughly four-second refinement phase deadline: reads and recovery use the actual remaining allowance. Persistent color-read timeouts enter endpoint recovery.
 

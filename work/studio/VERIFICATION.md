@@ -1,5 +1,15 @@
 # Current verification scope
 
+## Local candidate 0.4.2rc7 (2026-10-11)
+
+- Reproduced session `20261011-210621-60790ceb`: refinement action 12 produced `#FFFFFF / #FFFFFF / #DEE7F3`; action 13 replaced region 2 with `#D0D0D0`. Both native poses matched the replay. The controller compared only the complete route endpoint with the older one-white anchor.
+- Both local refinement and global routes now visually confirm and retain a superior intermediate landing when the remaining route is predicted worse. Subsequent refinement starts from that newly verified anchor.
+- Quick: 543 selected, 542 passed, one optional historical OCR skip, zero failures/errors, 64.732 seconds total. A subsequent confirmation-failure regression increases future selection to 544.
+- Final controller/retry suite: 68 passed in 13.165 seconds, including the new confirmation-failure recovery test. The original recorded/local solver and frame-budget suites also passed in the broader run; its one obsolete two-action expectation was updated and is included in the final 68. Counts overlap.
+- Original palette replay demonstrated the failure before the fix, then retained double white after one rotation. These are simulated input and screenshot boundaries, not a new live game verification. No public release or new dye item used. Prior missing rc16 release fixtures remain unresolved.
+
+Evidence: `outputs/native-integration/verification/prefix-best-2026-10-11/`.
+
 ## Local candidate 0.4.2rc6 (2026-10-11)
 
 - Quick: 540 selected, 539 passed, one optional historical OCR skip, zero failures/errors; 53.766 seconds total.
