@@ -8,7 +8,7 @@ from updater.paths import hash_file
 def main(argv=None):
     p=argparse.ArgumentParser();p.add_argument('--old-package',type=Path,required=True);p.add_argument('--offline',type=Path,required=True)
     p.add_argument('--keys',type=Path,required=True);p.add_argument('--out',type=Path,required=True)
-    p.add_argument('--expect-rollback',action='store_true');a=p.parse_args(argv)
+    p.add_argument('--expect-rollback',action='store_true');p.add_argument('--crash-after-backup',action='store_true');a=p.parse_args(argv)
     out=a.out.resolve();out.mkdir(parents=True,exist_ok=True);root=out/'测试 安装/ColorStudio'
     if root.exists():raise RuntimeError('Use a fresh isolated smoke directory')
     shutil.copytree(a.old_package,root)
@@ -25,10 +25,22 @@ def main(argv=None):
     with patch('updater.runtime.sys.frozen',True,create=True),patch('updater.runtime.launch_helper'):
         runtime.prepare_install(runtime.service.plan)
     tx=Path(json.loads((root/'.colorstudio-pending.json').read_text())['transaction'])
-    started=time.monotonic();helper=subprocess.Popen([str(tx/'ColorStudioUpdater.exe'),'--transaction',str(tx)])
+    started=time.monotonic()
+    if a.crash_after_backup:
+        from updater.transaction import apply_update
+        try:apply_update(tx,fault='after_backup')
+        except RuntimeError:pass
+        helper=subprocess.Popen([str(root/'ColorStudio.exe')],cwd=root)
+    else:helper=subprocess.Popen([str(tx/'ColorStudioUpdater.exe'),'--transaction',str(tx)])
     try:code=helper.wait(timeout=210)
     except subprocess.TimeoutExpired:
         helper.terminate();helper.wait(timeout=10);raise RuntimeError('Frozen helper smoke timeout')
+    if a.crash_after_backup:
+        end=time.monotonic()+60
+        while time.monotonic()<end:
+            state=json.loads((tx/'state.json').read_text())
+            if state['status'] in ('recovered','committed'):break
+            time.sleep(.1)
     state=json.loads((tx/'state.json').read_text());after={path:hash_file(root/path) for path in before}
     manifest=json.loads((root/'update-manifest.json').read_text())
     verified=all(hash_file(root/r['path'])==r['sha256'] for r in manifest['files'])

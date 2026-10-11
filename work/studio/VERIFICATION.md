@@ -1,3 +1,8 @@
+# Close/startup race fix (2026-10-12)
+
+- A queued close during CTk's first mainloop titlebar update caused a destroyed-WM exception. App now enters the Tk event loop without that nested pump, cancels pending callbacks on shutdown and avoids duplicate destruction. A fresh-process regression and three frozen EXE close timings pass with exit 0.
+- Interrupted update with a missing cryptography file recovers through the embedded-hash external helper using only stdlib; all program/user-file hashes were verified.
+
 # Local candidate 0.4.2rc9 — update bootstrap and retry focus (2026-10-12)
 
 - Main-window GitHub/offline update controls are implemented in Simplified Chinese, Traditional Chinese and English. Checks do not download/install; search/picking/window selection pause downloads and block installs.

@@ -35,3 +35,9 @@ Ed25519 使用 `cryptography==46.0.5`，未保留自写算法。文件所有权�
 用户资料、正式私钥、韩服个人日志、游戏文件和历史 fixture 不复制到 Git。本轮不覆盖桌面工具、不读取或操作游戏、不消耗染色道具。普通/管理员权限、ARM64 模拟、其他显示器与地区网络仍需正式包环境验收；韩服按后续计划先做普通界面只读诊断。
 
 最终只读代码审查未发现剩余 Critical/Important；审查期间修正窗口选择忙碌门控、helper 失联隐藏程序、提交日志失败子进程清理、改名同内容离线 blob 和混合安装时恢复依赖。生产签名、两份历史素材和韩服实机验证仍按上文边界处理。
+
+## 用户发现的关闭弹窗修复
+
+用户截图为 `app.py` 调用 CustomTkinter.mainloop 时的 `can't invoke wm command: application has been destroyed`，不是预期测试结果。复现：App 创建后排队 0ms 关闭，CTk 首次进入循环前的 titlebar 调整内部 update 消费关闭请求，销毁后继续查询 wm state。修复首次事件循环进入路径，并在关闭时取消遗留定时器及阻止重复销毁；没有忽略未处理异常。`test_app_shutdown` 在新进程复现失败后通过，相关 UI 15 项通过。实际候选 EXE 的 0/0.2/0.8 秒三个关闭时点均返回 0、无 stderr，证据为 candidate-shutdown.json。最新版候选为 release-v0.4.2rc9-shutdown；139 个模块/资源/embedded-helper 哈希核对通过。
+
+另完成真实混合安装恢复：将密码库文件备份后中断，直接启动旧 EXE，stdlib 引导调用外部 helper 恢复全部应用文件；用户数据不变，约 4.1 秒。证据 frozen-crash-recovery-final/report.json。Git 同步树因不携带私有 fixture 跳过较多测试，不能与开发工作区 quick 的完整证据混为一谈。

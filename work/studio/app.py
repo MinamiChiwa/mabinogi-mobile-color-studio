@@ -313,6 +313,7 @@ class App(ct.CTk):
         self.after(100,self.fit_screen)
         self.selected_window=None;self._bound_target=None;self.overlay=None;self.active_rules=None;self.history=read_history(DATA/'history.json');self.best_summary=None
         self.q=queue.Queue();self.runner=None;self.busy=False;self.picking=False;self.keys={};self.cards=[]
+        self._closing=False
         self._update_health_pending='--update-ready' in sys.argv
         # The page follows the resizable native window. Its fixed-size card
         # viewport remains centered inside the responsive page.
@@ -427,6 +428,17 @@ class App(ct.CTk):
             from update_bootstrap import helper_alive
             if not helper_alive(self._update_transaction):self.close();return
             self.after(100,self._await_update_commit)
+    def mainloop(self,*args,**kwargs):
+        # CTk's first mainloop changes the Windows titlebar with a nested
+        # update(). A queued WM_CLOSE can destroy the root inside that update,
+        # before CTk subsequently calls wm state. Initialization already set
+        # the titlebar; enter Tk's event loop without that extra nested pump.
+        if self._closing:return
+        if not self._window_exists:
+            self._window_exists=True
+            if not self._withdraw_called_before_window_exists and not self._iconify_called_before_window_exists:
+                self.deiconify()
+        tk.Tk.mainloop(self,*args,**kwargs)
     def schedule_layout(self,event):
         if event.widget!=self:return
         try:scaling=self.page._get_widget_scaling()
@@ -796,6 +808,7 @@ class App(ct.CTk):
             self.q.put((kind,data))
         run_hotkeys(platform_win.u,ctypes,platform_win.W,self._hotkeys_stop,receive,keys)
     def tick(self):
+        if self.__dict__.get('_closing',False):return
         updater=self.__dict__.get('updater')
         if updater is not None:updater.set_busy(self.busy or self.__dict__.get('picking',False) or self.__dict__.get('_window_selecting',False) or self.__dict__.get('_color_selecting',False))
         try:
@@ -809,7 +822,8 @@ class App(ct.CTk):
                 except Exception:self.report_callback_exception(*sys.exc_info())
                 try:self.handle_event(k,d)
                 except Exception:self.report_callback_exception(*sys.exc_info())
-        finally:self.after(60,self.tick)
+        finally:
+            if not self.__dict__.get('_closing',False):self.after(60,self.tick)
     def handle_event(self,k,d):
         if k=='update':self.update_ui.handle(d)
         elif k=='hotkey':
@@ -964,13 +978,21 @@ class App(ct.CTk):
             self.region_note.configure(text='已识别 2 个染色区域，区域 3 本局不可用。');self.region_note.grid()
         else:self.region_note.grid_remove()
     def close(self):
+        if self.__dict__.get('_closing',False):return
+        self._closing=True
         if hasattr(self,'updater'):self.updater.cancel()
-        if self.busy:self.stop();self.after(250,self.close)
+        if self.busy:
+            self.stop();self._closing=False;self.after(250,self.close)
         else:
             if not getattr(self,'_profile_read_failed',False) or getattr(self,'_autosave_job',None) is not None:self.flush_autosave()
             self._hotkeys_stop.set()
             if hasattr(self,'_resize_surface'):self._resize_surface.destroy()
             self._resize_redraw.restore()
+            try:
+                for job in self.tk.call('after','info'):
+                    try:self.tk.call('after','cancel',job)
+                    except tk.TclError:pass
+            except tk.TclError:pass
             self.destroy()
 
 if __name__=='__main__':App().mainloop()
