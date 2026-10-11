@@ -108,7 +108,7 @@ def run_native_search(owner,rules,*,mode='search',target=None,activate=False,**u
             'discovery_progress':'discovery','discovery_blocked':'discovery',
             'planning':'search','action':'position','observed':'verify','initial_visual_wait':'native_validate',
             'compromise_selected':'position','observation_wait':'verify','target_approach':'position',
-            'refinement_planning':'search','refinement_search_progress':'search'}.get(name)
+            'refinement_planning':'refinement','refinement_search_progress':'refinement'}.get(name)
         with (folder/'native-events.jsonl').open('a',encoding='utf-8') as stream:
             stream.write(json.dumps(row,ensure_ascii=False)+'\n')
         if name in ('native_retry_available','native_retry_reset'):
@@ -124,8 +124,6 @@ def run_native_search(owner,rules,*,mode='search',target=None,activate=False,**u
             stage='waiting';message='正在等待并检查活动染色板；F9 可停止。'
         if name=='compromise_selected':message='未找到精准方案，正在定位并复核色差较小的妥协方案。'
         if name=='target_approach':message='已找到目标色板位置，正在定位并复核。'
-        if name=='refinement_planning':message='正在查找更接近的颜色，并保留恢复时间。'
-        if name=='refinement_search_progress':message='正在扩大细化搜索，并核对返回路线。'
         if name=='action' and row.get('purpose')=='refine':message='正在细化颜色，已预留恢复时间。'
         if name=='action' and row.get('purpose')=='restore_refinement':message='正在恢复已验证的颜色。'
         if stage:

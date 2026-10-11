@@ -784,6 +784,9 @@ class App(ct.CTk):
             from ui_progress import progress_text
             title,body=progress_text(d)
             self.status.configure(text=tr(title));self.set_detail(tr(body))
+            if k=='native_progress' and d.get('stage')=='refinement' and d.get('verified') and d.get('screenshot_verified'):
+                for card,color in zip(self.cards,d.get('current_colors') or []):
+                    card.current.configure(text=tr('当前颜色  ')+(color or tr('读取失败')))
         elif k=='native_retry_available':
             from native_status import retry_reason_text
             self._retry_enabled=bool(d.get('enabled'))

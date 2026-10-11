@@ -1,6 +1,8 @@
-# 0.4.2rc7 — 保留路线中途更优结果
+# 0.4.2rc8 — 细化期间展示当前实测配色
 
 ## 简体中文
+
+- 扩大细化搜索期间展示当前游戏实测颜色及各区域色差，并说明计算期间色板可能保持不动。找到更好的可执行方案才继续移动；满意当前效果可按 F9 停止搜索，再到游戏内确认染色。不显示预测候选或递增路线计数，不改变寻色策略与时间预算。
 
 - 加速启动及等待阶段的色板检查，大块数据改为对齐地址批量比较，仍覆盖所有候选并在结束时复验。准备时间随游戏状态和电脑性能变化。
 
@@ -28,6 +30,8 @@
 
 ## 繁體中文
 
+- 擴大細化搜尋期間顯示目前遊戲實測顏色及各區域色差，並說明計算期間色板可能保持不動。找到更好的可執行方案才繼續移動；滿意目前效果可按 F9 停止搜尋，再到遊戲內確認染色。不顯示預測候選或遞增路線計數，不變更尋色策略與時間預算。
+
 - 加速啟動及等待階段的色板檢查，大塊資料改為對齊位址批次比較，仍涵蓋所有候選並在結束時複驗。準備時間會隨遊戲狀態及電腦效能變化。
 
 - 修正兩步細化中第一步已取得雙白、第二步卻將其覆蓋的問題。中途落點優於保留結果且剩餘路線預測更差時，追加一次實際色碼確認，保留該落點，並從新基準繼續細化；不增加逐動作截圖或縮短時限。
@@ -53,6 +57,8 @@
 重試不增加遊戲時間、不消耗新道具，不自動開啟或套用染色。有限搜尋無法保證多色精準成功。本機候選版尚未完成新一局實機驗收。
 
 ## English
+
+- Shows the current measured game colors and each region's color difference during extended refinement. Explains why the board may remain still while a better executable route is calculated. Press F9 when satisfied, then confirm dyeing in the game. No predicted alternatives or growing route counts are shown; search behavior and time budgets are unchanged.
 
 - Speeds up startup and waiting checks with aligned full-pointer comparisons for large blocks, retaining full candidate coverage and final revalidation. Preparation time still depends on game state and computer performance.
 

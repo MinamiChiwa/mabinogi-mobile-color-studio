@@ -1,5 +1,10 @@
 """Reviewed wording for the desktop interface."""
 EN={
+'已保留当前配色，正在尝试进一步优化':'Current colors retained · Looking for further improvement',
+'当前配色 · 游戏实测':'Current colors · Measured in game',
+'工具正在计算能否继续缩小色差。只有找到更好的可执行方案才会移动色板，因此这段时间画面可能一直不动。':'The tool is calculating whether it can reduce the color differences further. It will move the board only after finding a better executable plan, so the board may remain still during this stage.',
+'这一阶段可能持续数十秒；若未找到更优方案，将保留当前配色。':'This stage may take tens of seconds. If no better plan is found, the current colors will be retained.',
+'满意当前效果可按 F9 停止搜索，再到游戏内确认染色。':'If you are satisfied with the current colors, press F9 to stop searching, then confirm dyeing in the game.',
 '当前方案 · 游戏实测':'Current combination · Measured in game',
 '已测试方案 · 游戏实测':'Tested combination · Measured in game',
 '候选方案 · 预测颜色':'Candidate · Predicted colors',
@@ -387,4 +392,12 @@ TW.update({
 '所选方案已不存在。':'所選方案已不存在。',
 '方案名称请输入 1 至 60 个字符。':'方案名稱請輸入 1 至 60 個字元。',
 '此方案名称已存在，请使用其他名称。':'此方案名稱已存在，請使用其他名稱。',
+})
+
+TW.update({
+'已保留当前配色，正在尝试进一步优化':'已保留目前配色，正在嘗試進一步最佳化',
+'当前配色 · 游戏实测':'目前配色 · 遊戲實測',
+'工具正在计算能否继续缩小色差。只有找到更好的可执行方案才会移动色板，因此这段时间画面可能一直不动。':'工具正在計算能否繼續縮小色差。只有找到更好的可執行方案才會移動色板，因此這段時間畫面可能一直不動。',
+'这一阶段可能持续数十秒；若未找到更优方案，将保留当前配色。':'這個階段可能持續數十秒；若未找到更好的方案，將保留目前配色。',
+'满意当前效果可按 F9 停止搜索，再到游戏内确认染色。':'滿意目前效果可按 F9 停止搜尋，再到遊戲內確認染色。',
 })

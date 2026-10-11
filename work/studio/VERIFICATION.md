@@ -1,5 +1,14 @@
 # Current verification scope
 
+## Local candidate 0.4.2rc8 (2026-10-11)
+
+- Targeted presentation, controller, service, localization and desktop retry suite: 73 tests passed in 33.964 seconds. Verified-anchor colors and deltas reach both UI surfaces and update after promotion. Two/three regions, repeated progress without resizing or resetting the stage timer, 100/150% scaling, collapse and F9 were exercised in isolated Tk windows.
+- Simplified Chinese, Traditional Chinese and English overlay screenshots were inspected using fixed example colors. Capture exclusion was disabled only inside this isolated fixture to make screenshots possible; production capture exclusion is unchanged.
+- Refinement copy now explains stationary calculation, shows measured HEX/delta E and offers F9. Candidate counts and unverified colors are not presented as current results. Search logic, time policy and game inputs are unchanged.
+- No live dye session or public release. The missing required historical rc16 release fixtures remain unresolved; this is not a complete release verdict. The automatic updater is a plan only, with GitHub and offline sources selected by the user.
+
+Evidence: `outputs/native-integration/verification/refinement-copy-2026-10-11/` and `outputs/refinement-copy-tests.log`.
+
 ## Local candidate 0.4.2rc7 (2026-10-11)
 
 - Final combined quick run: 544 selected, 543 passed, one optional historical OCR skip, zero failures/errors; 68.668 seconds. Current-process read-only service preflight passed with zero input attempts.

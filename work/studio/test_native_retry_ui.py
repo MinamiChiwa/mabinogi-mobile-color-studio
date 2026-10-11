@@ -74,5 +74,40 @@ class NativeRetryUITests(unittest.TestCase):
         self.ui.handle_event('hotkey',dict(id=3))
         self.assertEqual(self.requests,[])
 
+    def test_refinement_shows_measured_results_without_resetting_progress_or_blocking_stop(self):
+        import app
+        from unittest.mock import patch
+        overlay=self.ui.overlay
+        for scale,colors,deltas in ((1.,['#FFFFFF','#FFFFFF','#EBEEDC'],[0.,0.,11.45]),
+                                    (1.5,['#FFFFFF','#EBEEDC'],[0.,11.45])):
+            app.ct.set_widget_scaling(scale);app.ct.set_window_scaling(scale)
+            event=dict(stage='refinement',current_colors=colors,current_deltas=deltas,
+                       verified=True,screenshot_verified=True,examined=14527)
+            self.emit('native_progress',event)
+            for label in (self.ui.detail,overlay.copy):
+                body=str(label.cget('text'))
+                self.assertIn('当前配色 · 游戏实测',body)
+                self.assertIn('#EBEEDC · ΔE 11.45',body)
+                self.assertNotIn('14527',body)
+                self.assertEqual('区域 3' in body,len(colors)==3)
+            self.assertIn(colors[0],str(self.ui.cards[0].current.cget('text')))
+            stage_started=overlay._stage_started
+            with patch.object(overlay,'resize_surface',wraps=overlay.resize_surface) as resize:
+                for n in range(3):self.emit('native_progress',dict(event,examined=15000+n))
+                resize.assert_not_called()
+            self.assertEqual(overlay._stage_started,stage_started)
+            self.assertEqual(overlay.candidate_rows,{})
+            self.assertIsNotNone(overlay._heartbeat_job)
+            overlay.toggle_collapse();self.helper.pump(.03)
+            self.helper.hit(overlay.stop_button)
+            overlay.toggle_collapse();self.helper.pump(.03)
+            self.emit('native_progress',dict(stage='position'))
+            self.assertNotIn('当前配色 · 游戏实测',str(overlay.copy.cget('text')))
+            self.assertFalse(overlay._refinement_status)
+        self.ui.handle_event('hotkey',dict(id=2))
+        self.assertTrue(self.ui.runner.stop.is_set())
+        self.assertEqual(overlay.state(),'withdrawn')
+        self.assertEqual(self.helper.errors,[])
+
 
 if __name__=='__main__':unittest.main()

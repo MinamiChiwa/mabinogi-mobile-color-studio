@@ -78,6 +78,24 @@ class ProtectedRefinementControllerTests(unittest.TestCase):
         self.assertTrue(result['best_current']);self.assertTrue(result['screenshot_verified'])
         self.assertEqual(len(result['planning_rounds']),1)
         self.assertEqual(result['refinement_attempts'][0]['status'],'promoted')
+
+    def test_refinement_progress_carries_the_verified_anchor_until_it_is_promoted(self):
+        from native_live.compromise import score_codes
+        events=[];anchors=[]
+        def refine(context,cp,rules,**kw):
+            anchors.append(list(cp['client_hex']))
+            kw['progress'](dict(stage='integer_drags',examined=14527))
+            return self.refine(context,cp,rules,**kw)
+        self.run_loop(refine=refine,event=events.append)
+        planning=[r for r in events if r['event']=='refinement_planning']
+        progress=[r for r in events if r['event']=='refinement_search_progress']
+        self.assertGreaterEqual(len(anchors),2)
+        self.assertNotEqual(anchors[0],anchors[1])
+        for rows in (planning,progress):
+            self.assertEqual([r['current_colors'] for r in rows],anchors)
+            for row in rows:
+                self.assertTrue(row['verified'] and row['screenshot_verified'])
+                self.assertEqual(row['current_deltas'],score_codes(row['current_colors'],self.rules)['deltas'])
     def test_twenty_second_window_can_try_one_short_audited_improvement(self):
         result=self.run_loop(deadline=28.)
         self.assertTrue(self.io.actions,'A short trial and audited return fit; repeated idle tails blocked it')

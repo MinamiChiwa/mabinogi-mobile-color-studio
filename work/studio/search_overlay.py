@@ -183,7 +183,7 @@ class SearchOverlay(ct.CTkToplevel):
     def resize_surface(self):
         if self._surface_job is not None:self.after_cancel(self._surface_job);self._surface_job=None
         area=work_area(self);scale=self._get_window_scaling()
-        height=175 if self._collapsed else 580 if self._has_results else 280
+        height=175 if self._collapsed else 580 if self._has_results else 480 if getattr(self,'_refinement_status',False) else 280
         width=max(1,min(410,int(area[2]/scale)))
         height=max(1,min(height,int(area[3]/scale)))
         x,y=clamp_position((self.winfo_x(),self.winfo_y()),area,
@@ -222,6 +222,7 @@ class SearchOverlay(ct.CTkToplevel):
         self._heartbeat_job=self.after(1000,self.heartbeat)
     def begin(self,rules,*,passive=False):
         self._dismissed=False
+        self._refinement_status=False
         self._native_run=False
         self._native_candidate_run=False;self._native_candidate_batch=None;self._native_candidate_closed=False
         self._retry_enabled=False;self._retry_pending=False
@@ -458,6 +459,10 @@ class SearchOverlay(ct.CTkToplevel):
             ct.CTkLabel(self.results,text=tr(text),justify='left',anchor='w').pack(fill='x',padx=8,pady=8)
     def handle(self,kind,data):
         if getattr(self,'_dismissed',False):return
+        if kind in ('native_progress','native_result','native_retry_reset','finished') or (kind=='native_retry_available' and data.get('waiting_for_retry')):
+            refining=kind=='native_progress' and data.get('stage')=='refinement'
+            if refining!=getattr(self,'_refinement_status',False):
+                self._refinement_status=refining;self.schedule_surface_resize()
         if kind in ('native_candidates','native_candidate_ready','native_candidate_selected','native_candidate_closed'):
             return
         if kind=='native_retry_available':

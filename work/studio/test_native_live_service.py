@@ -77,6 +77,10 @@ class NativeLiveServiceTests(unittest.TestCase):
             target=__import__('window_target').WindowTarget(20,123,'Game','MabinogiMobile.exe')
             backend=MagicMock();backend.observe_window_context.return_value=dict(extent_one_to_one=True,window=dict(client_size_physical=[1280,960]))
             def fake_loop(adapter,session,settings,rules,**kwargs):
+                for name in ('refinement_planning','refinement_search_progress'):
+                    kwargs['event'](dict(event=name,stage='integer_drags',examined=14527,
+                        current_colors=['#FFFFFF','#FFFFFF','#EBEEDC'],current_deltas=[0.,0.,11.45],
+                        verified=True,screenshot_verified=True))
                 kwargs['event']({'event':'action','kind':'wheel','purpose':'compromise','at_monotonic':1.0})
                 return {'stop_reason':'not_found_in_budget','actual_input_attempts':0,'accepted':False,
                         'verified':False,'actual_colors':[None]*3,'actual_deltas':[None]*3}
@@ -98,6 +102,12 @@ class NativeLiveServiceTests(unittest.TestCase):
             calls=[data for kind,data in events if kind=='native_progress']
             self.assertTrue(calls)
             self.assertEqual(calls[-1]['action_kind'],'wheel')
+            refinement=[row for row in calls if row.get('stage')=='refinement']
+            self.assertEqual(len(refinement),2)
+            for row in refinement:
+                self.assertEqual(row['current_colors'],['#FFFFFF','#FFFFFF','#EBEEDC'])
+                self.assertEqual(row['current_deltas'],[0.,0.,11.45])
+                self.assertTrue(row['verified'] and row['screenshot_verified'])
             self.assertNotEqual(result['stop_reason'],'observation_failed')
         finally:
             import shutil;shutil.rmtree(folder,ignore_errors=True)

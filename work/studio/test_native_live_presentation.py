@@ -92,6 +92,31 @@ class NativePresentationTests(unittest.TestCase):
         self.assertIn('准备',title)
         self.assertIn('暂时不要进入',body)
 
+    def test_refinement_explains_stationary_board_and_shows_only_measured_results(self):
+        from ui_progress import progress_text
+        import i18n
+        data=dict(stage='refinement',verified=True,screenshot_verified=True,
+            current_colors=['#FFFFFF','#FFFFFF','#EBEEDC'],current_deltas=[0.,0.,11.4525766],
+            checked_routes=14527)
+        title,body=progress_text(data)
+        self.assertIn('已保留当前配色',title)
+        self.assertIn('数十秒',body);self.assertIn('F9',body)
+        self.assertIn('区域 3  #EBEEDC · ΔE 11.45',body)
+        self.assertNotIn('14527',body)
+        for count in (2,3):
+            _,text=progress_text(dict(data,current_colors=data['current_colors'][:count],
+                current_deltas=[0.,None,11.45][:count]))
+            self.assertIn('未参与匹配',text)
+            self.assertEqual('区域 3' in text,count==3)
+        _,unverified=progress_text(dict(data,screenshot_verified=False))
+        self.assertNotIn('#FFFFFF',unverified)
+        original=i18n.language
+        try:
+            i18n.set_language('English')
+            translated=str(i18n.tr(title+'\n'+body))
+            self.assertFalse(any('\u4e00'<=c<='\u9fff' for c in translated),translated)
+        finally:i18n.set_language(original)
+
     def test_discovery_keeps_memory_reading_details_out_of_user_status(self):
         from ui_progress import progress_text
         title,body=progress_text(dict(stage='discovery',discovery=dict(bytes_scanned=33554432,

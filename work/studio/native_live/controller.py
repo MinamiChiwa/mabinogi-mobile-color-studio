@@ -746,7 +746,10 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                 protected_allowance_seconds=minimum)
             result['refinement_budget_decisions'].append(budget)
             if clock()+minimum+MINIMUM_USEFUL_SEARCH_SECONDS>=end:stop('insufficient_protected_time');return
-            emit('refinement_planning',protected_colors=baseline['client_hex'])
+            display=dict(current_colors=list(baseline['client_hex']),
+                current_deltas=score_codes(baseline['client_hex'],rules)['deltas'],
+                verified=True,screenshot_verified=True)
+            emit('refinement_planning',protected_colors=baseline['client_hex'],**display)
             # The local search itself never changes the board. Let its finite
             # family use the usable remainder; successful candidates return
             # promptly after polishing, while every trial still owns recovery.
@@ -755,7 +758,7 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
             try:
                 row=find_refinement(context,baseline,rules,deadline=search_end,clock=clock,
                     check=lambda:planning_guard(search_end),excluded=excluded,
-                    stats=stats,progress=lambda update:emit('refinement_search_progress',**update))
+                    stats=stats,progress=lambda update:emit('refinement_search_progress',**update,**display))
             except TimeoutError:
                 stop('local_search_timeout');return
             finally:

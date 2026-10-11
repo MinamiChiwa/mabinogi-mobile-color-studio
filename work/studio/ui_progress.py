@@ -12,6 +12,20 @@ STAGES={
 
 
 def progress_text(data):
+    if data.get('stage')=='refinement':
+        title='已保留当前配色，正在尝试进一步优化'
+        lines=[]
+        colors=data.get('current_colors') or []
+        deltas=data.get('current_deltas') or []
+        if data.get('verified') and data.get('screenshot_verified') and len(colors) in (2,3) and len(colors)==len(deltas):
+            lines.append('当前配色 · 游戏实测')
+            for i,(color,delta) in enumerate(zip(colors,deltas)):
+                lines.append(f'区域 {i+1}  {color or "—"} · '+(f'ΔE {delta:.2f}' if delta is not None else '未参与匹配'))
+            lines.append('')
+        lines.extend(('工具正在计算能否继续缩小色差。只有找到更好的可执行方案才会移动色板，因此这段时间画面可能一直不动。',
+            '这一阶段可能持续数十秒；若未找到更优方案，将保留当前配色。','',
+            '满意当前效果可按 F9 停止搜索，再到游戏内确认染色。'))
+        return title,'\n'.join(lines)
     title=STAGES.get(data.get('stage'),'正在按目标计算，请稍候。')
     if data.get('total'):title+=f"  {data.get('current',0)}/{data['total']}"
     body=data.get('message') or (
