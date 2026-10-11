@@ -35,10 +35,11 @@ class OfflineHeap:
         raise ValueError('Unexpected offline chunk read')
 
 
-def _run(chunk, repeats, *, prefix):
+def _run(chunk, repeats, *, aligned):
     reader = OfflineHeap(chunk, repeats)
     census = scanning.IncrementalDyeScan(reader, CLASS, clock=time.perf_counter)
-    if not prefix:
+    if not aligned:
+        census.aligned_search_min_bytes = float('inf')
         census.search_pattern = census.pattern
         census.buffer_search_pattern = census.pattern
     def inspect(reader, address, cls):
@@ -59,7 +60,7 @@ def _run(chunk, repeats, *, prefix):
 
 def benchmark(mib=512):
     if type(mib) is not int or mib < 8 or mib % 8: raise ValueError('MiB must be a positive multiple of 8')
-    result = dict(schema_version=1, kind='offline_scanner_cpu', fixture_mib=mib,
+    result = dict(schema_version=2, kind='offline_scanner_cpu', fixture_mib=mib,
         process_reads=0, inputs_sent=0, class_pointer=hex(CLASS), chunk_mib=8,
         excludes=['ReadProcessMemory', 'Windows region enumeration', 'real object inspection'], shapes=[])
     for name, word in (('zero', b'\0'*8), ('sparse_words', b'\0'*6+b'\x01\x00'),
@@ -68,12 +69,12 @@ def benchmark(mib=512):
         raw = bytearray(word*(CHUNK//8))
         struct.pack_into('<Q', raw, CHUNK//2, CLASS)
         chunk = bytes(raw)
-        before = _run(chunk, mib//8, prefix=False)
-        after = _run(chunk, mib//8, prefix=True)
+        before = _run(chunk, mib//8, aligned=False)
+        after = _run(chunk, mib//8, aligned=True)
         if before['candidates'] != after['candidates'] or not before['scan_complete'] or not after['scan_complete']:
             raise AssertionError('Offline coverage changed')
         candidates = len(after.pop('candidates')); before.pop('candidates')
-        result['shapes'].append(dict(shape=name, full_pointer=before, verified_prefix=after,
+        result['shapes'].append(dict(shape=name, full_pointer=before, aligned_pointer=after,
             identical_candidates=True, candidate_count=candidates, speedup=before['seconds']/after['seconds']))
     return result
 

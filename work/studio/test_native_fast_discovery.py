@@ -49,6 +49,43 @@ class PatternHeap:
 
 
 class NativeFastDiscoveryTests(unittest.TestCase):
+    def test_large_block_scans_aligned_full_pointers_without_byte_find(self):
+        memory = PatternHeap(128*1024+5)
+        memory.memory[:] = random.Random(84).randbytes(len(memory.memory))
+        for offset in (0, 9, 65528, 65536, 131064): memory.put(offset)
+        memory.put(128, memory.cls | (1 << 56))
+        scan = scanning.IncrementalDyeScan(memory, memory.cls, clock=memory.clock)
+        with patch.object(scanning, 'inspect', side_effect=memory.inspect):
+            while scan.phase != 'complete': scan.advance(20., lambda: None, max_candidates=1)
+        self.assertEqual(sorted(scan.seen), [memory.base+x for x in (0, 65528, 65536, 131064)])
+        self.assertTrue(scan.diagnostic()['scan_complete'])
+        self.assertEqual(memory.needles, [])
+
+    def test_large_block_interruption_retries_candidate_before_advancing(self):
+        memory = PatternHeap(128*1024); memory.put(0); memory.put(65536)
+        scan = scanning.IncrementalDyeScan(memory, memory.cls, clock=memory.clock)
+        attempts = [0]
+        def interrupted(reader, address, cls):
+            attempts[0] += 1
+            if attempts[0] == 1: raise InterruptedError('F9')
+            return memory.inspect(reader, address, cls)
+        with patch.object(scanning, 'inspect', side_effect=interrupted):
+            with self.assertRaises(InterruptedError): scan.advance(20., lambda: None)
+            self.assertEqual(scan.seen, set())
+            while scan.phase != 'complete': scan.advance(20., lambda: None, max_candidates=1)
+        self.assertEqual(scan.diagnostic()['eligible_addresses'], [hex(memory.base), hex(memory.base+65536)])
+        self.assertTrue(scan.diagnostic()['scan_complete'])
+
+    def test_large_block_alignment_uses_absolute_address_and_window_boundary(self):
+        memory = PatternHeap(512*1024+7); memory.base += 3
+        for offset in (5, 256*1024-3, 256*1024+5, 512*1024-3): memory.put(offset)
+        memory.put(80)  # relative alignment is not absolute alignment
+        scan = scanning.IncrementalDyeScan(memory, memory.cls, clock=memory.clock)
+        with patch.object(scanning, 'inspect', side_effect=memory.inspect):
+            while scan.phase != 'complete': scan.advance(20., lambda: None, max_candidates=1)
+        self.assertEqual(sorted(scan.seen), [memory.base+x for x in (5, 256*1024-3, 256*1024+5, 512*1024-3)])
+        self.assertTrue(scan.diagnostic()['scan_complete'])
+
     def test_zero_suffix_search_uses_prefix_but_rejects_every_nonexact_pointer(self):
         memory = PatternHeap()
         pattern = struct.pack('<Q', memory.cls)

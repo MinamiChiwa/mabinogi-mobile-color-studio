@@ -2,6 +2,11 @@
 
 ## Local candidate 0.4.2rc7 (2026-10-11)
 
+- Final combined quick run: 544 selected, 543 passed, one optional historical OCR skip, zero failures/errors; 68.668 seconds. Current-process read-only service preflight passed with zero input attempts.
+- Startup report: the rc6 session took 14.64 seconds to arm, scanning about 4 GB. Its 42.662-second discovery total includes later waiting scans. An uninitialized dye class skips that census, explaining faster starts on a fresh game process.
+- Aligned full-pointer search now compares bounded 256 KiB windows in large blocks, retaining resumable candidates, full coverage, cancellation and final inspection. 64 focused discovery/session/service checks passed.
+- Alternating old/new read-only sweeps of the same live process covered about 3.28 GB: old 6.703/6.672 seconds, new 4.406/3.953 seconds (34–41% reduction). This used an absent synthetic class pointer on an uninitialized game, not a live dye selection; real active-object validation and slow-machine performance remain unmeasured. Current backend initialization and build hashing took 0.84 seconds; the unresolved class check completed immediately. No inputs were sent.
+
 - Reproduced session `20261011-210621-60790ceb`: refinement action 12 produced `#FFFFFF / #FFFFFF / #DEE7F3`; action 13 replaced region 2 with `#D0D0D0`. Both native poses matched the replay. The controller compared only the complete route endpoint with the older one-white anchor.
 - Both local refinement and global routes now visually confirm and retain a superior intermediate landing when the remaining route is predicted worse. Subsequent refinement starts from that newly verified anchor.
 - Quick: 543 selected, 542 passed, one optional historical OCR skip, zero failures/errors, 64.732 seconds total. A subsequent confirmation-failure regression increases future selection to 544.

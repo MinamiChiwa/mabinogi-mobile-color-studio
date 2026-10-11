@@ -2,6 +2,8 @@
 
 ## 简体中文
 
+- 加速启动及等待阶段的色板检查，大块数据改为对齐地址批量比较，仍覆盖所有候选并在结束时复验。准备时间随游戏状态和电脑性能变化。
+
 - 修复两步细化中第一步已取得双白、第二步却将其覆盖的问题。中途落点优于保留结果且剩余路线预测更差时，追加一次实际色码确认，保留该落点，并从新基准继续细化；不增加逐动作截图或缩短时限。
 
 - 修复已找到的旋转与滚轮路线被拦截、转而在初始位置不断细化的问题。移除细化约 4 秒的阶段硬截止，读取与恢复可使用真实剩余时间；持续读色超时进入实际落点恢复。
@@ -26,6 +28,8 @@
 
 ## 繁體中文
 
+- 加速啟動及等待階段的色板檢查，大塊資料改為對齊位址批次比較，仍涵蓋所有候選並在結束時複驗。準備時間會隨遊戲狀態及電腦效能變化。
+
 - 修正兩步細化中第一步已取得雙白、第二步卻將其覆蓋的問題。中途落點優於保留結果且剩餘路線預測更差時，追加一次實際色碼確認，保留該落點，並從新基準繼續細化；不增加逐動作截圖或縮短時限。
 
 - 修正已找到的旋轉與滾輪路線被攔截、轉而在初始位置持續細化的問題。移除細化約 4 秒的階段硬截止，讀取與恢復可使用實際剩餘時間；持續讀色逾時會進入實際落點恢復。
@@ -49,6 +53,8 @@
 重試不增加遊戲時間、不消耗新道具，不自動開啟或套用染色。有限搜尋無法保證多色精準成功。本機候選版尚未完成新一局實機驗收。
 
 ## English
+
+- Speeds up startup and waiting checks with aligned full-pointer comparisons for large blocks, retaining full candidate coverage and final revalidation. Preparation time still depends on game state and computer performance.
 
 - Keeps a better intermediate result instead of overwriting it with a worse route endpoint. If live feedback beats the retained result and the predicted remaining route, one visual confirmation promotes that landing as the next refinement anchor. No screenshot is added to every action and time limits are unchanged.
 

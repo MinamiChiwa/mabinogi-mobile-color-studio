@@ -1,5 +1,6 @@
 """Preflight bounded scan for valid dye instances and live Unity native textures."""
 import struct,sys,time,json,datetime
+import numpy as np
 from pathlib import Path
 from .runtime_read import Reader
 from .capture_dye_state import checked_object, mm_items, snapshot
@@ -65,6 +66,7 @@ class IncrementalDyeScan:
  including inactive or temporarily uninitialized objects. All matches are
  inspected again after the census before uniqueness can be established.
  """
+ aligned_search_min_bytes=64*1024
  def __init__(self,reader,cls,*,clock=time.monotonic,known_addresses=()):
   self.reader=reader;self.cls=cls;self.clock=clock;self.started=clock()
   self.pattern=struct.pack('<Q',cls)
@@ -83,6 +85,7 @@ class IncrementalDyeScan:
   self.read_failures=0;self.last_read_error=None;self.candidate_read_errors={};self.rejected_candidates={}
   self.read_seconds=0.;self.search_seconds=0.;self.inspection_seconds=0.
   self.exact_search_blocks=0
+  self.aligned_search_blocks=0;self.aligned_matches=None;self.aligned_window_end=0
 
  def _inspect(self,address,check,*,validating=False):
   check();began=self.clock();unreadable=False
@@ -126,7 +129,26 @@ class IncrementalDyeScan:
     self.validation_index+=1;inspected+=1;continue
    if self.buffer is not None:
     search_began=self.clock()
-    position=self.buffer.find(self.buffer_search_pattern,self.find_position)
+    if len(self.buffer)>=self.aligned_search_min_bytes:
+     # Object headers are 8-byte aligned. Compare complete little-endian
+     # pointers in bounded windows instead of searching every byte. Retain
+     # both matches and the byte cursor so cancellation never loses a hit.
+     if self.aligned_matches is None or self.find_position>=self.aligned_window_end:
+      start=self.find_position+(-(self.buffer_start+self.find_position)%8)
+      end=min(len(self.buffer),start+256*1024)
+      count=max(0,(end-start)//8)
+      if not count:
+       self.buffer=None;continue
+      self.aligned_window_end=start+count*8
+      words=np.frombuffer(self.buffer,dtype='<u8',count=count,offset=start)
+      self.aligned_matches=np.flatnonzero(words==self.cls)*8+start
+     index=int(np.searchsorted(self.aligned_matches,self.find_position))
+     if index==len(self.aligned_matches):
+      self.find_position=self.aligned_window_end
+      self.search_seconds+=max(0.,self.clock()-search_began)
+      continue
+     position=int(self.aligned_matches[index])
+    else:position=self.buffer.find(self.buffer_search_pattern,self.find_position)
     exact=position>=0 and self.buffer.startswith(self.pattern,position)
     self.search_seconds+=max(0.,self.clock()-search_began)
     if position<0:
@@ -178,6 +200,8 @@ class IncrementalDyeScan:
     self.read_failures+=1;self.last_read_error='Short process read'
     self.next_address+=8*1024*1024;continue
    self.buffer=buffer;self.buffer_start=start;self.find_position=0
+   self.aligned_matches=None;self.aligned_window_end=0
+   self.aligned_search_blocks+=len(buffer)>=self.aligned_search_min_bytes
    # Prefix search wins on zero-heavy heaps but loses on already varied words.
    # A few bounded samples choose the needle only; every chosen match still
    # receives the exact full-pointer check below. No region is excluded.
@@ -213,6 +237,7 @@ class IncrementalDyeScan:
    search_pattern_bytes=len(self.search_pattern),read_seconds=self.read_seconds,
    prefix_collision_count=self.prefix_collision_count,search_full_fallbacks=self.search_full_fallbacks,
    exact_search_blocks=self.exact_search_blocks,
+   aligned_search_blocks=self.aligned_search_blocks,
    search_seconds=self.search_seconds,inspection_seconds=self.inspection_seconds,
    throughput_mib_per_second=self.bytes_scanned/(1024*1024*elapsed) if elapsed>0 else 0.,
    inputs_sent=0,ready_for_input=False)
