@@ -98,7 +98,7 @@ class NativeControllerTests(unittest.TestCase):
         self.assertTrue(result['accepted']);self.assertEqual(result['effective_deadline'],110.)
         self.assertTrue(all(frame.get('timer_policy')=='startup_advisory'
             for observation in result['observations'] for frame in observation.get('frames') or []))
-    def test_late_unknown_timer_is_advisory_and_a_real_pair_keeps_ten_seconds(self):
+    def test_late_unknown_timer_is_advisory_and_a_real_pair_keeps_three_seconds(self):
         original=self.io.frames;calls=[0]
         # Late reads may shorten the deadline before an old plan is rejected.
         def later(label,deadline):
@@ -113,7 +113,7 @@ class NativeControllerTests(unittest.TestCase):
             return rows
         self.io.frames=later
         result=self.run_goal()
-        self.assertLessEqual(result['effective_deadline'],65.)
+        self.assertLessEqual(result['effective_deadline'],70.1)
         self.assertEqual(result['stop_reason'],'observation_failed')
     def test_unknown_countdown_after_grace_does_not_block_color_feedback(self):
         original=self.io.frames;shifted=[False]

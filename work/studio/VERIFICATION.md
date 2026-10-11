@@ -1,5 +1,15 @@
 # Current verification scope
 
+## Local candidate 0.4.2rc6 (2026-10-11)
+
+- Quick: 540 selected, 539 passed, one optional historical OCR skip, zero failures/errors; 53.766 seconds total.
+- Focused real-refinement and recorded recovery replays: 35 passed in 58.726 seconds. Retry/readback admission: 51 passed in 8.656 seconds. A subsequently added persistent-decoder-timeout recovery case also passed (0.689 seconds); it increases future quick selection to 541. Counts overlap.
+- Replays the reported `20261011-203529-ce9a6c15` palette and seven-action route. The forward rotation/wheel route now executes and produces the saved predicted colors in offline input replay; this is not a new live screenshot validation.
+- Removes speculative global return admission and short per-refinement read deadlines. Local trials reserve one measured recovery; a second recovery is attempted only if actual time remains. Initial OCR grace and the three-second tail are unchanged.
+- No new live dye round or public release. The two missing rc16 similarity fixtures documented below remain unresolved; no complete release verdict is claimed.
+
+Reports: `outputs/native-integration/verification/refinement-stall-2026-10-11/`.
+
 ## Local candidate 0.4.2rc5 (2026-10-11)
 
 Public release remains 0.4.1. This candidate is not approved for public release.
@@ -17,7 +27,7 @@ The input backend accepts a non-1:1 viewport only with verified target-HWND DPI 
 
 The shared time policy keeps a single three-second tail. New rounds are capped at 117 seconds; unknown-age rounds initially use 90 seconds and may gain at most 27 seconds from reliable same-session countdown evidence. The initial 30-second OCR grace and retry epoch are preserved. Input, readback and complete return routes remain dynamically charged.
 
-Global approaches can use controlled rotations up to 90 degrees while generic compilation retains its 12-degree default and fine candidates. Completed candidates survive CPU search exhaustion; late moves require protected recovery. Actual screenshot HEX remains the only precise-match proof. Three-white end-to-end accuracy is not newly verified.
+Global approaches can use controlled rotations up to 90 degrees while generic compilation retains its 12-degree default and fine candidates. Completed candidates survive CPU search exhaustion; rc5 late moves required speculative recovery; rc6 removes that global admission gate. Actual screenshot HEX remains the only precise-match proof. Three-white end-to-end accuracy is not newly verified.
 
 ## Evidence and exclusions
 

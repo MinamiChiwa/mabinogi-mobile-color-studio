@@ -1,13 +1,15 @@
-# 0.4.2rc5 — 回归精简与 DPI 输入适配
+# 0.4.2rc6 — 路线执行与时间预算修正
 
 ## 简体中文
+
+- 修复已找到的旋转与滚轮路线被拦截、转而在初始位置不断细化的问题。移除细化约 4 秒的阶段硬截止，读取与恢复可使用真实剩余时间；持续读色超时进入实际落点恢复。
 
 - 精简日常与发布回归，历史搜索矩阵移至研究集合；发布检查不会将必要样本缺失后的跳过误报为完整通过。
 - 输入后端接受经过 HWND DPI 像素映射验证的非 1:1 视口，继续检查会话绑定、窗口和坐标证据。
 
 - 尾部统一最多预留 3 秒，取消重复的 8／10 秒空闲预留；实际输入、回读、回程和会话检查仍按真实耗时保护。倒计时仍保留首次 30 秒宽限。
 - 全局大角度色板路线允许受控的最多 90°平滑旋转，同时保留 12°与微调候选；数学近似目标需完整动作回放和实际色码复核，不能据此宣称精准命中。
-- 已完成的实测候选不会因后续有限 CPU 搜索耗尽而被清除；若更好的路线无法保证回程，会保留当前最佳并继续尝试更短安全路线。
+- 已完成的实测候选不会因后续有限 CPU 搜索耗尽而被清除；全局路线只核算实际前进与回读成本，不再为假设失败预扣完整回程；局部细化只保留一次实测恢复成本。
 - 修正剩余约 50 秒却拒绝本局重试的预算门槛。按实际缩小路线及颜色复核预留时间，新搜索使用本局剩余余量；按钮与点击后的预算判断一致，实际目标路线仍单独复核。
 - 重试不可用时分别说明时间、操作额度、搜索次数和缩小路线原因，避免统一误报为时间不足。
 - 精准模式移除预测候选列表，改为浮窗「重新寻色」和 F7。停止当前搜索、释放鼠标并缩小画板至最大可见范围后，在同局重新搜索。
@@ -22,12 +24,14 @@
 
 ## 繁體中文
 
+- 修正已找到的旋轉與滾輪路線被攔截、轉而在初始位置持續細化的問題。移除細化約 4 秒的階段硬截止，讀取與恢復可使用實際剩餘時間；持續讀色逾時會進入實際落點恢復。
+
 - 精簡日常與發布回歸，歷史搜尋矩陣移至研究集合；發布檢查不會將必要樣本缺失後的跳過誤報為完整通過。
 - 輸入後端接受經過 HWND DPI 像素映射驗證的非 1:1 視口，繼續檢查會話綁定、視窗與座標證據。
 
 - 尾部統一最多預留 3 秒，移除重複的 8／10 秒空閒預留；實際輸入、回讀、回程與會話檢查仍依真實耗時保護。倒數計時仍保留首次 30 秒寬限。
 - 全域大角度色板路線允許受控的最多 90°平滑旋轉，同時保留 12°與微調候選；數學近似目標仍須完整動作重播與實際色碼複核，不能宣稱精準命中。
-- 已完成的實測候選不會因後續有限 CPU 搜尋耗盡而被清除；若更佳路線無法保證回程，會保留目前最佳並繼續嘗試更短安全路線。
+- 已完成的實測候選不會因後續有限 CPU 搜尋耗盡而被清除；全域路線只計算實際前進與回讀成本，不再為假設失敗預扣完整回程；局部細化只保留一次實測恢復成本。
 - 修正剩餘約 50 秒仍拒絕本局重試的預算門檻。依實際縮小路線與顏色複核預留時間，新搜尋使用本局剩餘餘量；按鈕與點擊後的預算判斷一致，實際目標路線仍單獨複核。
 - 重試無法使用時分別說明時間、操作額度、搜尋次數與縮小路線原因，避免統一誤報為時間不足。
 - 精準模式移除預測候選清單，改為浮窗「重新尋色」與 F7。停止目前搜尋、釋放滑鼠並縮小色板至最大可見範圍後，在同局重新搜尋。
@@ -42,12 +46,14 @@
 
 ## English
 
+- Fixes a blocked rotation/wheel route that caused repeated refinement at the initial position. Removes the roughly four-second refinement phase deadline: reads and recovery use the actual remaining allowance. Persistent color-read timeouts enter endpoint recovery.
+
 - Trims daily and release regression profiles while keeping historical search matrices in research. Missing required evidence can no longer produce a complete release verdict.
 - Accepts non-1:1 input viewports backed by verified HWND DPI pixel mapping, retaining session, window and coordinate checks.
 
 - Uses a single three-second game-tail reserve and removes duplicate eight/ten-second idle padding. Real input, readback, return and session checks remain charged by their measured cost. The initial 30-second countdown grace remains.
 - Global palette approaches may use controlled smooth rotations up to 90 degrees while retaining 12-degree and micro-adjustment proposals. Mathematical near targets still require full route replay and actual HEX verification; they never prove an exact match.
-- Completed measured candidates are retained when later bounded CPU search is exhausted. If a better route cannot guarantee a return, the current best is kept while shorter safe routes continue to be considered.
+- Completed measured candidates are retained when later bounded CPU search is exhausted. Global routes are admitted by their actual forward and readback cost without a hypothetical full return. Local refinement reserves one measured recovery.
 - Fixes overly conservative retry admission with about 50 seconds left. It reserves the actual zoom-out route and color verification, then searches within the round's remaining allowance. Button availability and retry admission use the same budget; real target routes still require independent approval.
 - Unavailable retries now distinguish time, action allowance, search count and zoom-out route causes instead of reporting every refusal as insufficient time.
 - Precise Search replaces predicted alternatives with Retry in the overlay and F7. It ends the current search, releases the mouse, zooms out to the maximum visible area and searches again in the same round.

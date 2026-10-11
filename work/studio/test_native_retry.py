@@ -161,7 +161,7 @@ class NativeRetryTests(unittest.TestCase):
         result=self.run_loop(io,lambda:False,lambda row:None,deadline=10.)
         self.assertFalse(result['accepted']);self.assertFalse(result['verified'])
         self.assertIsNone(result['current']);self.assertIn('last_verified_retry',result)
-    def test_late_forward_route_without_complete_return_never_risks_verified_best(self):
+    def test_late_forward_route_runs_and_expired_drift_read_cannot_claim_old_best(self):
         from native_input_compile import native_drag_gesture
         from native_live.same_session_dye_planner import _json
         import hashlib
@@ -194,11 +194,12 @@ class NativeRetryTests(unittest.TestCase):
             plan['plan_fingerprint']=_plan_fingerprint(plan);return plan
         with patch('native_live.controller.find_refinement',return_value=None):
             result=self.run_loop(io,lambda:False,lambda row:None,planner=planner,deadline=17.)
-        self.assertEqual(io.actions,[],'Forward inputs fit, but the audited return and readback do not')
-        self.assertTrue(result['verified']);self.assertTrue(result['best_current'])
-        self.assertLessEqual(result['maximum'],result['initial_maximum'])
-        self.assertTrue(result.get('late_route_decisions'))
-    def test_twenty_second_replanned_four_action_route_keeps_best_without_return_budget(self):
+        self.assertEqual(len(io.actions),2,'A hypothetical return must not block the fitting forward route')
+        self.assertEqual(result['stop_reason'],'insufficient_time')
+        self.assertFalse(result['verified']);self.assertFalse(result['accepted'])
+        self.assertEqual(result['actual_colors'],[None]*3)
+        self.assertNotIn('late_route_decisions',result)
+    def test_twenty_second_replanned_four_action_route_reaches_target_without_return_budget(self):
         io=RetryIO(scale=.5);plans=[];pending=[False];sent=[False]
         route=[drag_gesture(io.geometry.board,1,0).record() for _ in range(4)]
         endpoint=replay_native_route(io.pose,route,io.geometry,io.settings,
@@ -231,11 +232,11 @@ class NativeRetryTests(unittest.TestCase):
             return plan
         result=self.run_loop(io,requested,event,planner=planner)
         self.assertEqual(result['retry_epochs'],1)
-        self.assertEqual(len(io.actions),0,result.get('error'))
-        self.assertFalse(result['accepted'],result.get('error'))
+        self.assertEqual(len(io.actions),4,result.get('error'))
+        self.assertTrue(result['accepted'],result.get('error'))
         self.assertTrue(result['screenshot_verified'])
         self.assertTrue(result['best_current'])
-        self.assertEqual(result['refinement_stop'],'late_route_not_protected')
+        self.assertEqual(result['stop_reason'],'target_observed')
     def test_retry_without_minimum_search_budget_preserves_current_without_input(self):
         io=RetryIO();requested,event,events=self.once_ready(io,retry_at=86.)
         result=self.run_loop(io,requested,event)
@@ -401,8 +402,7 @@ class NativeRetryTests(unittest.TestCase):
                 self.assertEqual(len(io.actions),len(reset))
                 self.assertTrue(all(row['kind']=='wheel' for row in io.actions))
                 if limit=='time':
-                    self.assertEqual(result['refinement_stop'],'late_route_not_protected')
-                    self.assertEqual(result['stop_reason'],'compromise_observed')
+                    self.assertEqual(result['stop_reason'],'insufficient_time')
                 else:self.assertEqual(result['stop_reason'],'insufficient_route_actions',result.get('error'))
     def test_f9_during_reset_stops_before_the_next_wheel_group(self):
         io=RetryIO();requested,event,events=self.once_ready(io);perform=io.perform_candidate

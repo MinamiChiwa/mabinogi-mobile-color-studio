@@ -84,6 +84,55 @@ class ProtectedRefinementControllerTests(unittest.TestCase):
         self.assertEqual(result['refinement_attempts'][0]['status'],'promoted')
         self.assertTrue(result['best_current']);self.assertTrue(result['verified'])
         self.assertLess(self.io.t,28.)
+    def test_slow_successful_visual_read_uses_spare_time_without_reversing_improvement(self):
+        original=self.io.frames
+        def delayed(label,deadline):
+            if label.startswith('refine_') and label.endswith('_after'):
+                self.io.t+=2.5
+            rows=original(label,deadline)
+            self.io.check(deadline)
+            return rows
+        self.io.frames=delayed
+        result=self.run_loop()
+        self.assertEqual(len(self.io.actions),1,result.get('error'))
+        self.assertEqual(result['refinement_attempts'][0]['status'],'promoted')
+        self.assertTrue(result['screenshot_verified'])
+
+    def test_slow_reference_read_uses_spare_time_before_trial(self):
+        original=self.io.checkpoint
+        def delayed(label,deadline):
+            if label=='refine_reference':self.io.t+=1.5
+            return original(label,deadline)
+        self.io.checkpoint=delayed
+        result=self.run_loop()
+        self.assertEqual(len(self.io.actions),1,result.get('error'))
+        self.assertEqual(result['refinement_attempts'][0]['status'],'promoted')
+        self.assertTrue(result['screenshot_verified'])
+
+    def test_recorded_white_global_wheel_route_is_not_replaced_by_initial_local_search(self):
+        import json
+        from pathlib import Path
+        from test_support import read_local_fixture_text,load_local_palette_session
+        from native_input_response import InputGeometry,InputSettings
+        folder=Path(__file__).parent/'fixtures/native_live/rc5_global_stall'
+        case=json.loads(read_local_fixture_text(folder/'case.json',encoding='utf-8'))
+        self.io.session=load_local_palette_session(folder/'palette')
+        self.io.cp=case['initial'];self.io.pose=copy.deepcopy(self.io.cp['pose'])
+        self.io.settings=InputSettings(**case['settings'])
+        self.io.geometry=InputGeometry(self.io.cp['board'],self.io.cp['local_size'],'windows_legacy_mouse_pixels')
+        self.rules=case['rules'];original=self.plan
+        def plan(context,cp,frames,rules,grid,**kw):
+            row=original(context,cp,frames,rules,grid,**kw)
+            row['compromise_candidate']=self.candidate(context,cp,case['route'])
+            self.io.t+=case['planning_seconds'];row['planned_at']=self.io.t
+            row['plan_fingerprint']=_plan_fingerprint(row)
+            return row
+        self.plan=plan
+        result=self.run_loop(deadline=60.,refine=lambda *a,**kw:None)
+        self.assertEqual([g['kind'] for g in self.io.actions],[g['kind'] for g in case['route']],result.get('error'))
+        self.assertEqual(result['actual_colors'],case['predicted_colors'])
+        self.assertTrue(result['screenshot_verified'])
+        self.assertLess(self.io.t,60.)
     def test_slow_entry_and_exit_checks_are_measured_as_real_observation_cost(self):
         original=self.io.check
         def charged_check(deadline):
@@ -93,7 +142,7 @@ class ProtectedRefinementControllerTests(unittest.TestCase):
         self.assertTrue(self.io.actions,result.get('error'))
         self.assertEqual(result['refinement_attempts'][0]['status'],'promoted')
         self.assertTrue(result['best_current']);self.assertTrue(result['verified'])
-    def test_late_global_short_route_uses_a_checked_return_transaction(self):
+    def test_late_global_short_route_executes_without_hypothetical_return_budget(self):
         original=self.plan
         def plan(context,cp,frames,rules,grid,**kw):
             record=original(context,cp,frames,rules,grid,**kw)
@@ -102,8 +151,8 @@ class ProtectedRefinementControllerTests(unittest.TestCase):
             record['plan_fingerprint']=_plan_fingerprint(record);return record
         self.plan=plan
         result=self.run_loop(deadline=28.,refine=lambda *a,**kw:None)
-        self.assertTrue(result['late_route_decisions'][0]['prefix_returns_verified'])
-        self.assertEqual(result['refinement_attempts'][0]['status'],'promoted')
+        self.assertEqual(len(self.io.actions),1)
+        self.assertEqual(result['steps'][0]['purpose'],'compromise')
         self.assertLess(result['maximum'],result['initial_maximum'])
         self.assertTrue(result['verified']);self.assertTrue(result['best_current'])
     def test_equal_measured_trial_tries_another_safe_route_while_time_remains(self):
@@ -178,6 +227,21 @@ class ProtectedRefinementControllerTests(unittest.TestCase):
         self.assertEqual(result['actual_colors'],result['initial']['checkpoint']['client_hex'])
         self.assertTrue(result['verified']);self.assertLess(self.io.t,90.)
 
+    def test_repeated_local_decoder_timeouts_restore_actual_endpoint_while_session_is_active(self):
+        original=self.io.frames;failures=[]
+        def frames(label,deadline):
+            if label.startswith('refine_') and '_after' in label:
+                failures.append(label);self.io.t+=1.
+                raise TimeoutError('OCR observation deadline expired')
+            return original(label,deadline)
+        self.io.frames=frames
+        result=self.run_loop()
+        self.assertEqual(len(failures),3)
+        self.assertGreaterEqual(len(self.io.actions),2)
+        self.assertEqual(result['refinement_attempts'][0]['status'],'restored')
+        self.assertEqual(result['actual_colors'],result['initial']['checkpoint']['client_hex'])
+        self.assertTrue(result['verified']);self.assertLess(self.io.t,90.)
+
     def test_missing_prefix_recovery_never_admits_trial(self):
         def unsafe(*a,**kw):
             row=self.refine(*a,**kw);row['prefix_recoveries']=[];return row
@@ -241,7 +305,7 @@ class ProtectedRefinementControllerTests(unittest.TestCase):
         def check(deadline):
             if armed[0]:
                 armed[0]=False
-                self.assertLess(deadline,40.,'Pre-input guard borrowed the global rather than trial allowance')
+                self.assertLess(deadline,90.,'Pre-input guard borrowed the reserved return allowance')
                 self.io.t=deadline;raise TimeoutError('focus wait exhausted input phase')
             return original(deadline)
         self.io.check=check

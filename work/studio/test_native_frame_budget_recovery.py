@@ -124,11 +124,19 @@ class ControllerFrameBudgetRecoveryTests(unittest.TestCase):
     def test_target_and_approach_reserve_complete_readback_time_before_input(self):
         for purpose in ('target','approach'):
             with self.subTest(purpose=purpose):
-                io=FixtureIO();result=self.run_io(io,purpose=purpose,engineering_deadline=12.)
+                io=FixtureIO();result=self.run_io(io,purpose=purpose,engineering_deadline=6.)
                 self.assertEqual(io.actions,[])
-                self.assertEqual(result['stop_reason'],'compromise_observed')
+                self.assertEqual(result['stop_reason'],'insufficient_time')
                 self.assertTrue(result['verified'])
                 self.assertFalse(result['accepted'])
+
+    def test_target_and_approach_use_fitting_forward_budget_without_speculative_return(self):
+        for purpose in ('target','approach'):
+            with self.subTest(purpose=purpose):
+                io=FixtureIO();result=self.run_io(io,purpose=purpose,engineering_deadline=12.)
+                self.assertEqual(len(io.actions),2)
+                self.assertEqual(result['stop_reason'],'target_observed')
+                self.assertTrue(result['verified']);self.assertTrue(result['accepted'])
 
     def test_postinput_local_frame_timeout_recovers_without_repeating_input(self):
         io=FixtureIO();original=io.frames;failed=[]
