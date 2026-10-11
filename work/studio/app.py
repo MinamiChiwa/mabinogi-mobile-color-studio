@@ -809,11 +809,18 @@ class App(ct.CTk):
             return
         elif k=='native_result':
             if d.get('region_count') in (2,3):self.apply_region_layout(d)
-            from native_status import result_text
+            from native_status import result_text,last_verified_display
             title,detail=result_text(d)
             self.status.configure(text=tr(title));self.set_detail(tr(detail))
-            for card,color in zip(self.cards,d.get('actual_colors') or [None]*3):
-                card.current.configure(text='当前颜色  '+(color or '读取失败'))
+            historical=last_verified_display(d)
+            if historical is not None:
+                for card,color,delta in zip(self.cards,historical['colors'],historical['deltas']):
+                    text=tr(historical['label'])+'  '+color
+                    if delta is not None:text+=f' · ΔE {delta:.2f}'
+                    card.current.configure(text=text)
+            else:
+                for card,color in zip(self.cards,d.get('actual_colors') or [None]*3):
+                    card.current.configure(text='当前颜色  '+(color or '读取失败'))
             if d.get('verified') and self.active_rules:
                 try:
                     row=save_result(DATA/'history.json',d['actual_colors'],self.active_rules,

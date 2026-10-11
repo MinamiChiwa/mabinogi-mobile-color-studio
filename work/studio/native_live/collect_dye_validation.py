@@ -60,8 +60,34 @@ def collect_validation_session(backend, *, wait_seconds=300.,session_seconds=90.
         if diagnostic.get('status') not in ('scanning','validating'):
             pause(min(poll_seconds,max(0.,deadline-clock())))
     def first_seen(fallback):
-        value=result.get('discovery_progress',{}).get('first_eligible_seen_monotonic')
-        return value if type(value) in (int,float) and math.isfinite(value) else fallback
+        diagnostic=result.get('discovery_progress',{})
+        value=diagnostic.get('first_eligible_seen_monotonic')
+        if value is None:return fallback
+        scan_started=diagnostic.get('scan_started_monotonic',start)
+        if (type(value) not in (int,float) or not math.isfinite(value)
+                or type(scan_started) not in (int,float) or not math.isfinite(scan_started)
+                or not 0<=scan_started<=value<=clock()):
+            raise ValueError('Invalid first eligible session observation time')
+        diagnostic_identity=diagnostic.get('process_identity',identity)
+        if json.dumps(diagnostic_identity)!=json.dumps(identity):
+            raise ValueError('First eligible observation process identity changed')
+        return value
+    def bind_session_origin(candidate):
+        # Freeze the age bound before capture/dwell, retaining provenance on
+        # timeout or cancellation. Only a fully checked baseline can use it.
+        observed=clock();seen=first_seen(observed)
+        diagnostic=result.get('discovery_progress',{})
+        from_discovery=diagnostic.get('first_eligible_seen_monotonic') is not None
+        evidence=dict(selected_address=hex(candidate),process_identity=copy.deepcopy(identity))
+        if from_discovery:
+            eligible=diagnostic.get('eligible_addresses')
+            if eligible!=[hex(candidate)]:raise ValueError('First eligible observation address changed')
+            evidence.update(first_eligible_seen_monotonic=seen,eligible_addresses=copy.deepcopy(eligible),
+                scan_started_monotonic=diagnostic.get('scan_started_monotonic',start))
+        result.update(session_first_seen_monotonic=seen,timer_grace_until=seen+30.,
+            session_origin_observed_monotonic=observed,session_origin_evidence=evidence,
+            session_first_seen_source='first_eligible_observation' if from_discovery else 'active_validation_observation')
+        return seen
     address=None;capture=None;binding=None;stable=None;stable_since=None;sample_count=0
     try:
         result['initial_validation_deadline_monotonic']=deadline
@@ -100,11 +126,14 @@ def collect_validation_session(backend, *, wait_seconds=300.,session_seconds=90.
             result['existing_active_palette']=True;address=old
             # A palette already open at arming has an unknown age. Additional
             # caller allowance cannot establish that a fresh 120 s round began.
-            deadline=first_seen(clock())+min(session_seconds,90.)
+            deadline=bind_session_origin(address)+min(session_seconds,90.)
             result['phase']='session'
             result['instance_address']=address;result['session_deadline_monotonic']=deadline
             guard();emit('session_discovered',instance_address=address,
-                         session_deadline_monotonic=deadline,existing_active_palette=True)
+                         session_deadline_monotonic=deadline,existing_active_palette=True,
+                         session_first_seen_monotonic=result['session_first_seen_monotonic'],
+                         timer_grace_until=result['timer_grace_until'],
+                         session_first_seen_source=result['session_first_seen_source'])
         while address is None:
             guard();scan_started=clock()
             candidate=discover();guard()
@@ -117,10 +146,12 @@ def collect_validation_session(backend, *, wait_seconds=300.,session_seconds=90.
                     result['discovery_deadline_monotonic']=deadline
                 discovery_pause();continue
             address=candidate
-            deadline=first_seen(scan_started)+session_seconds
+            deadline=bind_session_origin(address)+session_seconds
             result['phase']='session'
             result['instance_address']=address;result['session_deadline_monotonic']=deadline
-            guard();emit('session_discovered',instance_address=address,session_deadline_monotonic=deadline)
+            guard();emit('session_discovered',instance_address=address,session_deadline_monotonic=deadline,
+                session_first_seen_monotonic=result['session_first_seen_monotonic'],
+                timer_grace_until=result['timer_grace_until'],session_first_seen_source=result['session_first_seen_source'])
         while sample_count<max_samples:
             guard();read_start=clock()
             try:
@@ -162,6 +193,7 @@ def collect_validation_session(backend, *, wait_seconds=300.,session_seconds=90.
                     stable_observed_seconds=dwell))
                 if settled and dwell>=dwell_seconds-1e-9:
                     result['baseline']=observation;result['stop_reason']='passive_baseline_collected'
+                    result['baseline_collected_monotonic']=now
                     if result['existing_active_palette']:
                         initial=result['session_deadline_monotonic']
                         result['timer_deadline_extension']=dict(
@@ -171,9 +203,14 @@ def collect_validation_session(backend, *, wait_seconds=300.,session_seconds=90.
                             process_identity=copy.deepcopy(identity),
                             session_token=copy.deepcopy(observation['session_token']))
                     emit('baseline_collected',client_board_candidate=mapping.get('client_board_candidate'),
-                         session_deadline_monotonic=deadline,ready_for_input=False)
+                         session_deadline_monotonic=deadline,timer_grace_until=result['timer_grace_until'],
+                         session_first_seen_monotonic=result['session_first_seen_monotonic'],ready_for_input=False)
                     break
                 emit('sample',index=sample_count-1,read_seconds=now-read_start,settled_candidate=settled)
+            except InterruptedError:
+                # Cancellation is an OSError subclass; it must escape the
+                # decoder/read retry budget and retain the partial session.
+                raise
             except (ValueError,OSError) as exc:
                 stable=stable_since=None
                 diagnostic=dict(time=clock(),type=type(exc).__name__,message=str(exc))

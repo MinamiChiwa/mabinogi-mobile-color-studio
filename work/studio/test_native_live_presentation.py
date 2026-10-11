@@ -39,6 +39,39 @@ class NativePresentationTests(unittest.TestCase):
         title,body=self.module().result_text(dict(verified=False,stop_reason='internal_error'))
         self.assertIn('内部',title);self.assertIn('诊断',body)
 
+    def test_ended_palette_and_changed_binding_have_distinct_user_messages(self):
+        ended=self.module().result_text(dict(stop_reason='palette_ended',verified=False))
+        changed=self.module().result_text(dict(stop_reason='session_binding_changed',verified=False))
+        self.assertIn('结束',ended[0]);self.assertIn('变化',changed[0])
+        self.assertNotEqual(ended,changed)
+        self.assertNotIn('时间不足',ended[0])
+
+    def test_unstable_session_is_distinct_from_closed_or_changed_session(self):
+        module=self.module()
+        ended=module.result_text(dict(stop_reason='palette_ended',verified=False))
+        changed=module.result_text(dict(stop_reason='session_binding_changed',verified=False))
+        for reason in ('session_probe_unstable','session_observation_unstable'):
+            with self.subTest(reason=reason):
+                title,body=module.result_text(dict(stop_reason=reason,verified=False))
+                self.assertIn('不稳定',title)
+                self.assertIn('诊断',body)
+                self.assertNotEqual((title,body),ended)
+                self.assertNotEqual((title,body),changed)
+                self.assertNotIn('时间不足',title)
+
+    def test_last_verified_colors_are_historical_not_current_success(self):
+        module=self.module();helper=getattr(module,'last_verified_display',None)
+        self.assertTrue(callable(helper),'The UI needs a separate historical observation model')
+        data=dict(stop_reason='palette_ended',verified=False,accepted=False,
+            actual_colors=[None,None],last_verified_colors=['#EBEFE1','#838586'],
+            last_verified_deltas=[2.8,40.1],last_verified_screenshot=True)
+        shown=helper(data)
+        self.assertEqual(shown['colors'],['#EBEFE1','#838586'])
+        self.assertIn('未确认',shown['label'])
+        self.assertFalse(shown['current']);self.assertFalse(shown['accepted'])
+        data['last_verified_screenshot']=False
+        self.assertIsNone(helper(data))
+
     def test_incomplete_initial_scan_is_not_reported_as_no_palette(self):
         for reason in ('initial_discovery_timeout','discovery_incomplete_timeout'):
             with self.subTest(reason=reason):

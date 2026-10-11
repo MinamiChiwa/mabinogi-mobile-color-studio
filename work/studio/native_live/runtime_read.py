@@ -9,6 +9,19 @@ K.ReadProcessMemory.argtypes=[wintypes.HANDLE,ctypes.c_void_p,ctypes.c_void_p,ct
 K.CloseHandle.argtypes=[wintypes.HANDLE]
 class MBI(ctypes.Structure):
  _fields_=[('BaseAddress',ctypes.c_void_p),('AllocationBase',ctypes.c_void_p),('AllocationProtect',wintypes.DWORD),('PartitionId',wintypes.WORD),('_pad',wintypes.WORD),('RegionSize',ctypes.c_size_t),('State',wintypes.DWORD),('Protect',wintypes.DWORD),('Type',wintypes.DWORD)]
+class _SYSTEM_INFO_ARCH(ctypes.Structure):
+ _fields_=[('wProcessorArchitecture',wintypes.WORD),('wReserved',wintypes.WORD)]
+class _SYSTEM_INFO_UNION(ctypes.Union):
+ _anonymous_=('arch',)
+ _fields_=[('dwOemId',wintypes.DWORD),('arch',_SYSTEM_INFO_ARCH)]
+class SYSTEM_INFO(ctypes.Structure):
+ _anonymous_=('processor',)
+ _fields_=[('processor',_SYSTEM_INFO_UNION),('dwPageSize',wintypes.DWORD),
+  ('lpMinimumApplicationAddress',ctypes.c_void_p),('lpMaximumApplicationAddress',ctypes.c_void_p),
+  ('dwActiveProcessorMask',ctypes.c_size_t),('dwNumberOfProcessors',wintypes.DWORD),
+  ('dwProcessorType',wintypes.DWORD),('dwAllocationGranularity',wintypes.DWORD),
+  ('wProcessorLevel',wintypes.WORD),('wProcessorRevision',wintypes.WORD)]
+K.GetNativeSystemInfo.argtypes=[ctypes.POINTER(SYSTEM_INFO)];K.GetNativeSystemInfo.restype=None
 K.VirtualQueryEx.argtypes=[wintypes.HANDLE,ctypes.c_void_p,ctypes.POINTER(MBI),ctypes.c_size_t];K.VirtualQueryEx.restype=ctypes.c_size_t
 P.EnumProcessModulesEx.argtypes=[wintypes.HANDLE,ctypes.POINTER(ctypes.c_void_p),wintypes.DWORD,ctypes.POINTER(wintypes.DWORD),wintypes.DWORD];P.EnumProcessModulesEx.restype=wintypes.BOOL
 P.GetModuleFileNameExW.argtypes=[wintypes.HANDLE,ctypes.c_void_p,wintypes.LPWSTR,wintypes.DWORD]
@@ -29,9 +42,18 @@ class Reader:
   if self.base is None:raise ValueError('GameAssembly module not found')
  def read(self,a,size):
   if not a or size<0 or size>64*1024*1024:raise ValueError('Invalid read range')
-  data=ctypes.create_string_buffer(size);got=ctypes.c_size_t()
+  if size>=64*1024:
+   # Reuse only destination storage, never process contents. string_at below
+   # returns independent immutable bytes for suspended scan cursors and for
+   # before/after state checks. Small metadata reads do not copy the bulk buffer.
+   data=getattr(self,'_read_buffer',None)
+   if data is None or ctypes.sizeof(data)<size:
+    data=ctypes.create_string_buffer(size);self._read_buffer=data
+  else:data=ctypes.create_string_buffer(size)
+  got=ctypes.c_size_t()
   if not K.ReadProcessMemory(self.h,a,data,size,ctypes.byref(got)):raise OSError(ctypes.get_last_error(),f'ReadProcessMemory {a:x}')
-  return data.raw[:got.value]
+  if got.value>size:raise OSError('Process read returned more than requested')
+  return ctypes.string_at(data,got.value)
  def u64(self,a):return struct.unpack('<Q',self.read(a,8))[0]
  def cstring(self,a,maxlen=256):return self.read(a,maxlen).split(b'\0',1)[0].decode('utf-8','replace')
  def class_name(self,a):
@@ -44,13 +66,21 @@ class Reader:
    result[self.cstring(namep)]=offset
   return result
  def regions(self):
-  a=0x10000
-  while a<0x7fffffffffff:
+  info=SYSTEM_INFO();K.GetNativeSystemInfo(ctypes.byref(info))
+  minimum=info.lpMinimumApplicationAddress;maximum=info.lpMaximumApplicationAddress
+  if minimum is None or maximum is None or not 0<minimum<=maximum<2**(8*ctypes.sizeof(ctypes.c_void_p))-1:
+   raise OSError('GetNativeSystemInfo returned invalid application address bounds')
+  a=minimum;limit=maximum+1
+  while a<limit:
    m=MBI()
-   if not K.VirtualQueryEx(self.h,a,ctypes.byref(m),ctypes.sizeof(m)):break
+   returned=K.VirtualQueryEx(self.h,a,ctypes.byref(m),ctypes.sizeof(m))
+   if not returned:raise OSError(ctypes.get_last_error(),f'VirtualQueryEx {a:x} before application address limit {limit:x}')
+   if returned!=ctypes.sizeof(m):raise OSError(f'VirtualQueryEx {a:x} returned incomplete memory information')
+   base=m.BaseAddress or 0;nexta=base+m.RegionSize
+   if m.RegionSize<=0 or not base<=a<nexta<=limit:
+    raise OSError(f'VirtualQueryEx {a:x} returned invalid or nonprogressing region {base:x}+{m.RegionSize:x}')
    yield m
-   nexta=(m.BaseAddress or a)+m.RegionSize
-   if nexta<=a:break
    a=nexta
  def close(self):
   if self.h:K.CloseHandle(self.h);self.h=None
+  self._read_buffer=None

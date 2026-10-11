@@ -2,6 +2,7 @@
 import copy,json,math,re,time
 import numpy as np
 from .read_dye_motion import UnsupportedSlotDelegate
+from .session_status import SessionStatusError
 
 
 def _binding(observation):
@@ -39,8 +40,10 @@ def record_action_checkpoint(backend,baseline,label,*,timeout_seconds=5.,dwell_s
         try:
             guard();row=backend.observe_motion(baseline['instance_address'],end,guard,clock=clock,
                 include_geometry=True,include_window=True)
-            if row.get('active') is not True:result['stop_reason']='palette_ended';break
-            if _binding(row)!=expected:result['stop_reason']='binding_changed';break
+            if row.get('active') is not True:
+                result.update(stop_reason='palette_ended',failed_observation=copy.deepcopy(row));break
+            if _binding(row)!=expected:
+                result.update(stop_reason='binding_changed',failed_observation=copy.deepcopy(row));break
             state=(row['motion']['pose'],row['geometry_diagnostic'],row['window_mapping_candidate'])
             result['samples'].append(dict(time=clock(),observation=row))
             if not _settled(row):stable=since=None
@@ -49,14 +52,25 @@ def record_action_checkpoint(backend,baseline,label,*,timeout_seconds=5.,dwell_s
                 captured=backend.capture_validation_bundle(baseline['instance_address'],end,guard,clock=clock)
                 final=backend.observe_motion(baseline['instance_address'],end,guard,clock=clock,
                     include_geometry=True,include_window=True)
-                if _binding(final)!=expected:result['stop_reason']='binding_changed';break
+                if final.get('active') is not True:
+                    result.update(stop_reason='palette_ended',failed_observation=copy.deepcopy(final));break
+                if _binding(final)!=expected:
+                    result.update(stop_reason='binding_changed',failed_observation=copy.deepcopy(final));break
                 final_state=(final['motion']['pose'],final['geometry_diagnostic'],final['window_mapping_candidate'])
+                if (json.dumps(captured.get('session_token'))!=json.dumps(row['session_token'])
+                        or json.dumps(captured.get('process_identity'))!=json.dumps(row['process_identity'])):
+                    failed=copy.deepcopy(row)
+                    failed.update(session_token=copy.deepcopy(captured.get('session_token')),
+                        process_identity=copy.deepcopy(captured.get('process_identity')))
+                    result.update(stop_reason='binding_changed',failed_observation=failed);break
                 if (captured.get('session_binding_verified') is not True or captured['session_token']!=row['session_token']
                     or captured['process_identity']!=row['process_identity'] or captured['pose']!=row['motion']['pose']
                     or final_state!=state or not _settled(final)):
                     raise ValueError('Checkpoint pose/session changed during color export')
                 result.update(observation=final,capture=captured,checkpoint_valid=True,stop_reason='checkpoint_collected')
                 break
+        except SessionStatusError:raise
+        except InterruptedError:raise
         except UnsupportedSlotDelegate as exc:
             result['errors'].append(dict(type=type(exc).__name__,message=str(exc),code=exc.code,details=exc.details))
             result['stop_reason']='unsupported_motion_binding';break

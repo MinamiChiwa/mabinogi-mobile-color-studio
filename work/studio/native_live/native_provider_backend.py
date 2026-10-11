@@ -82,13 +82,25 @@ class CurrentBuildBackend:
             raise ValueError('Dye class not initialized or build mismatch')
         return cls
 
+    def _invalidate_discovery(self, identity, diagnostic=None, *, status='identity_changed'):
+        self._discovery_scan=None;self._discovery_identity=None
+        self.last_discovery_diagnostic=dict(diagnostic or {},status=status,
+            scan_complete=False,uniqueness_verified=False,eligible_addresses=[],
+            first_eligible_seen_monotonic=None,process_identity=identity,
+            identity_verified=False,inputs_sent=0,ready_for_input=False)
+
     def discover(self, deadline, check):
         if not math.isfinite(deadline):raise ValueError('Finite discovery deadline required')
-        started=self.clock();identity=self.process_identity();check()
+        started=self.clock()
+        try:identity=self.process_identity()
+        except OSError:
+            self._invalidate_discovery(None,status='process_unavailable')
+            raise
+        check()
         try:
             cls=self._bind(check)
         except DyeClassUnavailable as exc:
-            self._discovery_scan=None
+            self._discovery_scan=None;self._discovery_identity=None
             value=exc.class_value
             verified=False;status='class_uninitialized'
             if value in (0,UNINITIALIZED_DYE_CLASS_TOKEN):
@@ -106,23 +118,34 @@ class CurrentBuildBackend:
                 process_identity=identity,inputs_sent=0,ready_for_input=False,
                 discover_seconds=max(0.,self.clock()-started))
             return None
+        except (OSError,ValueError):
+            self._invalidate_discovery(identity,status='class_unavailable')
+            raise
         check()
         previous=getattr(self,'_discovery_scan',None)
         if previous is not None and (getattr(self,'_discovery_identity',None)!=identity or previous.cls!=cls):
-            self._discovery_scan=None
+            self._invalidate_discovery(identity,previous.diagnostic())
             raise OSError('Process/class changed during palette discovery')
         if previous is None or previous.phase=='complete':
             known=() if previous is None else tuple(previous.seen|set(previous.known))
             self._discovery_scan=IncrementalDyeScan(self.reader,cls,clock=self.clock,known_addresses=known)
             self._discovery_identity=identity;self.scans+=1
         current=self._discovery_scan
+        identity_changed=False
         try:
             current.advance(deadline,check)
             check()
-            if self.process_identity()!=identity:raise OSError('Process changed during palette discovery')
+            # Failure to obtain the final identity is as unusable as a changed
+            # identity; never leave a completed old census reusable in either case.
+            identity_changed=True
+            if self.process_identity()!=identity:
+                raise OSError('Process changed during palette discovery')
+            identity_changed=False
         finally:
             self.last_discovery_diagnostic=current.diagnostic()
             self.last_discovery_diagnostic['discover_seconds']=max(0.,self.clock()-started)
+            self.last_discovery_diagnostic['process_identity']=identity
+            if identity_changed:self._invalidate_discovery(identity,self.last_discovery_diagnostic)
         diagnostic=self.last_discovery_diagnostic
         if diagnostic['uniqueness_verified']:
             return int(diagnostic['eligible_addresses'][0],16)
@@ -132,8 +155,10 @@ class CurrentBuildBackend:
         r = self.reader
         cls = self._bind(check)
         state = inspect(r, address, cls)
+        active_diagnostic=(dict(state,instance_status='typed_active' if state['capture_eligible'] else 'typed_inactive')
+            if state else dict(address=hex(address),instance_status='candidate_not_typed',capture_eligible=False))
         if not state or not state['capture_eligible']:
-            return dict(active=False, session_token=None, pose=None)
+            return dict(active=False, session_token=None, pose=None,active_diagnostic=active_diagnostic)
         fields = checked_object(r, address, 'MM.Client.Presentation.UI.Instances.StageScene.Dyeing.DyeingPaletteInstanceImpl')
         result = r.u64(address + fields['resultCache'])
         before = r.read(result + 16, 16)
@@ -172,7 +197,7 @@ class CurrentBuildBackend:
         token = (address, data, state['active_result'], tuple(state['native_textures']), state['native_material'],
                  tuple(fingerprints), ratio)
         return dict(active=True, session_token=token,region_count=count,
-                    pose=dict(position=[x,y], scale=scale, rotation_degrees=rotation))
+                    pose=dict(position=[x,y], scale=scale, rotation_degrees=rotation),active_diagnostic=active_diagnostic)
 
     def capture(self, address, deadline, check):
         self._bind(check)

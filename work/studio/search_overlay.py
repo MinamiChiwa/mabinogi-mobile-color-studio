@@ -531,13 +531,23 @@ class SearchOverlay(ct.CTkToplevel):
         if kind=='single_verified':
             self.activity.stop();self.activity.set(1);self.show_single_result(data);return
         if kind=='native_result':
-            from native_status import result_text
+            from native_status import result_text,last_verified_display
             self.activity.stop();self.activity.set(1)
             if getattr(self,'_native_candidate_run',False) and getattr(self,'_candidate_data',None):
                 owned=self.update_native_observation(data)
                 self._native_candidate_closed=True
                 self.show_native_candidates(owned,readonly=True)
-            else:self.show_recovery(data)
+            else:
+                self.show_recovery(data)
+                historical=last_verified_display(data)
+                if historical is not None:
+                    ct.CTkLabel(self.results,text=tr(historical['label']),font=BODY_FONT,
+                        anchor='w').pack(fill='x',padx=8,pady=5)
+                    for i,(color,delta) in enumerate(zip(historical['colors'],historical['deltas'])):
+                        text=tr('区域 ')+str(i+1)+'  '+color
+                        if delta is not None:text+=f' · ΔE {delta:.2f}'
+                        ct.CTkLabel(self.results,text=text,font=BODY_FONT,
+                            anchor='w').pack(fill='x',padx=8,pady=4)
             self.render(*result_text(data));return
         if kind=='atlas_command':
             self.phase='positioning';self.update_activity({'stage':'position'})

@@ -18,7 +18,8 @@ from dye_regions import session_region_count,bind_region_rules
 from .candidate_selection import (candidate_id,candidate_observation,present_candidates,
     compile_candidate_selection,CandidateUnavailable,exact_observed_rules,actual_colors)
 from .retry import RetryRequested,minimum_scale_route,at_minimum_scale
-from .session_deadline import verified_timer_extension
+from .session_deadline import verified_timer_extension,verified_timer_grace_until,verified_timer_shortening
+from .session_status import SessionStatusError,SessionBindingChanged,session_diagnostic
 
 
 class GoalStop(Exception):pass
@@ -26,16 +27,28 @@ class GoalStop(Exception):pass
 
 def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.monotonic,
         max_rounds=64,max_actions=64,planner=plan_from_checkpoint,event=lambda row:None,pause=time.sleep,
-        candidate_choice=None,retry_requested=None,timer_deadline_extension=None):
+        candidate_choice=None,retry_requested=None,timer_deadline_extension=None,timer_grace_baseline=None):
     count=session_region_count(session)
     rules=normalize_target_rules(bind_region_rules(rules,count))
     if (type(max_rounds) is not int or not 1<=max_rounds<=64 or type(max_actions) is not int or not 1<=max_actions<=64
         or not math.isfinite(engineering_deadline)):
         raise ValueError('Invalid native execution limits')
     start=clock();end=engineering_deadline;timer_grace_until=start+EARLY_TIMER_GRACE_SECONDS
+    timer_grace_binding=None
+    if timer_grace_baseline is not None:
+        if not isinstance(timer_grace_baseline,dict):
+            raise ValueError('Invalid timer grace baseline or session binding')
+        io_reference=getattr(io,'reference',{})
+        if not isinstance(io_reference,dict):
+            raise ValueError('Invalid timer grace baseline or session binding')
+        reference=io_reference.get('baseline',timer_grace_baseline.get('baseline',{}))
+        if not isinstance(reference,dict):raise ValueError('Invalid timer grace baseline or session binding')
+        timer_grace_until=verified_timer_grace_until(timer_grace_baseline,
+            session_token=reference.get('session_token'),process_identity=reference.get('process_identity'),now=start)
+        timer_grace_binding=json.loads(json.dumps([reference['session_token'],reference['process_identity']]))
     initial_engineering_deadline=engineering_deadline
-    qualified_timer_frame=None;qualified_timer_checkpoint=None
-    backend_binding=None;previous_timer=None;current=None;context=None
+    qualified_timer_frame=None;qualified_timer_checkpoint=None;timer_shortening_observed=False
+    backend_binding=None;previous_timer=None;current=None;context=None;last_verified_observation=None
     result=dict(rules=rules,region_count=count,stop_reason='not_started',accepted=False,target_exact=False,verified=False,
         planning_rounds=[],steps=[],observations=[],actual_input_attempts=0,
         server_confirmation_verified=False,initial_visual_retries=0,observation_retries=0,compromise_selected=False,
@@ -51,6 +64,30 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
     costs=dict(native=[],visual=[],input=[],closing_visual=[])
     io.timer_grace_until=timer_grace_until
     def emit(name,**data):event(dict(event=name,at_monotonic=clock(),**data))
+    def complete_screenshot(cp,frames):
+        colors=list(cp['client_hex'])
+        return bool(frames and len(frames)==2 and all(frame.get('screenshot_hex',frame['hex'])==colors
+            and frame.get('hex_source',['screenshot']*count)==['screenshot']*count
+            and frame.get('screenshot_hex_verified',True) is True for frame in frames))
+    def invalidate_current():
+        nonlocal current
+        if current is not None and not current.get('frames'):
+            result['native_current']=copy.deepcopy(current)
+        current=None;result.update(accepted=False,verified=False)
+    def remember_verified(cp,frames):
+        nonlocal last_verified_observation
+        if complete_screenshot(cp,frames):
+            if context is not None:assess_feedback(context,cp,frames,rules)
+            last_verified_observation=copy.deepcopy(dict(checkpoint=cp,frames=frames,screenshot_verified=True))
+    def process_binding_stop(before,cp,label):
+        binding=json.loads(cp['binding'])
+        expected=dict(active=True,session_token=binding[0],process_identity=before['process_identity'])
+        observed=dict(active=True,session_token=binding[0],process_identity=binding[1])
+        writer=getattr(io,'_session_stop',None)
+        if callable(writer):writer(SessionBindingChanged,observed,'checkpoint_process',expected=expected,changed_fields=['process_identity'])
+        diagnostic=session_diagnostic(expected,observed,error_type=SessionBindingChanged,
+            stage=label,observed_monotonic=clock(),changed_fields=['process_identity'])
+        raise SessionBindingChanged('Checkpoint process identity changed',diagnostic)
     def check_retry():
         nonlocal retry_pending
         if retry_requested is not None and not retry_suppressed:
@@ -80,13 +117,21 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
         if count and clock()+allowance+(visual if include_revalidation else 0.)>=end:
             raise GoalStop('insufficient_time')
     def observe(label,phase_deadline=None):
-        nonlocal end,backend_binding,previous_timer,current,qualified_timer_frame,qualified_timer_checkpoint
-        current=None
+        nonlocal end,backend_binding,previous_timer,current,qualified_timer_frame,qualified_timer_checkpoint,timer_shortening_observed
+        current=None;io.session_status_label=label
         guard(phase_deadline);began=clock();until=end if phase_deadline is None else min(end,phase_deadline)
         before=io.input_backend(until)
         if backend_binding is None:backend_binding=input_backend_binding(before)
         if input_backend_binding(before)!=backend_binding:raise GoalStop('input_backend_changed')
         cp=io.checkpoint(label,until)
+        if timer_grace_binding is not None and json.loads(cp['binding'])[:2]!=timer_grace_binding:
+            expected=dict(active=True,session_token=timer_grace_binding[0],process_identity=timer_grace_binding[1])
+            binding=json.loads(cp['binding'])
+            observed=dict(active=True,session_token=binding[0],process_identity=binding[1])
+            writer=getattr(io,'_session_stop',None)
+            if callable(writer):writer(SessionBindingChanged,observed,'timer_grace_binding',expected=expected)
+            raise SessionBindingChanged('Timer grace checkpoint binding changed',session_diagnostic(expected,observed,
+                error_type=SessionBindingChanged,stage='timer_grace_binding',observed_monotonic=clock()))
         try:frames=io.frames(label,until)
         except TimeoutError:
             # Retain only this fresh checkpoint, never a previous screenshot
@@ -97,26 +142,39 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
             raise
         after=io.input_backend(until)
         if input_backend_binding(after)!=backend_binding:raise GoalStop('input_backend_changed')
-        if before['process_identity']!=json.loads(cp['binding'])[1]:raise GoalStop('process_changed')
+        if before['process_identity']!=json.loads(cp['binding'])[1]:process_binding_stop(before,cp,label)
         if cp.get('checkpoint_valid') is not True or cp.get('cpu_matches') is not True:raise GoalStop('checkpoint_unavailable')
         frames=copy.deepcopy(frames)
         for frame in frames:frame['timer_advisory']=True
         _frames(cp,frames)
+        remember_verified(cp,frames)
+        timer_shortened=False
         # Metadata distinguishes the conservative unknown-age startup cap from
         # an intentional caller limit. IO independently validates this pair.
-        if timer_deadline_extension is not None and callable(getattr(io,'set_verified_session_deadline',None)):
+        if timer_grace_baseline is not None or (timer_deadline_extension is not None and callable(getattr(io,'set_verified_session_deadline',None))):
             pairs=[frames]
             if (qualified_timer_checkpoint is not None and qualified_timer_frame is not None
                     and all(qualified_timer_checkpoint[key]==cp[key] for key in ('binding','pose','client_hex'))):
                 pairs.extend(([qualified_timer_frame,frame] for frame in frames))
             for pair in pairs:
-                approved=verified_timer_extension(cp,pair,initial_engineering_deadline=initial_engineering_deadline,
+                approved=(verified_timer_extension(cp,pair,initial_engineering_deadline=initial_engineering_deadline,
                     current_deadline=end,extension=timer_deadline_extension,timer_grace_until=timer_grace_until,now=clock())
+                    if (not timer_shortening_observed and timer_deadline_extension is not None
+                        and callable(getattr(io,'set_verified_session_deadline',None))) else None)
                 if approved is not None:
                     io.set_verified_session_deadline(approved['deadline'],approved['evidence'])
                     end=approved['deadline']
                     result.setdefault('deadline_extensions',[]).append(copy.deepcopy(approved))
                     emit('native_deadline_corrected',effective_deadline=end,maximum_deadline=timer_deadline_extension['maximum_deadline'])
+                    break
+                shortened=(verified_timer_shortening(cp,pair,current_deadline=end,
+                    timer_grace_until=timer_grace_until,now=clock()) if timer_grace_baseline is not None else None)
+                if shortened is not None:
+                    end=shortened['deadline']
+                    timer_shortening_observed=True
+                    timer_shortened=True
+                    result.setdefault('deadline_shortenings',[]).append(copy.deepcopy(shortened))
+                    emit('native_deadline_shortened',effective_deadline=end,source='verified_decreasing_timer_pair')
                     break
             qualified=[frame for frame in frames if frame.get('screenshot_hex_verified') is True
                 and frame.get('screenshot_hex')==cp['client_hex'] and frame.get('hex_source')==['screenshot']*count
@@ -128,6 +186,9 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
             seconds,when=frame['remaining_seconds'],frame['captured_monotonic']
             if when<timer_grace_until:
                 frame['timer_policy']='startup_advisory';continue
+            if timer_grace_baseline is not None:
+                frame['timer_policy']='verified_pair_shortened_deadline' if timer_shortened else 'unknown_advisory'
+                continue
             if previous_timer and type(seconds) is int:
                 old,old_when=previous_timer;elapsed=when-old_when
                 if elapsed<=0:raise GoalStop('countdown_discontinuity')
@@ -163,13 +224,13 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                 pause(.25)
     def observe_native(label,phase_deadline=None):
         nonlocal current
-        current=None;guard(phase_deadline);began=clock();until=end if phase_deadline is None else min(end,phase_deadline)
+        current=None;io.session_status_label=label;guard(phase_deadline);began=clock();until=end if phase_deadline is None else min(end,phase_deadline)
         before=io.input_backend(until)
         if input_backend_binding(before)!=backend_binding:raise GoalStop('input_backend_changed')
         cp=io.checkpoint(label,until)
         after=io.input_backend(until)
         if input_backend_binding(after)!=backend_binding:raise GoalStop('input_backend_changed')
-        if before['process_identity']!=json.loads(cp['binding'])[1]:raise GoalStop('process_changed')
+        if before['process_identity']!=json.loads(cp['binding'])[1]:process_binding_stop(before,cp,label)
         assess_native_feedback(context,cp,rules)
         current=dict(checkpoint=cp,frames=None,screenshot_verified=False)
         result['observations'].append(dict(label=label,checkpoint=cp,frames=None,
@@ -447,6 +508,7 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                     raise CandidateUnavailable('insufficient_protected_actions')
                 if clock()+outward+recovery_reserve>=end:
                     raise CandidateUnavailable('insufficient_protected_time')
+            except SessionStatusError:raise
             except (CandidateUnavailable,ValueError,TimeoutError) as exc:
                 emit('native_candidate_selected',batch_id=batch_id,candidate_id=selected_id,status='rejected',reason=str(exc))
                 continue
@@ -480,6 +542,7 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                 if not route:cp,frames=observe_resilient('selection_current',phase_end)
                 if not assess_feedback(context,cp,frames,compiled['selection_rules'])['observed_target_accepted']:
                     failure='candidate_endpoint_unconfirmed'
+            except SessionStatusError:raise
             except (TimeoutError,VisualNotReady,GoalStop,ValueError) as exc:
                 if isinstance(exc,GoalStop) and str(exc)!='target_visual_unconfirmed':raise
                 latest=result['steps'][-1] if len(result['steps'])>selection_step_start else None
@@ -994,18 +1057,38 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                 if reset_retry():break
                 should_retry=wait_for_retry()
             if not should_retry:break
-    except GoalStop as exc:result['stop_reason']=str(exc)
-    except InterruptedError as exc:result.update(stop_reason='interrupted',error=str(exc))
-    except TimeoutError as exc:result.update(stop_reason='insufficient_time',error=str(exc))
+    except SessionStatusError as exc:
+        invalidate_current()
+        result.update(stop_reason=exc.stop_reason,accepted=False,verified=False,
+            session_stop_reason=exc.stop_reason,session_stop_classification=exc.classification,
+            session_diagnostic=copy.deepcopy(exc.diagnostic),error=type(exc).__name__+': '+str(exc))
+        emit('session_status',stop_reason=exc.stop_reason,classification=exc.classification,
+            changed_fields=exc.diagnostic.get('changed_fields',[]),
+            diagnostic_file=exc.diagnostic.get('diagnostic_file'))
+    except GoalStop as exc:
+        reason=str(exc);result['stop_reason']=reason
+        # Budget and quota stops do not themselves invalidate a completed read.
+        # Every failed binding, unconfirmed input, recovery or visual read does.
+        if (reason not in ('not_found_in_budget','round_limit','action_limit','insufficient_time',
+                'insufficient_route_actions','insufficient_compromise_actions')
+                or current is None or not complete_screenshot(current['checkpoint'],current.get('frames'))):
+            invalidate_current()
+    except InterruptedError as exc:
+        invalidate_current();result.update(stop_reason='interrupted',error=str(exc))
+    except TimeoutError as exc:
+        invalidate_current();result.update(stop_reason='insufficient_time',error=str(exc))
     except (ValueError,OSError,RuntimeError,KeyError) as exc:
+        invalidate_current()
         result.update(stop_reason='observation_failed',error=type(exc).__name__+': '+str(exc))
     except Exception as exc:
+        invalidate_current()
         result.update(stop_reason='internal_error',error=type(exc).__name__+': '+str(exc),
                       error_traceback=traceback.format_exc())
     finally:
         if retry_requested is not None:io.retry_check=previous_retry_check
         try:io.release()
-        except Exception as exc:result['release_error']=str(exc)
+        except Exception as exc:
+            invalidate_current();result['release_error']=str(exc)
     if current is not None and current.get('frames'):
         score=score_codes(current['checkpoint']['client_hex'],rules)
         result['screenshot_verified']=assess_feedback(context,current['checkpoint'],current['frames'],rules)['screenshot_verified'] if context else False
@@ -1024,13 +1107,14 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                 if result.get('restoration_rounds') else None)
     else:
         result.update(verified=False,accepted=False,target_exact=False,
-            actual_colors=[None]*count,actual_deltas=[None]*count,current=None)
+            actual_colors=[None]*count,actual_deltas=[None]*count,current=None,screenshot_verified=False)
         if current is not None:
             result['native_current']=current
-            score=score_codes(current['checkpoint']['client_hex'],rules)
-            result.update(actual_colors=score['colors'],actual_deltas=score['deltas'],
-                screenshot_verified=False)
-            if candidate_choice is not None:result['actual_colors']=list(current['checkpoint']['client_hex'])
+    if last_verified_observation is not None:
+        last_colors=list(last_verified_observation['checkpoint']['client_hex'])
+        result.update(last_verified_colors=last_colors,last_verified_deltas=score_codes(last_colors,rules)['deltas'],
+            last_verified_captured_monotonic=last_verified_observation['frames'][-1]['captured_monotonic'],
+            last_verified_screenshot=True,last_verified_observation=last_verified_observation)
     result.update(elapsed_seconds=max(0.,clock()-start),effective_deadline=end)
     result['outcome']=('matched' if result['accepted'] else 'compromise' if result['stop_reason'] in ('compromise_observed','user_candidate_observed')
         and result['verified'] else 'not_found' if result['stop_reason']=='not_found_in_budget' else 'stopped')

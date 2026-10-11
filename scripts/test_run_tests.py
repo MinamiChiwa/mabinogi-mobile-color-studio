@@ -116,6 +116,18 @@ class RegressionEntryTests(unittest.TestCase):
         self.assertNotIn(cases[-1].id(), {test.id() for test in selected})
         self.assertEqual(info['desktop_omitted_count'], 1)
 
+    def test_physical_eyedropper_mapping_runs_in_quick_and_release(self):
+        m = self.module()
+        names = (
+            'test_screen_mapping.ScreenMappingTests.test_frozen_mapping_uses_physical_cursor_and_negative_origin',
+            'test_screen_mapping.ScreenMappingTests.test_frozen_mapping_rejects_cursor_outside_bitmap',
+        )
+        cases = [self.case(name) for name in names]
+        for profile in ('quick', 'release'):
+            with self.subTest(profile=profile):
+                selected, _ = m.select_tests(cases, profile)
+                self.assertEqual({test.id() for test in selected}, set(names))
+
     def test_result_separates_pass_skip_failure_and_records_duration(self):
         m = self.module()
         class Examples(unittest.TestCase):

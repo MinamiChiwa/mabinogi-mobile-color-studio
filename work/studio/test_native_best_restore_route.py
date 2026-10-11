@@ -101,9 +101,13 @@ class BestRestoreRouteTests(unittest.TestCase):
                 return [merge_native_hex(dict(row,hex=[None]*3),row['hex']) for row in rows]
             return rows
         self.io.frames=missing_screenshot;result=self.run_loop()
-        self.assertEqual(result['actual_colors'],self.baseline_colors)
+        self.assertEqual(result['actual_colors'],[None]*3)
+        self.assertFalse(result['verified']);self.assertFalse(result['accepted'])
         self.assertFalse(result['screenshot_verified'])
-        self.assertFalse(result['restored'])
+        self.assertFalse(result.get('restored',False))
+        restores=[step for step in result['steps'] if step['purpose']=='restore_best']
+        self.assertEqual(len(restores),3)
+        self.assertEqual(restores[-1]['after']['client_hex'],self.baseline_colors)
 
     def test_insufficient_whole_recovery_quota_keeps_current_without_partial_restore(self):
         result=self.run_loop(max_actions=3)

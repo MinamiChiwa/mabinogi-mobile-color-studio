@@ -149,7 +149,8 @@ class ControllerFrameBudgetRecoveryTests(unittest.TestCase):
         io.frames=frames;result=self.run_io(io)
         self.assertEqual(result['stop_reason'],'observation_failed')
         self.assertFalse(result['accepted']);self.assertFalse(result['verified'])
-        self.assertEqual(result['actual_colors'],result['native_current']['checkpoint']['client_hex'])
+        self.assertEqual(result['actual_colors'],[None]*3)
+        self.assertEqual(result['native_current']['checkpoint']['client_hex'],[rule['colors'][0] for rule in io.case['rules']])
         self.assertEqual(len(io.actions),2)
         self.assertGreater(result['effective_deadline']-io.t,40.)
 

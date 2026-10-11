@@ -3,6 +3,7 @@ import copy
 import json
 
 from native_live.session_deadline import verified_timer_extension
+from native_live import session_deadline
 
 
 class VerifiedTimerExtensionTests(unittest.TestCase):
@@ -112,6 +113,45 @@ class VerifiedTimerExtensionTests(unittest.TestCase):
         self.assertIsNone(verified_timer_extension(checkpoint, frames,
             initial_engineering_deadline=180., current_deadline=180.,
             extension=self.extension(), timer_grace_until=130., now=154.))
+
+
+class VerifiedTimerShorteningTests(unittest.TestCase):
+    def approve(self,checkpoint,frames,*,current=210.,grace=130.,now=154.):
+        method=getattr(session_deadline,'verified_timer_shortening',None)
+        self.assertTrue(callable(method),'Verified timer shortening missing')
+        return method(checkpoint,frames,current_deadline=current,timer_grace_until=grace,now=now)
+    def test_checked_decreasing_pair_keeps_ten_second_execution_reserve(self):
+        checkpoint,frames=VerifiedTimerExtensionTests().frames()
+        approved=self.approve(checkpoint,frames)
+        self.assertEqual(approved['deadline'],190.)
+        self.assertEqual(approved['evidence']['implied_timer_ends'],[200.,200.])
+    def test_early_or_discontinuous_countdown_keeps_caller_deadline(self):
+        checkpoint,frames=VerifiedTimerExtensionTests().frames()
+        self.assertIsNone(self.approve(checkpoint,frames,grace=155.))
+        for first,second in ((117,17),(100,13),(17,17),(50,49)):
+            with self.subTest(values=(first,second)):
+                changed=copy.deepcopy(frames);changed[0]['remaining_seconds']=first;changed[1]['remaining_seconds']=second
+                self.assertIsNone(self.approve(checkpoint,changed))
+    def test_fast_weak_or_nonvisual_pair_cannot_shorten_execution_time(self):
+        checkpoint,frames=VerifiedTimerExtensionTests().frames()
+        alterations=[('captured_monotonic',150.1),('timer_confidence','single_pass'),
+            ('timer_confidence','segmented_selected'),('screenshot_hex_verified',False),
+            ('screenshot_hex',['#000000','#FFFFFF']),('remaining_seconds',True),
+            ('hex_source',['native_checkpoint','screenshot'])]
+        for key,value in alterations:
+            with self.subTest(field=key,value=value):
+                changed=copy.deepcopy(frames);changed[1][key]=value
+                self.assertIsNone(self.approve(checkpoint,changed))
+    def test_stale_or_wrong_checkpoint_does_not_supply_countdown_authority(self):
+        checkpoint,frames=VerifiedTimerExtensionTests().frames()
+        self.assertIsNone(self.approve(checkpoint,frames,now=160.))
+        for field,value in (('checkpoint_valid',False),('cpu_matches',False),('binding','unbound')):
+            with self.subTest(field=field):
+                changed=dict(checkpoint,**{field:value})
+                self.assertIsNone(self.approve(changed,frames))
+    def test_pair_never_extends_shorter_caller_deadline(self):
+        checkpoint,frames=VerifiedTimerExtensionTests().frames()
+        self.assertIsNone(self.approve(checkpoint,frames,current=180.))
 
 
 if __name__ == '__main__':

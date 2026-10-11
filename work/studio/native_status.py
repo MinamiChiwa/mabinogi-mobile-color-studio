@@ -1,4 +1,18 @@
 """User-facing native results, separate from predicted candidate acceptance."""
+import math
+import re
+
+
+def last_verified_display(data):
+    """Keep an earlier screenshot measurement distinct from current colors."""
+    if data.get('verified') or data.get('last_verified_screenshot') is not True:return None
+    colors=data.get('last_verified_colors');deltas=data.get('last_verified_deltas')
+    if (not isinstance(colors,list) or len(colors) not in (2,3)
+            or any(not isinstance(c,str) or not re.fullmatch('#[0-9A-F]{6}',c) for c in colors)):
+        return None
+    if not isinstance(deltas,list) or len(deltas)!=len(colors):deltas=[None]*len(colors)
+    deltas=[d if type(d) in (int,float) and math.isfinite(d) and d>=0 else None for d in deltas]
+    return dict(label='上次实测（当前未确认）',colors=list(colors),deltas=deltas,accepted=False,current=False)
 
 
 def candidate_reason_text(reason):
@@ -20,6 +34,12 @@ def candidate_reason_text(reason):
 
 def result_text(data):
     reason=data.get('stop_reason')
+    if reason=='palette_ended':
+        return ('染色界面已关闭或结束','已停止自动操作。上次实测记录仅供查看，请以游戏当前颜色为准。')
+    if reason=='session_binding_changed':
+        return ('本局色板数据已变化','本局绑定不再成立，已停止自动操作。上次实测记录仅供查看，请以游戏当前颜色为准。')
+    if reason in ('session_probe_unstable','session_observation_unstable'):
+        return ('色板状态读取不稳定','多次检查仍未确认本局色板状态，已停止操作并保存诊断记录。上次实测记录仅供查看，请以游戏当前颜色为准。')
     if reason=='retry_minimum_unconfirmed':
         return ('重试缩放未完成确认','画板缩小后的状态未能确认，已停止重试。请以游戏当前颜色为准。')
     if reason=='input_outcome_unknown':

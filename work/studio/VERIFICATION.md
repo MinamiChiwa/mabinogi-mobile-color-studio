@@ -1,5 +1,17 @@
 # Current verification scope
 
+## Candidate 0.4.2rc2: Complete discovery, session timers and stop diagnostics (2026-10-11)
+
+Policy: `native-fast-discovery-session-timer-diagnostics-v20`. The six supplied data3 records are all 0.4.1: four F9 stops before input and two sessions ending after verified colors with a generic session-change error. They do not show a DPI or coordinate failure, and the saved countdowns do not justify calling the final error natural expiry.
+
+Discovery now chooses a verified pointer prefix or full pointer per chunk, retains overlap and complete census/final uniqueness, and returns independent immutable process bytes from reusable storage. Process/class changes invalidate all discovery evidence. Address enumeration uses the native application limits; an early query failure remains an incomplete census even after the iterator ends. A 1 GiB offline CPU benchmark improved zero/sparse heaps by 5.68x/4.87x with identical candidate sets; real process reads and total game discovery latency are excluded from that measurement.
+
+The countdown advisory interval is bound to the first eligible observation of this session. Independent initial visual readiness retains its own allowance. Only verified, decreasing screenshot timer pairs after grace can shorten the engineering cutoff or correct an unknown-age cap within 20 seconds and the original first-seen bound. Once shortened, later jitter cannot re-extend the cutoff. F7 retry never resets these bounds or accumulated inputs.
+
+Typed diagnostics distinguish closed boards, changed bindings and inconsistent observations. F9 during checkpoint capture propagates immediately. Generic failures, unconfirmed input/visual state and release failures invalidate current-match claims while retaining separately labeled complete screenshot history. Valid final target observations and complete measurements at ordinary budget stops still remain current.
+
+Final frozen release profile: 729 tests, 728 passed, one optional private OCR fixture skipped, zero failures/errors; 181.205 seconds total. Root independently reproduced the scan, timer, stale-current and UI contracts; an independent reviewer confirmed the cancellation and three-pair timer fixes. No new live game capture, mouse input or dye item was used. Package bytecode, startup and archive verification are recorded separately in the local evidence folder. This is a local candidate; actual new-round retry, remote eyedropper behavior and end-to-end discovery speed remain subject to a user run. Public release remains 0.4.1.
+
 ## Candidate 0.4.2rc1: Same-round retry, scaled text and physical eyedropper (2026-10-11)
 
 Policy: `native-same-round-retry-physical-eyedropper-v19`. Native production no longer publishes predicted alternatives. F7/overlay retry coalesces a soft request, ends/release-checks current input, reads actual state and wheels down to the verified minimum scale before restarting in the same round. Deadline, OCR grace, settings and accumulated actions are preserved. Final waiting reads are fresh; a missing final read cannot claim a cached match. Independent review reproduced and repaired left-release failure skipping right-release and insufficient final-read time exposing old colors.

@@ -17,6 +17,10 @@ _RUNTIME_MODULES = (
     'vision.py',
     'atlas_live_adapter.py',
     'platform_win.py',
+    'native_status.py',
+    'eyedropper.py',
+    'eyedropper_native.py',
+    'screen_mapping.py',
 )
 
 

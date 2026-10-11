@@ -116,8 +116,6 @@ def run_native_search(owner,rules,*,mode='search',target=None,activate=False,**u
         if name in ('native_candidates','native_candidate_ready','native_candidate_selected','native_candidate_closed'):
             # Legacy diagnostic events never create predicted native choices.
             return
-            owner.event(name,**{key:value for key,value in row.items() if key!='event'})
-            return
         message={'native_validate':'正在检查当前游戏与取色数据。','search':'正在计算可执行的目标方案。',
             'discovery':'正在准备寻色，暂时不要进入染色界面；等提示就绪后再开始。F9 可停止。',
             'position':'正在调整色板。','verify':'正在核对当前游戏色码。'}.get(stage)
@@ -163,6 +161,8 @@ def run_native_search(owner,rules,*,mode='search',target=None,activate=False,**u
             options=dict(retry_requested=retry) if callable(retry) else {}
             extension=baseline.get('timer_deadline_extension')
             if isinstance(extension,dict):options['timer_deadline_extension']=extension
+            if 'session_first_seen_monotonic' in baseline and 'timer_grace_until' in baseline:
+                options['timer_grace_baseline']=baseline
             result.update(run_goal_loop(adapter,session,settings,rules,
                 engineering_deadline=baseline['session_deadline_monotonic'],event=event,**options))
     except InterruptedError as exc:result.update(stop_reason='interrupted',error=str(exc))
@@ -191,5 +191,7 @@ def run_native_search(owner,rules,*,mode='search',target=None,activate=False,**u
         'actual_colors','actual_deltas','best_actual_colors',
         'actual_input_attempts','maximum','average','restored','best_current','screenshot_verified',
         'server_confirmation_verified','enabled_regions','rules','region_count','available_regions',
-        'refinement_stop','unavailable_reason')})
+        'refinement_stop','unavailable_reason','session_stop_reason',
+        'last_verified_colors','last_verified_deltas','last_verified_captured_monotonic',
+        'last_verified_screenshot')})
     return result

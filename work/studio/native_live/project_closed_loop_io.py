@@ -8,6 +8,7 @@ from input_gestures import PointerGesture
 from .read_dye_input_backend import read_input_backend, input_backend_binding
 from .dye_visual_readiness import VisualNotReady, INITIAL_LAYOUT_ERRORS
 from .dye_hex_glyphs import read_card_glyphs, prepare_hex_assets
+from .session_status import SessionStatusError
 
 
 class InputNotStarted(TimeoutError):
@@ -61,6 +62,7 @@ class ProjectClosedLoopIO(ProjectProbeIO):
         return record
     def frames(self,label,deadline):
         try:return super().frames(label,deadline)
+        except SessionStatusError:raise
         except ValueError as exc:
             retryable=str(exc) in (*INITIAL_LAYOUT_ERRORS,'Screenshot and checkpoint HEX disagree')
             (self.folder/(label+'.visual_failure.json')).write_text(json.dumps(dict(
@@ -87,6 +89,7 @@ class ProjectClosedLoopIO(ProjectProbeIO):
             raise
     def _perform_candidate_checked(self,record,label,deadline,*,feedback_reserve_seconds):
         if not isinstance(label,str) or not re.fullmatch(r'[a-z][a-z0-9_]{0,47}',label):raise ValueError('Bad input label')
+        self.session_status_label=label
         self.check(deadline)
         if self.input_attempts>=64:raise ValueError('Maximum input attempt accounting reached')
         gesture=validate_research_gesture(record,self.last_observation['window_mapping_candidate']['client_board_candidate'])
@@ -94,6 +97,7 @@ class ProjectClosedLoopIO(ProjectProbeIO):
         first=self.input_backend(self.deadline)
         fresh=self.backend.observe_motion(self.reference['instance_address'],self.deadline,self._input_guard,
             include_geometry=True,include_window=True)
+        self._check_observed_session(fresh,'pre_input',expected=self.last_observation,full_binding=True)
         if (fresh.get('active') is not True or _binding(fresh)!=_binding(self.last_observation)
             or fresh['motion']['pose']!=self.last_observation['motion']['pose']
             or fresh['geometry_diagnostic']!=self.last_observation['geometry_diagnostic']

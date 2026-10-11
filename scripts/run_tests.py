@@ -18,9 +18,10 @@ PROFILES = ('quick', 'release', 'research', 'full')
 QUICK_MODULES = frozenset('''
 test_app_data test_build_info test_core test_dpi_layout test_display_geometry
 test_hotkeys test_input_gestures test_window_target test_platform_dpi
+test_screen_mapping
 test_runtime_i18n_coverage test_ui_i18n test_ui_performance
 test_native_ui_completion test_native_ui_hit_testing test_responsive_geometry
-test_native_retry_ui test_native_retry_bridge
+test_native_retry_ui test_native_retry_bridge test_native_session_status_ui
 test_overlay_native test_runner_strategy test_native_live_layout
 test_native_live_presentation test_native_live_ui test_native_live_runner
 test_native_live_service test_native_live_timer_policy test_native_live_session_budget
@@ -77,7 +78,7 @@ test_native_target_pipeline test_native_target_seeds test_native_transform_matri
 test_native_triple_black test_ocr_transport test_periodic_atlas test_planner
 test_point_sampling_probe test_product test_registration_precision_methods
 test_registration_uncertainty_audit test_rotation_comparison test_rotation_probe_review
-test_scan_route_review test_scan_settling_review test_scan_settling test_screen_mapping
+test_scan_route_review test_scan_settling_review test_scan_settling
 test_search_overlay_atlas test_session_store test_single_region_search
 test_single_region_zoom_bands test_single_region_zoom test_startup_performance
 test_translation_ranking_subset test_visual test_wheel_micro_model test_workflow_budget
@@ -121,6 +122,7 @@ RELEASE_TEST_IDS = (
 )
 
 DESKTOP_TEST_PREFIXES = (
+    'test_native_session_status_ui.',
     'test_two_region_ui.',
     'test_resize_surface.',
     'test_profile_ui.',

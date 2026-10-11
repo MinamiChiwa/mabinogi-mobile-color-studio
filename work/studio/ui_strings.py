@@ -117,6 +117,14 @@ TW={
 
 # Current product copy. Historical keys above only translate archived events.
 EN.update({
+'已停止自动染色':'Automatic dyeing stopped',
+'色板状态读取不稳定':'Palette state could not be read consistently',
+'多次检查仍未确认本局色板状态，已停止操作并保存诊断记录。上次实测记录仅供查看，请以游戏当前颜色为准。':'Repeated checks could not confirm this round’s palette state. Actions stopped and diagnostics were saved. The last measurement is for reference; use the current colors shown in the game.',
+'上次实测（当前未确认）':'Last measured colors (current state unconfirmed)',
+'染色界面已关闭或结束':'Dye screen closed or ended',
+'已停止自动操作。上次实测记录仅供查看，请以游戏当前颜色为准。':'Automatic actions stopped. The last measurement is for reference; use the current colors shown in the game.',
+'本局色板数据已变化':'This round’s palette data changed',
+'本局绑定不再成立，已停止自动操作。上次实测记录仅供查看，请以游戏当前颜色为准。':'This round’s binding is no longer valid. Automatic actions stopped. The last measurement is for reference; use the current game colors.',
 '当前实测颜色：':'Current measured colors: ',
 '重试缩放未完成确认':'Retry zoom unconfirmed',
 '画板缩小后的状态未能确认，已停止重试。请以游戏当前颜色为准。':'The zoomed-out board state could not be confirmed. Retry stopped. Refer to the current game colors.',
@@ -239,6 +247,14 @@ EN.update({
 '此方案名称已存在，请使用其他名称。':'That preset name already exists. Choose a different name.',
 })
 TW.update({
+'已停止自动染色':'已停止自動染色',
+'色板状态读取不稳定':'色板狀態讀取不穩定',
+'多次检查仍未确认本局色板状态，已停止操作并保存诊断记录。上次实测记录仅供查看，请以游戏当前颜色为准。':'多次檢查仍未確認本局色板狀態，已停止操作並儲存診斷紀錄。上次實測紀錄僅供查看，請以遊戲目前顏色為準。',
+'上次实测（当前未确认）':'上次實測（目前未確認）',
+'染色界面已关闭或结束':'染色畫面已關閉或結束',
+'已停止自动操作。上次实测记录仅供查看，请以游戏当前颜色为准。':'已停止自動操作。上次實測紀錄僅供查看，請以遊戲目前顏色為準。',
+'本局色板数据已变化':'本局色板資料已變化',
+'本局绑定不再成立，已停止自动操作。上次实测记录仅供查看，请以游戏当前颜色为准。':'本局綁定已失效，已停止自動操作。上次實測紀錄僅供查看，請以遊戲目前顏色為準。',
 '当前实测颜色：':'目前實測顏色：',
 '重试缩放未完成确认':'重試縮放尚未完成確認',
 '画板缩小后的状态未能确认，已停止重试。请以游戏当前颜色为准。':'色板縮小後的狀態未能確認，已停止重試。請以遊戲目前顏色為準。',

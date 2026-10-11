@@ -67,12 +67,22 @@ class IncrementalDyeScan:
  """
  def __init__(self,reader,cls,*,clock=time.monotonic,known_addresses=()):
   self.reader=reader;self.cls=cls;self.clock=clock;self.started=clock()
-  self.pattern=struct.pack('<Q',cls);self.regions=iter(reader.regions())
+  self.pattern=struct.pack('<Q',cls)
+  # Canonical x64 class pointers end in zero bytes. Searching the full needle
+  # makes CPython's skip search visit almost every byte in zero-heavy heaps.
+  # A nonzero-ending prefix locates possibilities cheaply; the full 8-byte
+  # pointer is still checked locally before any match enters the census.
+  self.search_pattern=self.pattern[:max(4,len(self.pattern.rstrip(b'\0')))]
+  self.buffer_search_pattern=self.search_pattern;self.buffer_prefix_collisions=0
+  self.prefix_collision_count=0;self.search_full_fallbacks=0
+  self.regions=iter(reader.regions())
   self.region=None;self.next_address=None;self.buffer=None;self.buffer_start=None;self.find_position=0
   self.seen=set();self.hits={};self.first_eligible_seen={};self.known=list(known_addresses);self.known_index=0
   self.validation_addresses=None;self.validation_index=0;self.validated={}
   self.phase='scanning';self.bytes_scanned=0;self.chunks_scanned=0;self.regions_visited=0
   self.read_failures=0;self.last_read_error=None;self.candidate_read_errors={};self.rejected_candidates={}
+  self.read_seconds=0.;self.search_seconds=0.;self.inspection_seconds=0.
+  self.exact_search_blocks=0
 
  def _inspect(self,address,check,*,validating=False):
   check();began=self.clock();unreadable=False
@@ -85,6 +95,7 @@ class IncrementalDyeScan:
    check();hit=None;self.rejected_candidates[address]=str(exc)
   except (ValueError,struct.error):
    check();hit=None
+  finally:self.inspection_seconds+=max(0.,self.clock()-began)
   check()
   if hit:
    self.rejected_candidates.pop(address,None)
@@ -114,11 +125,25 @@ class IncrementalDyeScan:
     self._inspect(address,check,validating=True)
     self.validation_index+=1;inspected+=1;continue
    if self.buffer is not None:
-    position=self.buffer.find(self.pattern,self.find_position)
+    search_began=self.clock()
+    position=self.buffer.find(self.buffer_search_pattern,self.find_position)
+    exact=position>=0 and self.buffer.startswith(self.pattern,position)
+    self.search_seconds+=max(0.,self.clock()-search_began)
     if position<0:
      self.buffer=None;continue
     address=self.buffer_start+position
-    if address%8 or address in self.seen:
+    if not exact or address%8:
+     # Prefix collisions and unaligned matches can overlap a real aligned
+     # pointer. Advance one byte so none of those pointers are discarded.
+     self.find_position=position+1
+     if self.buffer_search_pattern!=self.pattern:
+      self.buffer_prefix_collisions+=1;self.prefix_collision_count+=1
+      if self.buffer_prefix_collisions>=32:
+       # An atypical block packed with prefix collisions is cheaper to scan
+       # with the exact needle. The committed byte cursor remains unchanged.
+       self.buffer_search_pattern=self.pattern;self.search_full_fallbacks+=1
+     continue
+    if address in self.seen:
      self.find_position=position+8;continue
     # Commit the cursor only after the guarded inspection finishes. An outer
     # cancellation/deadline cannot discard a candidate or the remaining buffer.
@@ -129,22 +154,38 @@ class IncrementalDyeScan:
     except StopIteration:
      self.phase='validating'
      self.validation_addresses=sorted(self.seen|set(self.known));continue
+    except (InterruptedError,TimeoutError):raise
+    except OSError as exc:
+     # A failed region iterator is exhausted on its next call. Retain the
+     # coverage failure so resuming cannot turn that exhaustion into proof.
+     self.read_failures+=1;self.last_read_error=type(exc).__name__+': '+str(exc);check()
+     raise
     self.regions_visited+=1;visited+=1
     if region.State!=0x1000 or region.Type!=0x20000 or region.Protect&0x100 or region.Protect&0xff not in (4,8,0x40,0x80):
      self.region=None;continue
     self.region=region;self.next_address=region.BaseAddress
    start=self.next_address
    length=min(8*1024*1024+8,self.region.BaseAddress+self.region.RegionSize-start)
+   read_began=self.clock()
    try:buffer=self.reader.read(start,length)
    except (InterruptedError,TimeoutError):raise
    except OSError as exc:
     check();self.read_failures+=1;self.last_read_error=type(exc).__name__+': '+str(exc)
     self.next_address+=8*1024*1024;continue
+   finally:self.read_seconds+=max(0.,self.clock()-read_began)
    check()
    if len(buffer)!=length:
     self.read_failures+=1;self.last_read_error='Short process read'
     self.next_address+=8*1024*1024;continue
    self.buffer=buffer;self.buffer_start=start;self.find_position=0
+   # Prefix search wins on zero-heavy heaps but loses on already varied words.
+   # A few bounded samples choose the needle only; every chosen match still
+   # receives the exact full-pointer check below. No region is excluded.
+   samples=(buffer[:4096],buffer[len(buffer)//2:len(buffer)//2+4096],buffer[-4096:])
+   zero_density=sum(sample.count(0) for sample in samples)/max(1,sum(len(sample) for sample in samples))
+   self.buffer_search_pattern=self.search_pattern if zero_density >= .5 else self.pattern
+   self.exact_search_blocks += self.buffer_search_pattern==self.pattern
+   self.buffer_prefix_collisions=0
    self.next_address+=8*1024*1024
    self.bytes_scanned+=len(buffer);read_bytes+=len(buffer);self.chunks_scanned+=1
   return self.diagnostic()
@@ -153,6 +194,7 @@ class IncrementalDyeScan:
   rows=self.validated if self.phase=='complete' else self.hits
   eligible=sorted(address for address,hit in rows.items() if hit['capture_eligible'])
   complete=self.phase=='complete' and self.read_failures==0 and not self.candidate_read_errors
+  elapsed=max(0.,self.clock()-self.started)
   return dict(status='coverage_incomplete' if self.phase=='complete' and not complete else self.phase,
    scan_complete=complete,heap_scan_complete=self.phase in ('validating','complete'),
    uniqueness_verified=complete and len(eligible)==1,
@@ -167,7 +209,12 @@ class IncrementalDyeScan:
    rejected_candidate_count=len(self.rejected_candidates),
    rejected_candidates={hex(address):reason for address,reason in sorted(self.rejected_candidates.items())[:16]},
    census_finished=self.phase=='complete',
-   scan_started_monotonic=self.started,scan_elapsed_seconds=max(0.,self.clock()-self.started),
+   scan_started_monotonic=self.started,scan_elapsed_seconds=elapsed,
+   search_pattern_bytes=len(self.search_pattern),read_seconds=self.read_seconds,
+   prefix_collision_count=self.prefix_collision_count,search_full_fallbacks=self.search_full_fallbacks,
+   exact_search_blocks=self.exact_search_blocks,
+   search_seconds=self.search_seconds,inspection_seconds=self.inspection_seconds,
+   throughput_mib_per_second=self.bytes_scanned/(1024*1024*elapsed) if elapsed>0 else 0.,
    inputs_sent=0,ready_for_input=False)
 
 def inspect(r,a,cls):

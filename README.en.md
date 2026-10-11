@@ -23,6 +23,8 @@ Each palette is bound to its game session. Regions share transformations; mathem
 
 Precise Search does not display predicted alternatives. Click Retry in the overlay or press **F7** to end the current search, zoom out to the maximum visible board area, and search again in the same round. A retry keeps the remaining time and target settings, with no new dye item used. Current colors are kept if there is insufficient time to reset and search again. **F9** still stops all actions.
 
+Countdown readings are advisory for about 30 seconds after this round's board is first observed. Afterward, only reliable, decreasing screenshot readings can adjust the execution deadline. Retrying does not reset that interval or the round's time. If the current state cannot be verified, earlier colors are labeled "Last measured colors (current state unconfirmed)"; use the current colors in the game.
+
 Two- and three-region boards are detected automatically. A two-region round uses its actual left and right regions; the third UI card is marked unavailable without changing saved settings or priorities. If only the absent third region is enabled, no input is sent and the tool asks you to enable Region 1 or 2.
 
 When leather, wood or another material’s base palette lacks pure black or white, `#000000` or `#FFFFFF` cannot be matched exactly. Refer to the game’s actual HEX values. Multiple exact matches and finding a globally optimal result within the time limit are not guaranteed.

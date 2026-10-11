@@ -8,6 +8,8 @@ from .dye_action_checkpoint import record_action_checkpoint, _binding
 from vision import recognize,read_codes,_swatch_distance
 from .probe_timer import read_timer
 from dye_regions import region_count as validate_region_count
+from .session_status import (PaletteEnded,SessionBindingChanged,SessionProbeUnstable,
+    session_diagnostic,changed_token_fields)
 
 
 class FrameReadTimeout(TimeoutError):
@@ -156,7 +158,7 @@ def read_probe_frame(image,*,deadline,check=lambda:None,clock=time.monotonic,pre
     if timer_mode not in ('required','advisory','skip'):raise ValueError('Invalid timer mode')
     timer=dict(remaining_seconds=None,timer_confidence='startup_skipped' if timer_mode=='skip' else 'unknown')
     if timer_mode!='skip':
-        timer_deadline=deadline if timer_mode=='required' else clock()+.75
+        timer_deadline=deadline if timer_mode=='required' else clock()+1.
         if timer_mode=='advisory' and deadline is not None:timer_deadline=min(deadline,timer_deadline)
         try:
             if timer_mode=='advisory' and clock()>=timer_deadline:
@@ -203,6 +205,51 @@ class ProjectProbeIO:
         self.f9_pressed=f9_pressed
         self.game.check=lambda:self._input_guard()
         self.original_binding=_binding(baseline['baseline']);self.last_observation=baseline['baseline']
+        self.last_session_diagnostic=None;self.session_status_label='session_check'
+        if 'timer_grace_until' in baseline or 'session_first_seen_monotonic' in baseline:
+            from .session_deadline import verified_timer_grace_until
+            self.timer_grace_until=verified_timer_grace_until(baseline,
+                session_token=baseline['baseline']['session_token'],process_identity=baseline['baseline']['process_identity'],
+                now=time.monotonic())
+
+    def _session_stop(self,error_type,observed,stage,*,expected=None,changed_fields=None,error=None):
+        expected=self.reference['baseline'] if expected is None else expected
+        diagnostic=session_diagnostic(expected,observed,error_type=error_type,stage=stage,
+            observed_monotonic=time.monotonic(),changed_fields=changed_fields,error=error)
+        diagnostic['inputs_sent']=getattr(self,'input_attempts',int(self.sent_any))
+        self.last_session_diagnostic=diagnostic
+        label=getattr(self,'session_status_label','session_check')
+        if not isinstance(label,str) or not re.fullmatch(r'[a-z][a-z0-9_]{0,63}',label):label='session_check'
+        path=self.folder/(label+'.session-status.json');diagnostic['diagnostic_file']=str(path)
+        try:path.write_text(json.dumps(diagnostic,indent=2,allow_nan=False),encoding='utf-8')
+        except (OSError,ValueError,TypeError) as exc:diagnostic['diagnostic_write_error']=type(exc).__name__+': '+str(exc)
+        message=('Bound palette is no longer active' if error_type is PaletteEnded else
+            'Bound palette session identity changed' if error_type is SessionBindingChanged else
+            'Bound palette observation stayed inconsistent')
+        raise error_type(message,diagnostic)
+
+    def _check_observed_session(self,observed,stage,*,expected=None,full_binding=False):
+        expected=self.reference['baseline'] if expected is None else expected
+        self._input_guard()
+        identity=self.backend.process_identity()
+        if json.dumps(identity)!=json.dumps(expected['process_identity']):
+            self._session_stop(SessionBindingChanged,dict(observed,process_identity=identity),stage,
+                expected=expected,changed_fields=['process_identity'])
+        identity=observed.get('process_identity',identity)
+        observed=dict(observed,process_identity=identity)
+        if json.dumps(identity)!=json.dumps(expected['process_identity']):
+            self._session_stop(SessionBindingChanged,observed,stage,expected=expected,changed_fields=['process_identity'])
+        if observed.get('active') is False:
+            self._session_stop(PaletteEnded,observed,stage,expected=expected)
+        if observed.get('active') is not True:
+            self._session_stop(SessionProbeUnstable,observed,stage,expected=expected,changed_fields=['active'])
+        if json.dumps(observed.get('session_token'))!=json.dumps(expected['session_token']):
+            self._session_stop(SessionBindingChanged,observed,stage,expected=expected,
+                changed_fields=changed_token_fields(expected['session_token'],observed.get('session_token')))
+        if full_binding and _binding(observed)!=_binding(expected):
+            first,last=json.loads(_binding(expected)),json.loads(_binding(observed))
+            fields=[name for index,name in ((2,'motion_binding'),(3,'input_settings'),(4,'window_context')) if first[index]!=last[index]]
+            self._session_stop(SessionBindingChanged,observed,stage,expected=expected,changed_fields=fields)
 
     def _input_guard(self):
         focus_end=min(self.deadline,time.monotonic()+5.)
@@ -221,10 +268,27 @@ class ProjectProbeIO:
 
     def check(self,deadline):
         self.deadline=min(deadline,getattr(self,'accepted_session_deadline',self.reference['session_deadline_monotonic']));self._input_guard()
-        if list(self.backend.process_identity())!=list(self.reference['baseline']['process_identity']):raise ValueError('Process identity changed')
-        state=self.backend.probe(self.reference['instance_address'],self.deadline,self._input_guard)
-        if state.get('active') is not True or json.dumps(state['session_token'])!=json.dumps(self.reference['baseline']['session_token']):
-            raise ValueError('Active palette session changed')
+        identity=self.backend.process_identity()
+        if list(identity)!=list(self.reference['baseline']['process_identity']):
+            self._session_stop(SessionBindingChanged,dict(process_identity=identity),
+                'before_probe',changed_fields=['process_identity'])
+        for attempt in range(3):
+            try:
+                state=self.backend.probe(self.reference['instance_address'],self.deadline,self._input_guard)
+                break
+            except (InterruptedError,TimeoutError):raise
+            except (ValueError,OSError) as exc:
+                self._input_guard()
+                identity=self.backend.process_identity()
+                if list(identity)!=list(self.reference['baseline']['process_identity']):
+                    self._session_stop(SessionBindingChanged,dict(process_identity=identity),
+                        'during_probe',changed_fields=['process_identity'],error=exc)
+                if not isinstance(exc,ValueError) or str(exc)!='Palette changed during probe':raise
+                if attempt==2:
+                    self._session_stop(SessionProbeUnstable,dict(process_identity=identity),
+                        'probe',changed_fields=[],error=exc)
+                time.sleep(min(.05,max(0.,self.deadline-time.monotonic())))
+        self._check_observed_session(state,'probe')
 
     def set_verified_session_deadline(self,deadline,evidence):
         """Accept only the collector-bound timer pair, preserving its fixed cap."""
@@ -243,12 +307,20 @@ class ProjectProbeIO:
         self.accepted_session_deadline=deadline
 
     def checkpoint(self,label,deadline):
+        self.session_status_label=label
         self.check(deadline)
         reference=dict(self.reference,session_deadline_monotonic=self.deadline)
         record=record_action_checkpoint(self.backend,reference,label,timeout_seconds=min(5,max(.01,deadline-time.monotonic())),
             check=self._input_guard)
-        path=self.folder/(label+'.checkpoint.json');path.write_text(json.dumps(record,indent=2),encoding='utf-8')
-        if record.get('checkpoint_valid') is not True:raise ValueError('Checkpoint failed: '+record['stop_reason'])
+        path=self.folder/(label+'.checkpoint.json')
+        try:path.write_text(json.dumps(record,indent=2),encoding='utf-8')
+        except OSError as exc:
+            if record.get('checkpoint_valid') is True:raise
+            record['diagnostic_write_error']=type(exc).__name__+': '+str(exc)
+        if record.get('checkpoint_valid') is not True:
+            failed=record.get('failed_observation')
+            if isinstance(failed,dict):self._check_observed_session(failed,'checkpoint',full_binding=True)
+            raise ValueError('Checkpoint failed: '+record['stop_reason'])
         self._input_guard()
         observation=record['observation'];self.last_observation=observation
         cache=observation['geometry_diagnostic']['rect']['cache'];comparison=record['capture']['cpu_comparison']
@@ -261,6 +333,7 @@ class ProjectProbeIO:
         return checkpoint
 
     def frames(self,label,deadline):
+        self.session_status_label=label
         frames=[]
         for index in range(2):
             self.check(deadline);image=self.game.capture();captured=time.monotonic()
@@ -272,7 +345,7 @@ class ProjectProbeIO:
             try:
                 decoded=read_probe_frame(image,deadline=min(deadline,time.monotonic()+5),check=self._input_guard,
                     previous_timer=self.previous_timer,captured_at=captured,hex_fallback=getattr(self,'hex_fallback',None),
-                    timer_mode='skip' if captured<getattr(self,'timer_grace_until',0.) else 'advisory',card_cache=self.card_cache,
+                    timer_mode='advisory',card_cache=self.card_cache,
                     native_board=board,region_count=region_count)
             except FrameReadTimeout as exc:
                 self._input_guard()
@@ -294,9 +367,11 @@ class ProjectProbeIO:
         return frames
 
     def perform(self,action,deadline):
+        self.session_status_label=action.get('label','probe_input')
         self.check(deadline)
         fresh=self.backend.observe_motion(self.reference['instance_address'],deadline,self._input_guard,
             include_geometry=True,include_window=True)
+        self._check_observed_session(fresh,'pre_input',expected=self.last_observation,full_binding=True)
         if (fresh.get('active') is not True or _binding(fresh)!=_binding(self.last_observation)
                 or fresh['motion']['pose']!=self.last_observation['motion']['pose']
                 or fresh['geometry_diagnostic']!=self.last_observation['geometry_diagnostic']
