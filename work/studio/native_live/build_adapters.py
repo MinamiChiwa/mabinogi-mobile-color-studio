@@ -31,7 +31,7 @@ class BuildAdapter:
     region_layouts:tuple=(2,3)
     palette_uninitialized_marker:int=0x20035507
     input_class_rva:int=0x1074fa20
-    input_class_uninitialized_marker:int=0x20000001
+    input_class_uninitialized_marker:int=0x20041b49
     mouse_getter_cache_rva:int=0x11100078
     capability:str='input_verified'
     managed_layout_id:str='dye-managed-v31-v1'
