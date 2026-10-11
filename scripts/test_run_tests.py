@@ -39,8 +39,18 @@ class RegressionEntryTests(unittest.TestCase):
         selected, _ = m.select_tests(cases, 'quick')
         ids = {test.id() for test in selected}
         self.assertIn(cases[0].id(), ids)
-        self.assertIn(cases[1].id(), ids)
+        self.assertNotIn(cases[1].id(), ids)
         self.assertNotIn(cases[2].id(), ids)
+
+    def test_unclassified_modules_are_reported_and_deferred_to_research(self):
+        m = self.module()
+        legacy = self.case('test_native_route_continuation.NativeRouteContinuationTests.test_both_rc10_real_residuals_finish_without_global_research')
+        quick, quick_info = m.select_tests([legacy], 'quick')
+        research, research_info = m.select_tests([legacy], 'research')
+        self.assertEqual(quick, [])
+        self.assertIn('test_native_route_continuation', quick_info['unclassified_current_modules'])
+        self.assertEqual([test.id() for test in research], [legacy.id()])
+        self.assertIn('test_native_route_continuation', research_info['unclassified_current_modules'])
 
     def test_release_adds_explicit_recorded_or_legacy_contracts(self):
         m, cases = self.fixtures()

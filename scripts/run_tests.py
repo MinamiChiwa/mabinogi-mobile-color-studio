@@ -21,6 +21,8 @@ test_hotkeys test_input_gestures test_window_target test_platform_dpi
 test_screen_mapping
 test_runtime_i18n_coverage test_ui_i18n test_ui_performance
 test_native_ui_completion test_native_ui_hit_testing test_responsive_geometry
+test_resize_surface
+test_resize_surface_faults
 test_native_retry_ui test_native_retry_bridge test_native_session_status_ui
 test_overlay_native test_runner_strategy test_native_live_layout
 test_native_live_presentation test_native_live_ui test_native_live_runner
@@ -32,17 +34,19 @@ test_native_window_mapping test_native_cursor_diagnostic_integration
 test_native_mouse_diagnostic test_native_portable_backend test_native_portable_diagnostics
 test_native_scaled_board_mapping test_native_screen_hwnd test_native_unity_module_path
 test_native_variable_layout test_native_input_response test_native_input_compile
-test_native_route_continuation test_code_read_cache test_ocr_setup
+test_code_read_cache test_ocr_setup
 test_vision_stage_deadline test_native_probe_card_cache test_native_probe_glyph_first
 test_native_runtime_bridge test_native_runtime_discovery test_native_runtime_geometry
 test_native_runtime_observation test_native_runtime_adapter
 test_native_periodic_scale_compile
 test_native_periodic_large_rotation test_native_planner_tail test_native_planner_candidate_budget
+test_dye_regions test_eyedropper test_native_input_backend_mapping
+test_run_tests
 '''.split())
 
 # Add a current feature here once its tests have been reviewed for this profile.
-# Unclassified new test modules are also included automatically, so additions
-# such as preset/priority/resize regressions cannot silently disappear.
+# New modules are reported as unclassified and run by research/full until they
+# are deliberately assigned to a product profile.
 EXTRA_CURRENT_MODULES = frozenset(('test_profile_store', 'test_profile_ui',
                                    'test_region_priority', 'test_priority_search_paths',
                                    'test_native_frame_budget_recovery'))
@@ -98,6 +102,23 @@ QUICK_TEST_IDS = (
     'test_native_live_compromise.NativeCompromiseTests.test_neighborhood_risk_breaks_an_equal_center_quality_tie',
     'test_native_live_compromise.NativeCompromiseTests.test_center_average_precedes_uncalibrated_neighborhood_risk',
     'test_native_live_compromise.NativeCompromiseTests.test_expired_compromise_never_sends_input',
+    'test_native_retry.NativeRetryTests.test_retry_zooms_to_verified_minimum_and_keeps_deadline_and_grace',
+    'test_native_retry.NativeRetryTests.test_recorded_fifty_second_retry_runs_reset_and_useful_bounded_search',
+    'test_native_retry.NativeRetryTests.test_f9_during_reset_stops_before_the_next_wheel_group',
+    'test_native_retry.NativeRetryTests.test_retry_search_does_not_authorize_an_actual_route_over_time_or_action_budget',
+    'test_native_retry.NativeRetryTests.test_failed_mouse_release_never_sends_next_reset_group',
+    'test_native_session_status.SessionStatusIOTests.test_inactive_record_is_a_normal_palette_stop_with_saved_observation',
+    'test_native_session_status.SessionStatusIOTests.test_repeated_torn_probe_has_a_retryable_observation_diagnostic',
+    'test_native_session_status.SessionStatusGoalTests.test_generic_stop_after_verified_initial_keeps_history_without_current_match',
+    'test_native_session_status.SessionStatusGoalTests.test_unconfirmed_visual_goal_stop_does_not_promote_native_filled_frame',
+    'test_native_session_status.SessionStatusGoalTests.test_fresh_final_target_observation_remains_current_and_matched',
+    'test_native_fast_discovery.NativeFastDiscoveryTests.test_both_search_strategies_match_reference_for_varied_pointer_layouts',
+    'test_native_fast_discovery.NativeRegionCoverageTests.test_query_failure_inside_application_range_is_not_normal_completion',
+    'test_native_deadline_controller.DeadlineControllerTests.test_late_verified_pair_corrects_cap_only_inside_same_round_maximum',
+    'test_native_deadline_controller.DeadlineIOBoundaryTests.test_approved_pair_updates_only_the_checked_session_bound',
+    'test_native_timer_extension.VerifiedTimerExtensionTests.test_qualified_pair_extends_only_to_bounded_timer_end',
+    'test_native_timer_extension.VerifiedTimerShorteningTests.test_checked_decreasing_pair_keeps_only_three_second_game_tail',
+    'test_native_timer_grace_start.TimerGraceOriginTests.test_data3_scan_42_seconds_does_not_restart_grace_at_controller_start',
 )
 
 QUICK_EXCLUDED_TEST_IDS = frozenset((
@@ -181,7 +202,7 @@ def select_tests(tests, profile, *, no_desktop=False):
         if unclassified:
             new_modules.add(module)
         desktop = name.startswith(DESKTOP_TEST_PREFIXES)
-        quick = ((current or unclassified or name in quick_ids) and name not in quick_excluded
+        quick = ((current or name in quick_ids) and name not in quick_excluded
                  and (not desktop or name in QUICK_DESKTOP_TEST_IDS))
         include = (profile == 'full' or (profile == 'quick' and quick)
                    or (profile == 'release' and (quick or name in release_ids or desktop))

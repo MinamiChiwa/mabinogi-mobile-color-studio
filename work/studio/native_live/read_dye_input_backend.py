@@ -4,6 +4,16 @@ from .read_native_rect import SUPPORTED_UNITYPLAYER
 from .read_unity_screen import unityplayer_module_base
 
 
+def viewport_mapping_is_verified(origin, scale, mapping):
+    """Accept scaled input only when the current target HWND lattice is bound."""
+    if list(origin) == [0, 0] and [float(v) for v in scale] == [1., 1.]:
+        return True
+    return (isinstance(mapping, dict)
+            and mapping.get('source') == 'win32_target_awareness_pixel_lattice'
+            and mapping.get('coordinate_validation', {}).get('verified') is True
+            and bool(mapping.get('mapping_sha256')))
+
+
 def read_input_backend(backend,deadline,*,check=lambda:None,clock=time.monotonic):
     if not math.isfinite(deadline):raise ValueError('Finite input-read deadline required')
     r=backend.reader;prior=r.guard;reads={}
@@ -35,7 +45,9 @@ def read_input_backend(backend,deadline,*,check=lambda:None,clock=time.monotonic
         if function!=unity+0x185310:raise ValueError('Legacy mouse getter unresolved or differs')
         screen=pointer(unity+0x1b23390);viewport=read(screen+0x120,24)
         origin=list(struct.unpack('<2i',viewport[:8]));scale=list(struct.unpack('<2f',viewport[16:]))
-        if origin!=[0,0] or scale!=[1.,1.]:raise ValueError('Only one-to-one origin-zero viewport validated')
+        mapping=getattr(backend,'win_pixel_mapping',None)
+        if not viewport_mapping_is_verified(origin,scale,mapping):
+            raise ValueError('Viewport requires a verified target-awareness pixel mapping')
         for (address,size),raw in reads.items():
             guard()
             if r.read(address,size)!=raw:raise ValueError('Input branch or viewport changed during read')
@@ -43,11 +55,14 @@ def read_input_backend(backend,deadline,*,check=lambda:None,clock=time.monotonic
         if list(backend.process_identity())!=identity:raise ValueError('Input process identity changed')
         return dict(process_identity=identity,backend_object=hex(manager),backend_type=name,input_assistant='0x0',
             legacy_mouse_getter_rva='0x185310',viewport_origin=origin,viewport_scale=scale,
+            pixel_mapping_verified=viewport_mapping_is_verified(origin,scale,mapping),
+            pixel_mapping_sha256=mapping.get('mapping_sha256') if isinstance(mapping,dict) else None,
             observed_monotonic=clock(),inputs_sent=0,ready_for_input=False,cached_mouse_freshness_verified=False,
             scope='Repeated input branch/viewport read near checkpoint, not event instrumentation or frame atomicity')
     finally:r.guard=prior
 
 
 def input_backend_binding(record):
-    return {k:record[k] for k in ('process_identity','backend_object','backend_type','input_assistant',
-        'legacy_mouse_getter_rva','viewport_origin','viewport_scale')}
+    return {k:record.get(k) for k in ('process_identity','backend_object','backend_type','input_assistant',
+        'legacy_mouse_getter_rva','viewport_origin','viewport_scale','pixel_mapping_verified',
+        'pixel_mapping_sha256')}

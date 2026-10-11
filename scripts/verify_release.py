@@ -27,6 +27,7 @@ def verify(release,source):
               'native_live.retry','native_live.session_deadline','native_live.time_policy','native_live.session_status',
               'native_live.controller','native_live.same_session_dye_planner','native_live.compromise',
               'native_live.candidate_selection','native_live.collect_dye_validation',
+              'native_live.read_dye_input_backend','native_periodic_route',
               'native_live.native_provider_backend','native_live.scan_live_dye',
               'native_live.project_probe_io','native_live.project_closed_loop_io','native_live.service',
               'native_live.read_dye_window_mapping','native_live.runtime_read','overlay_native','search_overlay'}
