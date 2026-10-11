@@ -268,8 +268,18 @@ def inspect(r,a,cls):
  native_material=_pointer(r.u64(material+16),'native material',nullable=True) if material else 0
  active_result=_pointer(r.u64(a+fs['<Result>k__BackingField']),'active result',nullable=True)
  return {'address':hex(a),'data':hex(data),'region_count':count,'native_textures':[hex(x) for x in natives],'live_textures':all(natives),'native_material':hex(native_material),'controller_state':state,'active_result':hex(active_result),'capture_eligible':all(natives) and bool(native_material) and bool(active_result) and state==2}
-def scan(r,capture=False):
- cls=r.u64(r.base+0x106c9010);pattern=struct.pack('<Q',cls);hits=[];saved=[];seen=set();total=0;t=time.perf_counter()
+def scan(r,capture=False,*,adapter=None):
+ if adapter is None:
+  import hashlib
+  from .build_layout import resolve_build_files
+  from .build_adapters import select_adapter
+  files=resolve_build_files(r.module_files)
+  adapter=select_adapter({name:hashlib.sha256(path.read_bytes()).hexdigest() for name,path in files.items()})
+ cls=r.u64(r.base+adapter.palette_class_rva);hits=[];saved=[];seen=set();total=0;t=time.perf_counter()
+ if cls in (0,adapter.palette_uninitialized_marker):return hits,saved,total,time.perf_counter()-t
+ _pointer(cls,'dye class',class_pointer=True)
+ if r.class_name(cls)!='MM.Client.Presentation.UI.Instances.StageScene.Dyeing.DyeingPaletteInstanceImpl':raise ValueError('Dye class not initialized or build mismatch')
+ pattern=struct.pack('<Q',cls)
  for region in r.regions():
   if region.State!=0x1000 or region.Type!=0x20000 or region.Protect&0x100 or region.Protect&0xff not in (4,8,0x40,0x80):continue
   for start in range(region.BaseAddress,region.BaseAddress+region.RegionSize,8*1024*1024):

@@ -1,3 +1,4 @@
+from native_live.build_adapters import TW_ADAPTER
 """Portable failures must retain the failed layer and physical measurements."""
 import copy,json,tempfile,threading,unittest
 from pathlib import Path
@@ -10,7 +11,7 @@ from window_target import WindowTarget
 
 class NativePortableDiagnosticsTests(unittest.TestCase):
     def test_preflight_failure_saves_actual_paths_and_window_stage(self):
-        backend=MagicMock()
+        backend=MagicMock();backend.adapter=TW_ADAPTER
         backend.build_files=dict(gameassembly=Path('D:/游戏/appdata/GameAssembly.dll'),
             unityplayer=Path('D:/游戏/appdata/UnityPlayer.dll'),metadata=Path('D:/游戏/appdata/Metadata.dat'))
         backend.version='game-hash';backend.metadata_version='metadata-hash';backend.unityplayer_version='unity-hash'

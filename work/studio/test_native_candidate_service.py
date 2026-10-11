@@ -1,3 +1,4 @@
+from native_live.build_adapters import TW_ADAPTER
 """Native retry uses the same IO lifetime and does not publish predictions."""
 import tempfile
 import threading
@@ -18,7 +19,7 @@ class NativeCandidateServiceTests(unittest.TestCase):
             return True
         owner=SimpleNamespace(stop=threading.Event(),consume_retry_request=retry,
             event=lambda kind,**data:events.append((kind,data)))
-        backend=MagicMock()
+        backend=MagicMock();backend.adapter=TW_ADAPTER
         adapter=SimpleNamespace(input_attempts=0,release=lambda:None)
         target=WindowTarget(20,123,'Game','MabinogiMobile.exe')
         baseline=dict(stop_reason='passive_baseline_collected',capture={'capture_folder':'unused'},

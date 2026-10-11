@@ -47,6 +47,7 @@ test_run_tests
 test_updater_manifest test_updater_plan test_updater_network test_updater_offline
 test_updater_service test_updater_ui test_updater_bootstrap test_updater_runtime
 test_native_build_adapters
+test_native_server_adaptation
 test_app_shutdown
 '''.split())
 

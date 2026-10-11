@@ -1,6 +1,8 @@
-# 0.4.2rc11 — 搜索计算提速、重试连续缩小与本地更新
+# 0.4.2rc12 — 搜索提速与韩服验证接入
 
 ## 简体中文
+
+- 按完整构建指纹接入当前韩服的对象、鼠标和几何参数；新增 `Korean-validation.cmd` 完整染色验证入口及 `Korean-preflight.cmd` 只读检查。韩服拖动、缩放、旋转和重试沿用现有流程；尚未完成活跃色板和实机响应验收，不列为正式完整支持。
 
 - 复用相同颜色的距离计算，减少路线模拟中重复的 float32 数据转换；保留原来的颜色算法、事件顺序、搜索范围和实际核验。未命中时仍会使用剩余搜索时间，以检查更多候选。
 
@@ -37,6 +39,8 @@
 
 ## 繁體中文
 
+- 依完整版本指紋接入目前韓服的物件、滑鼠及幾何參數；新增 `Korean-validation.cmd` 完整染色驗證入口及 `Korean-preflight.cmd` 唯讀檢查。韓服拖動、縮放、旋轉與重試沿用現有流程；尚未完成實際色板與操作響應驗收，不列為正式完整支援。
+
 - 重用相同顏色的距離計算，減少路線模擬中重複的 float32 資料轉換；保留原本的顏色算法、事件順序、搜尋範圍及實際核驗。未命中時仍會使用剩餘搜尋時間，以檢查更多候選。
 
 - 重試縮小改為同一錨點連續滾動，移除分組間的完整回讀與重複準備；結束後核對實際縮放與顏色，漏收滾輪時依實際位置補齊。保留逐格滾輪節奏、F9 與最終核驗，不縮減搜尋範圍或放寬精準標準。
@@ -71,6 +75,8 @@
 重試不增加遊戲時間、不消耗新道具，不自動開啟或套用染色。有限搜尋無法保證多色精準成功。本機候選版尚未完成新一局實機驗收。
 
 ## English
+
+- Selects the current Korean object, mouse and geometry parameters by complete build fingerprint. `Korean-validation.cmd` enables the full dye workflow for testing; `Korean-preflight.cmd` runs read-only checks. Drag, zoom, rotation and retry use the existing workflow. Live palette and response validation is pending; Korean support is not yet declared complete.
 
 - Reuses identical colour-distance calculations and avoids redundant float32 conversions during route simulation. Colour arithmetic, event order, search coverage and actual verification are preserved. Searches without a hit still use the remaining allowance to examine more candidates.
 

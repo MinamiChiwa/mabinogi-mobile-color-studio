@@ -81,6 +81,12 @@ verification=out/'ColorStudio/work/studio/VERIFICATION.md'
 verification.parent.mkdir(parents=True,exist_ok=True)
 shutil.copy2(root/'VERIFICATION.md',verification)
 shutil.copy2(root/'native-window-check.ps1',out/'ColorStudio/native-window-check.ps1')
+shutil.copy2(root/'Korean-validation.cmd',out/'ColorStudio/Korean-validation.cmd')
+shutil.copy2(root/'Korean-preflight.cmd',out/'ColorStudio/Korean-preflight.cmd')
+kr_validation=workspace/'docs/server-adaptation/korean-validation.md'
+if kr_validation.is_file():
+    (out/'ColorStudio/docs').mkdir(exist_ok=True)
+    shutil.copy2(kr_validation,out/'ColorStudio/docs/korean-validation.md')
 shutil.copy2(root/'WINDOW_CHECK.zh-CN.md',out/'ColorStudio/WINDOW_CHECK.zh-CN.md')
 for name in ('WINDOW_CHECK.zh-TW.md','WINDOW_CHECK.en.md'):
     shutil.copy2(root/name,out/'ColorStudio'/name)

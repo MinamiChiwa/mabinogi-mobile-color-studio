@@ -17,7 +17,7 @@ from .read_dye_window_mapping import read_pixel_mapping,validate_pixel_mapping
 from .read_native_mouse_diagnostic import read_native_mouse_cache
 from .map_unity_window import map_unity_geometry_to_client
 from .build_layout import resolve_build_files
-from .build_adapters import select_adapter,BuildUnsupported
+from .build_adapters import select_adapter,BuildUnsupported,TW_ADAPTER
 from ctypes import wintypes
 
 EXPECTED_BUILD='1675c2131534d0ab2fc053af8a2e394d326ba7d22eff0019734be96b1808678f'
@@ -65,7 +65,8 @@ class CurrentBuildBackend:
         except BaseException:
             self.reader.close();raise
         self.build_diagnostic={'hashes':dict(gameassembly=self.version,metadata=self.metadata_version,unityplayer=self.unityplayer_version),
-            'adapter':self.adapter.adapter_id,'inputs_sent':0}
+            'adapter':self.adapter.adapter_id,'capability':self.adapter.capability,'input_verified':self.adapter.input_verified,
+            'layouts':self.adapter.diagnostic(),'inputs_sent':0}
         self.base = self.reader.base
         self.scans = self.exports = 0
 
@@ -79,8 +80,9 @@ class CurrentBuildBackend:
     def _bind(self, check):
         self.reader.guard = check
         check()
-        cls = self.reader.u64(self.base + getattr(getattr(self,'adapter',None),'palette_class_rva',0x106c9010))
-        if cls in (0,UNINITIALIZED_DYE_CLASS_TOKEN):
+        adapter=getattr(self,'adapter',TW_ADAPTER)
+        cls = self.reader.u64(self.base + adapter.palette_class_rva)
+        if cls in (0,adapter.palette_uninitialized_marker):
             raise DyeClassUnavailable('Dye class not initialized',class_value=cls)
         if cls < 0x100000000 or self.reader.class_name(cls) != 'MM.Client.Presentation.UI.Instances.StageScene.Dyeing.DyeingPaletteInstanceImpl':
             raise ValueError('Dye class not initialized or build mismatch')
@@ -107,11 +109,12 @@ class CurrentBuildBackend:
             self._discovery_scan=None;self._discovery_identity=None
             value=exc.class_value
             verified=False;status='class_uninitialized'
-            if value in (0,UNINITIALIZED_DYE_CLASS_TOKEN):
+            adapter=getattr(self,'adapter',TW_ADAPTER)
+            if value in (0,adapter.palette_uninitialized_marker):
                 # The exact unresolved marker was checked against this build's
                 # original DLL and a fresh process (stage43). It is distinct
                 # from an incomplete heap census or an unknown low pointer.
-                repeated=self.reader.u64(self.base+0x106c9010);check()
+                repeated=self.reader.u64(self.base+adapter.palette_class_rva);check()
                 if self.process_identity()!=identity:raise OSError('Process changed during palette discovery')
                 verified=repeated==value
                 if not verified:status='class_initializing'

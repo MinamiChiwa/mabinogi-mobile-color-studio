@@ -2,7 +2,7 @@
 import numpy as np
 
 from .read_native_transform import read_native_transform_matrix
-from .read_toucharea_rect import SUPPORTED_GAMEASSEMBLY, SUPPORTED_METADATA, SUPPORTED_UNITYPLAYER, read_toucharea_rect_cache
+from .read_toucharea_rect import read_toucharea_rect_cache
 
 
 def read_toucharea_geometry_cache(reader, slot_address, *, gameassembly_sha256,

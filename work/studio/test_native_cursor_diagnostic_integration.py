@@ -1,3 +1,4 @@
+from native_live.build_adapters import TW_ADAPTER
 """Transient reader cursor observations must not replace stable window binding."""
 import json,tempfile,unittest
 import copy
@@ -77,7 +78,7 @@ class NativeCursorDiagnosticIntegrationTests(unittest.TestCase):
         self.assertEqual(b.last_pixel_mapping_diagnostic['reader_cursor']['physical_cursor_before'],[3200,1409])
 
     def test_preparation_records_cursor_data_for_later_remote_audit(self):
-        backend=MagicMock();backend.last_pixel_mapping_diagnostic=dict(reader_cursor=dict(matches=False,delta=[1,0]))
+        backend=MagicMock();backend.adapter=TW_ADAPTER;backend.last_pixel_mapping_diagnostic=dict(reader_cursor=dict(matches=False,delta=[1,0]))
         backend.observe_window_context.return_value=dict(extent_one_to_one=True,
             window=dict(client_size_physical=[1280,960]))
         with tempfile.TemporaryDirectory() as tmp,patch.object(service,'CurrentBuildBackend',return_value=backend), \

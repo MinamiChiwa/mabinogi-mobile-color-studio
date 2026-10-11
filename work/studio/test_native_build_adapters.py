@@ -18,6 +18,6 @@ class BuildAdapterTests(unittest.TestCase):
         self.assertEqual(diagnostic['inputs_sent'],0)
 
     def test_known_build_is_selected_by_fingerprint_independent_of_server_title(self):
-        from native_live.build_adapters import select_adapter,TW_BUILD,TW_METADATA
-        adapter=select_adapter(dict(gameassembly=TW_BUILD,metadata=TW_METADATA,unityplayer='c'*64))
+        from native_live.build_adapters import select_adapter,TW_BUILD,TW_METADATA,UNITY_BUILD
+        adapter=select_adapter(dict(gameassembly=TW_BUILD,metadata=TW_METADATA,unityplayer=UNITY_BUILD))
         self.assertEqual(adapter.palette_class_rva,0x106c9010)

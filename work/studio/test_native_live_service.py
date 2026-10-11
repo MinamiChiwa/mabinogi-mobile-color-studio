@@ -1,3 +1,4 @@
+from native_live.build_adapters import TW_ADAPTER
 """Preflight must not construct a sender; user rules own live execution."""
 import importlib,importlib.util,tempfile,threading,unittest
 from types import SimpleNamespace
@@ -10,7 +11,7 @@ class NativeLiveServiceTests(unittest.TestCase):
         self.assertIsNotNone(importlib.util.find_spec('native_live.service'),'Runner service missing')
         return importlib.import_module('native_live.service')
     def test_preflight_resolves_selected_process_without_sender_or_input(self):
-        m=self.module();backend=MagicMock()
+        m=self.module();backend=MagicMock();backend.adapter=TW_ADAPTER
         backend.observe_window_context.return_value=dict(extent_one_to_one=True,window=dict(client_size_physical=[1280,960]))
         with tempfile.TemporaryDirectory() as tmp, patch.object(m,'CurrentBuildBackend',return_value=backend), \
              patch.object(m,'configure_ocr'),patch.object(m,'prepare_timer_assets',return_value={}), \
@@ -20,7 +21,7 @@ class NativeLiveServiceTests(unittest.TestCase):
         self.assertEqual(result['stop_reason'],'preflight_complete');self.assertEqual(result['actual_input_attempts'],0)
         adapter.assert_not_called();backend.close.assert_called_once()
     def test_no_active_new_session_never_constructs_sender(self):
-        m=self.module();backend=MagicMock()
+        m=self.module();backend=MagicMock();backend.adapter=TW_ADAPTER
         backend.observe_window_context.return_value=dict(extent_one_to_one=True,window=dict(client_size_physical=[1280,960]))
         from window_target import WindowTarget
         target=WindowTarget(20,123,'Game','MabinogiMobile.exe')
@@ -75,7 +76,7 @@ class NativeLiveServiceTests(unittest.TestCase):
         try:
             # Exercise the service event adapter through a minimal run setup.
             target=__import__('window_target').WindowTarget(20,123,'Game','MabinogiMobile.exe')
-            backend=MagicMock();backend.observe_window_context.return_value=dict(extent_one_to_one=True,window=dict(client_size_physical=[1280,960]))
+            backend=MagicMock();backend.adapter=TW_ADAPTER;backend.observe_window_context.return_value=dict(extent_one_to_one=True,window=dict(client_size_physical=[1280,960]))
             def fake_loop(adapter,session,settings,rules,**kwargs):
                 for name in ('refinement_planning','refinement_search_progress'):
                     kwargs['event'](dict(event=name,stage='integer_drags',examined=14527,

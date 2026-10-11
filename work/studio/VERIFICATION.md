@@ -1,3 +1,12 @@
+# Local candidate 0.4.2rc12 — Korean validation integration (2026-10-12)
+
+- Fingerprint-bound Korean palette/marker/input/getter parameters and shared Unity/managed layouts are connected. Normal launch retains diagnostic capability; an explicit known-build validation launch permits the complete existing input/search/retry workflow without claiming input verification.
+- Fresh Korean read-only preflight passed:1280x720 client, legacy mouse, identity viewport, exact fingerprints; dye class marker repeated consistently, zero input and zero heap scans. Active dye pixels and gesture response remain unverified.
+- Quick baseline:606 selected,605 passed,one optional OCR skip,zero failures/errors;85.786 seconds total. Further focused cases cover Korean-only preflight, wrapper drift and independent scan absence. Package/preflight evidence is saved separately.
+- rc11 final lossless regression after ndarray-subclass repair:597 selected,596 passed,one optional skip;65.122 seconds total. Independent review found no remaining issue. No new dye item or public release.
+
+Reports:`docs/server-adaptation/2026-10-12-kr-integration-report.md` and `docs/verification-lossless-speed-2026-10-12.md`.
+
 # Local candidate 0.4.2rc11 — lossless computation speedup (2026-10-12)
 
 - Pure canonical RGB/LAB distance reuse is bounded and owns immutable target tuples; mutated alternatives are re-evaluated. Replay float32 vectors retain checks and buffer ownership while avoiding redundant float64 conversion.

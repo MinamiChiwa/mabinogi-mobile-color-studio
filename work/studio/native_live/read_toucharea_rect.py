@@ -2,6 +2,7 @@
 import struct
 
 from .read_native_rect import SUPPORTED_UNITYPLAYER, read_native_rect_cache
+from .build_adapters import select_adapter,BuildUnsupported
 
 SUPPORTED_GAMEASSEMBLY = '1675c2131534d0ab2fc053af8a2e394d326ba7d22eff0019734be96b1808678f'
 SUPPORTED_METADATA = '3f6827a41d26ab50ef0051b881cb2c6dcab0c12aab5e95cc7da0071fae63a847'
@@ -10,9 +11,10 @@ SUPPORTED_METADATA = '3f6827a41d26ab50ef0051b881cb2c6dcab0c12aab5e95cc7da0071fae
 def read_toucharea_rect_cache(reader, slot_address, *, gameassembly_sha256,
                              metadata_sha256, unityplayer_sha256,
                              expected_touch_area=None, check=lambda: None):
-    if (gameassembly_sha256 != SUPPORTED_GAMEASSEMBLY or metadata_sha256 != SUPPORTED_METADATA
-            or unityplayer_sha256 != SUPPORTED_UNITYPLAYER):
-        raise ValueError('Unsupported TouchArea/native layout build')
+    try:
+        adapter=select_adapter(dict(gameassembly=gameassembly_sha256,metadata=metadata_sha256,unityplayer=unityplayer_sha256))
+    except BuildUnsupported as exc:raise ValueError('Unsupported TouchArea/native layout build') from exc
+    if adapter.managed_layout_id!='dye-managed-v31-v1':raise ValueError('Unsupported TouchArea/native layout build')
     observed = {}
     layouts = {}
 

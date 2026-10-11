@@ -1,5 +1,5 @@
 """Selected-window native acquisition and controller service; never confirms dye."""
-import copy,ctypes,json,time,traceback
+import copy,ctypes,json,time,traceback,sys
 from pathlib import Path
 from platform_win import u
 from window_target import resolve_target
@@ -18,6 +18,7 @@ from .controller import run_goal_loop
 from .time_policy import SESSION_MAX_SECONDS
 from dye_regions import session_region_count,bind_region_rules
 from process_access import ProcessReadDenied
+from .build_adapters import require_input_capability,enable_known_validation_input,KR_ADAPTER
 
 
 def _prepare(pid,folder,check,hwnd=None):
@@ -48,7 +49,10 @@ def _prepare(pid,folder,check,hwnd=None):
         diagnostic['stage']='input_backend';save()
         branch=read_input_backend(backend,end,check=check)
         diagnostic.update(stage='complete',input_backend=branch);save()
+        selected_adapter=getattr(backend,'adapter',None)
+        adapter_diagnostic=selected_adapter.diagnostic() if selected_adapter is not None else {}
         return backend,dict(window_context=window,input_backend=branch,timer_assets=timer,hex_assets=glyphs,
+            build_adapter=adapter_diagnostic,
             pixel_mapping_diagnostics=diagnostic.get('pixel_mapping_diagnostics',{}))
     except BaseException as exc:
         from .build_adapters import BuildUnsupported
@@ -144,6 +148,13 @@ def run_native_search(owner,rules,*,mode='search',target=None,activate=False,**u
         owner.event('native_progress',stage='native_validate',message='正在检查当前游戏与取色数据。')
         backend,prepared=_prepare(selected.pid,folder,check,selected.hwnd)
         result['preflight']=prepared
+        if '--validate-korean-build' in sys.argv:
+            enable_known_validation_input(backend,KR_ADAPTER.adapter_id)
+        selected_adapter=getattr(backend,'adapter',None)
+        if selected_adapter is not None:
+            result['build_adapter']=dict(selected_adapter.diagnostic(),
+                validation_input_enabled=getattr(backend,'validation_input_enabled',False) is True)
+        require_input_capability(backend)
         baseline=collect_validation_session(backend,wait_seconds=300.,session_seconds=SESSION_MAX_SECONDS,check=check,event=event)
         (folder/'native-baseline.json').write_text(json.dumps(baseline,indent=2),encoding='utf-8')
         if baseline['stop_reason']!='passive_baseline_collected':result['stop_reason']=baseline['stop_reason']

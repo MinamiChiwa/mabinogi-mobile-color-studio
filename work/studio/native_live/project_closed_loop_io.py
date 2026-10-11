@@ -59,6 +59,9 @@ def validate_retry_reset_route(route,board):
 
 class ProjectClosedLoopIO(ProjectProbeIO):
     def __init__(self,*args,**kwargs):
+        from .build_adapters import require_input_capability
+        backend=args[0] if args else kwargs['backend']
+        require_input_capability(backend)
         prepare_hex_assets()
         super().__init__(*args,**kwargs);self.input_reference=None;self.input_attempts=0;self.hex_fallback=read_card_glyphs
         self._planning_probe_at=None
@@ -115,6 +118,8 @@ class ProjectClosedLoopIO(ProjectProbeIO):
             if self.input_attempts==before:exc.input_not_started=True
             raise
     def _perform_candidate_checked(self,record,label,deadline,*,feedback_reserve_seconds,retry_route=None):
+        from .build_adapters import require_input_capability
+        require_input_capability(self.backend)
         if not isinstance(label,str) or not re.fullmatch(r'[a-z][a-z0-9_]{0,47}',label):raise ValueError('Bad input label')
         self.session_status_label=label
         self.check(deadline)

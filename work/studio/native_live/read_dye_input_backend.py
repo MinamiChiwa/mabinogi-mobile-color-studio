@@ -2,6 +2,7 @@
 import math,struct,time
 from .read_native_rect import SUPPORTED_UNITYPLAYER
 from .read_unity_screen import unityplayer_module_base
+from .build_adapters import TW_ADAPTER
 
 
 def viewport_mapping_is_verified(origin, scale, mapping):
@@ -31,19 +32,20 @@ def read_input_backend(backend,deadline,*,check=lambda:None,clock=time.monotonic
         return value
     try:
         r.guard=guard;guard();identity=list(backend.process_identity())
-        if backend.unityplayer_version!=SUPPORTED_UNITYPLAYER:raise ValueError('Unsupported mouse layout build')
+        adapter=getattr(backend,'adapter',TW_ADAPTER);layout=adapter.unity_layout
+        if backend.unityplayer_version!=layout.sha256:raise ValueError('Unsupported mouse layout build')
         base=backend.base;unity=getattr(backend,'unityplayer_base',None)
         if unity is None:unity=unityplayer_module_base(r,check=guard)
-        cls=pointer(base+0x1074fa20)
+        cls=pointer(base+adapter.input_class_rva)
         if r.class_name(cls)!='MM.Client.Framework.InputSystem.MMInputSystem':raise ValueError('Input class differs')
         static=pointer(cls+0xb8);manager=pointer(static+r.fields(cls)['inputSystem'])
         manager_class=pointer(manager);name=r.class_name(manager_class)
         if name!='MM.Client.Framework.InputSystem.InputManager':raise ValueError('Input backend branch differs')
         assistant=struct.unpack('<Q',read(manager+r.fields(manager_class)['inputEventAssistant'],8))[0]
         if assistant!=0:raise ValueError('Input assistant overrides legacy mouse')
-        function=struct.unpack('<Q',read(base+0x11100078,8))[0]
-        if function!=unity+0x185310:raise ValueError('Legacy mouse getter unresolved or differs')
-        screen=pointer(unity+0x1b23390);viewport=read(screen+0x120,24)
+        function=struct.unpack('<Q',read(base+adapter.mouse_getter_cache_rva,8))[0]
+        if function!=unity+layout.mouse_getter_rva:raise ValueError('Legacy mouse getter unresolved or differs')
+        screen=pointer(unity+layout.screen_global_rva);viewport=read(screen+layout.viewport_offset,24)
         origin=list(struct.unpack('<2i',viewport[:8]));scale=list(struct.unpack('<2f',viewport[16:]))
         mapping=getattr(backend,'win_pixel_mapping',None)
         if not viewport_mapping_is_verified(origin,scale,mapping):
@@ -54,7 +56,7 @@ def read_input_backend(backend,deadline,*,check=lambda:None,clock=time.monotonic
         guard()
         if list(backend.process_identity())!=identity:raise ValueError('Input process identity changed')
         return dict(process_identity=identity,backend_object=hex(manager),backend_type=name,input_assistant='0x0',
-            legacy_mouse_getter_rva='0x185310',viewport_origin=origin,viewport_scale=scale,
+            legacy_mouse_getter_rva=hex(layout.mouse_getter_rva),viewport_origin=origin,viewport_scale=scale,
             pixel_mapping_verified=viewport_mapping_is_verified(origin,scale,mapping),
             pixel_mapping_sha256=mapping.get('mapping_sha256') if isinstance(mapping,dict) else None,
             observed_monotonic=clock(),inputs_sent=0,ready_for_input=False,cached_mouse_freshness_verified=False,

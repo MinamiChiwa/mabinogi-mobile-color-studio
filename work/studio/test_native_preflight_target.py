@@ -25,5 +25,24 @@ class NativePreflightTargetTests(unittest.TestCase):
             native_preflight.main(['--pid','40','--hwnd','30','--output-dir',tmp])
         resolve.assert_not_called();self.assertEqual(preflight.call_args.kwargs['hwnd'],30)
 
+    def test_korean_locator_keeps_its_handle_with_taiwan_running(self):
+        windows=[WindowTarget(30,40,'瑪奇 Mobile','MabinogiMobile.exe'),
+                 WindowTarget(50,60,'마비노기 모바일','MabinogiMobile.exe')]
+        result={'stop_reason':'preflight_complete','build_adapter':{'adapter_id':'kr-20261012-research-candidate'}}
+        with tempfile.TemporaryDirectory() as tmp,patch('window_target.list_windows',return_value=windows),\
+            patch('native_live.service.preflight',return_value=result) as preflight:
+            self.assertEqual(native_preflight.main(['--korean','--output-dir',tmp]),0)
+        self.assertEqual(preflight.call_args.args,(60,Path(tmp)))
+        self.assertEqual(preflight.call_args.kwargs['hwnd'],50)
+
+    def test_korean_preflight_does_not_accept_taiwan_hash_under_korean_title(self):
+        result={'stop_reason':'preflight_complete','build_adapter':{'adapter_id':'unity-static-v1'}}
+        with tempfile.TemporaryDirectory() as tmp,patch('window_target.list_windows',return_value=[WindowTarget(50,60,'마비노기 모바일','MabinogiMobile.exe')]),\
+            patch('native_live.service.preflight',return_value=result):
+            self.assertEqual(native_preflight.main(['--korean','--output-dir',tmp]),1)
+            import json
+            saved=json.loads((Path(tmp)/'native-preflight.json').read_text())
+            self.assertEqual(saved['unavailable_reason'],'game_build')
+
 
 if __name__=='__main__':unittest.main()

@@ -1,3 +1,4 @@
+from native_live.build_adapters import TW_ADAPTER
 """A wide physical client is supported when its native extent agrees."""
 import tempfile,unittest
 from pathlib import Path
@@ -7,7 +8,7 @@ from native_live import service
 
 class NativeMappedPreflightTests(unittest.TestCase):
     def test_verified_scaled_window_reaches_backend_without_sender(self):
-        backend=MagicMock();context=dict(extent_one_to_one=False,coordinate_mapping_verified=True,
+        backend=MagicMock();backend.adapter=TW_ADAPTER;context=dict(extent_one_to_one=False,coordinate_mapping_verified=True,
             window=dict(hwnd=1,pid=2,client_size_physical=[1920,1440],dpi=144),
             unity_screen=dict(size=[1280,960],hwnd=1),
             pixel_mapping=dict(source='win32_target_awareness_pixel_lattice',coordinate_validation=dict(verified=True)))
@@ -23,7 +24,7 @@ class NativeMappedPreflightTests(unittest.TestCase):
         for size,dpi in (([800,600],96),([1280,960],144),([1920,1080],144),
                          ([2560,1440],168),([3840,2160],192),([900,1600],120)):
             with self.subTest(size=size,dpi=dpi),tempfile.TemporaryDirectory() as tmp:
-                backend=MagicMock()
+                backend=MagicMock();backend.adapter=TW_ADAPTER
                 backend.observe_window_context.return_value=dict(extent_one_to_one=True,
                     window=dict(client_size_physical=size,dpi=dpi,physical_coordinates=True),unity_screen=dict(size=size))
                 with patch.object(service,'CurrentBuildBackend',return_value=backend), \
