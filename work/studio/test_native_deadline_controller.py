@@ -10,7 +10,7 @@ from native_live.dye_action_checkpoint import _binding
 from test_native_retry import RetryIO
 
 
-def metadata(io,initial=90.,maximum=110.):
+def metadata(io,initial=90.,maximum=117.):
     binding=json.loads(io.binding)
     return dict(deadline_source='existing_active_unknown_age',initial_deadline=initial,
         maximum_deadline=maximum,session_token=binding[0],process_identity=binding[1])
@@ -28,8 +28,10 @@ class DeadlineControllerTests(unittest.TestCase):
         original=io.frames;approved=[]
         def frames(label,until):
             rows=original(label,until)
+            # A one-second pair costs one second from the first warm sample;
+            # the closing budget must reflect that actual observation cost.
+            io.t+=1.
             if label=='retry_wait_closed':
-                io.t+=1.
                 rows=evidence_frames(io.checkpoint(label,until),io.t-1.,io.t,(50,49))
                 if bad:rows[0]['remaining_seconds']=117;rows[1]['remaining_seconds']=17
             return rows
@@ -41,10 +43,10 @@ class DeadlineControllerTests(unittest.TestCase):
     def test_late_verified_pair_corrects_cap_only_inside_same_round_maximum(self):
         io=RetryIO();result,approved=self.run_loop(io,metadata(io))
         self.assertGreater(result['effective_deadline'],90.)
-        self.assertLessEqual(result['effective_deadline'],110.)
+        self.assertLessEqual(result['effective_deadline'],117.)
         self.assertEqual(io.timer_grace_until,31.)
         self.assertEqual(len(approved),1);self.assertTrue(result['accepted'])
-        self.assertEqual(result['deadline_extensions'][0]['deadline'],110.)
+        self.assertEqual(result['deadline_extensions'][0]['deadline'],117.)
     def test_short_caller_bound_and_bad_timer_pair_never_extend(self):
         for deadline,bad in ((80.,False),(90.,True)):
             with self.subTest(deadline=deadline,bad=bad):
@@ -81,7 +83,7 @@ class DeadlineControllerTests(unittest.TestCase):
             timer_deadline_extension=metadata(io),retry_requested=requested,event=event,clock=io.clock,pause=io.pause)
         self.assertEqual(result['retry_epochs'],2)
         self.assertGreater(result['effective_deadline'],90.)
-        self.assertLessEqual(result['effective_deadline'],110.)
+        self.assertLessEqual(result['effective_deadline'],117.)
         self.assertEqual(len(approved),1)
         pair=approved[0][1]['frames']
         self.assertGreater(pair[1]['captured_monotonic']-pair[0]['captured_monotonic'],.5)
@@ -104,26 +106,26 @@ class DeadlineIOBoundaryTests(unittest.TestCase):
     def test_approved_pair_updates_only_the_checked_session_bound(self):
         method=getattr(self.io,'set_verified_session_deadline',None)
         self.assertTrue(callable(method),'Verified deadline IO boundary missing')
-        method(107.,self.evidence)
+        method(114.,self.evidence)
         self.io.check(119.)
-        self.assertEqual(self.io.deadline,107.)
+        self.assertEqual(self.io.deadline,114.)
         self.assertEqual(self.io.reference['session_deadline_monotonic'],100.)
     def test_unapproved_deadline_and_unbound_evidence_are_rejected(self):
         method=getattr(self.io,'set_verified_session_deadline',None)
         self.assertTrue(callable(method),'Verified deadline IO boundary missing')
-        for new_end,mutate in ((119.,lambda e:None),(107.,lambda e:e['frames'][0].update(hex_source=['native_checkpoint']*3))):
+        for new_end,mutate in ((119.,lambda e:None),(114.,lambda e:e['frames'][0].update(hex_source=['native_checkpoint']*3))):
             with self.subTest(new_end=new_end):
                 evidence=copy.deepcopy(self.evidence);mutate(evidence)
                 with self.assertRaises(ValueError):method(new_end,evidence)
         self.io.check(119.);self.assertEqual(self.io.deadline,100.)
     def test_checkpoint_uses_only_accepted_extension_and_requested_phase_deadline(self):
-        self.io.set_verified_session_deadline(107.,self.evidence)
+        self.io.set_verified_session_deadline(114.,self.evidence)
         def read(backend,baseline,label,**kwargs):
-            self.assertEqual(baseline['session_deadline_monotonic'],106.)
+            self.assertEqual(baseline['session_deadline_monotonic'],113.)
             self.assertEqual(self.io.reference['session_deadline_monotonic'],100.)
             raise RuntimeError('checkpoint stub reached')
         with patch('native_live.project_probe_io.record_action_checkpoint',side_effect=read):
-            with self.assertRaisesRegex(RuntimeError,'checkpoint stub reached'):self.io.checkpoint('extended',106.)
+            with self.assertRaisesRegex(RuntimeError,'checkpoint stub reached'):self.io.checkpoint('extended',113.)
 
 
 if __name__=='__main__':unittest.main()

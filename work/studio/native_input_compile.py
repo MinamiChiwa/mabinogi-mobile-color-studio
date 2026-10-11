@@ -59,7 +59,8 @@ def compile_native_route(target, reference, geometry, settings, markers, *,
                          marker_tolerance=.1, max_steps=32, max_proposals=512,
                          verify_seconds=3., safety_seconds=.5,
                          planning_seconds=2., clock=time.monotonic,
-                         check=lambda: None,max_wheel_steps=1,input_margin=0.):
+                         check=lambda: None,max_wheel_steps=1,input_margin=0.,
+                         max_rotation_degrees=12.):
     """Greedily reduce marker error with modeled accepted operations.
 
     A route is conditional, and modelled_reached means geometric tolerance,
@@ -80,6 +81,9 @@ def compile_native_route(target, reference, geometry, settings, markers, *,
         raise ValueError('Compiler currently requires explicit all-recorded-points assumption')
     if type(max_wheel_steps) is not int or not 1<=max_wheel_steps<=32 or not math.isfinite(input_margin) or input_margin<0:
         raise ValueError('Invalid standard gesture bounds')
+    if (type(max_rotation_degrees) not in (int,float)
+            or not math.isfinite(max_rotation_degrees) or not 0<max_rotation_degrees<=90.):
+        raise ValueError('Rotation proposal limit must be finite, positive and at most 90 degrees')
     if not math.isfinite(wheel_delta_per_step) or wheel_delta_per_step == 0:
         raise ValueError('Explicit nonzero wheel calibration required')
     points = np.asarray(markers, float)
@@ -121,13 +125,22 @@ def compile_native_route(target, reference, geometry, settings, markers, *,
         fields = pose_fields(residual, board)
         pivots = decompose_gestures(fields, board, points)
         proposals = []
-        angle = float(np.clip(fields['angle'], -12, 12))
+        angle = float(np.clip(fields['angle'], -max_rotation_degrees, max_rotation_degrees))
         if abs(angle) > 1e-7:
-            for multiplier in (1., .5, 1.5):
-                anchor=tuple(np.clip(pivots['rotation_anchor'],[gesture_board[0]+10,gesture_board[1]+10],
-                                    [gesture_board[2]-10,gesture_board[3]-10]))
-                proposals.append(grouped_rotation_gesture(gesture_board,
-                    float(np.clip(angle*multiplier, -12, 12)), anchor))
+            anchor=tuple(np.clip(pivots['rotation_anchor'],[gesture_board[0]+10,gesture_board[1]+10],
+                                [gesture_board[2]-10,gesture_board[3]-10]))
+            # Global targets can need a large rotation before any nearby color
+            # improves. Replay the same standard smooth descriptor up to 90
+            # degrees while retaining the established small-angle alternatives.
+            # Generic compilation keeps its historical 12-degree default.
+            rotation_angles=[]
+            for cap in dict.fromkeys((max_rotation_degrees,min(12.,max_rotation_degrees))):
+                bounded=float(np.clip(fields['angle'],-cap,cap))
+                for multiplier in (1.,.5,1.5):
+                    proposed=float(np.clip(bounded*multiplier,-cap,cap))
+                    if proposed not in rotation_angles:rotation_angles.append(proposed)
+            for proposed in rotation_angles:
+                proposals.append(grouped_rotation_gesture(gesture_board,proposed,anchor))
         if abs(math.log(fields['scale'])) > 1e-9:
             wanted_game_direction = 1 if fields['scale'] > 1 else -1
             adapter_direction = wanted_game_direction*(1 if wheel_delta_per_step > 0 else -1)

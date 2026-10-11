@@ -7,16 +7,19 @@ import math
 import time
 from pathlib import Path
 from .read_dye_motion import UnsupportedSlotDelegate
+from .time_policy import (GAME_DURATION_SECONDS, SESSION_MAX_SECONDS,
+                          UNKNOWN_AGE_INITIAL_SECONDS, EARLY_TIMER_GRACE_SECONDS)
 
 
 def collect_validation_session(backend, *, wait_seconds=300.,session_seconds=90.,poll_seconds=.2,
         dwell_seconds=.5,max_errors=30,max_samples=100,clock=time.monotonic,pause=time.sleep,
         check=lambda:None,event=lambda row:None):
-    for value,upper in ((wait_seconds,300),(session_seconds,120),(poll_seconds,2),(dwell_seconds,5)):
+    for value,upper in ((wait_seconds,300),(session_seconds,GAME_DURATION_SECONDS),(poll_seconds,2),(dwell_seconds,5)):
         if isinstance(value,bool) or not math.isfinite(value) or not 0<value<=upper:
             raise ValueError('Invalid passive validation time bound')
     if type(max_errors) is not int or not 1<=max_errors<=100:raise ValueError('Invalid error bound')
     if type(max_samples) is not int or not 3<=max_samples<=500:raise ValueError('Invalid sample bound')
+    session_seconds=min(session_seconds,SESSION_MAX_SECONDS)
     result=dict(stop_reason='not_started',samples=[],errors=[],inputs_sent=0,ready_for_input=False,
         existing_active_palette=False,
         actual_corner_measurement_verified=False,screenshot_hex_verified=False,server_confirmation_verified=False,
@@ -84,7 +87,7 @@ def collect_validation_session(backend, *, wait_seconds=300.,session_seconds=90.
             if eligible!=[hex(candidate)]:raise ValueError('First eligible observation address changed')
             evidence.update(first_eligible_seen_monotonic=seen,eligible_addresses=copy.deepcopy(eligible),
                 scan_started_monotonic=diagnostic.get('scan_started_monotonic',start))
-        result.update(session_first_seen_monotonic=seen,timer_grace_until=seen+30.,
+        result.update(session_first_seen_monotonic=seen,timer_grace_until=seen+EARLY_TIMER_GRACE_SECONDS,
             session_origin_observed_monotonic=observed,session_origin_evidence=evidence,
             session_first_seen_source='first_eligible_observation' if from_discovery else 'active_validation_observation')
         return seen
@@ -111,7 +114,7 @@ def collect_validation_session(backend, *, wait_seconds=300.,session_seconds=90.
             guard();old=discover();guard()
             if backend.process_identity()!=identity:raise OSError('Process changed during initial discovery')
             if result.get('discovery_progress',{}).get('eligible_addresses'):
-                deadline=min(deadline,first_seen(clock())+min(session_seconds,90.))
+                deadline=min(deadline,first_seen(clock())+min(session_seconds,UNKNOWN_AGE_INITIAL_SECONDS))
                 result['discovery_deadline_monotonic']=deadline
             if discovery_complete():
                 eligible=result.get('discovery_progress',{}).get('eligible_addresses',[])
@@ -126,7 +129,7 @@ def collect_validation_session(backend, *, wait_seconds=300.,session_seconds=90.
             result['existing_active_palette']=True;address=old
             # A palette already open at arming has an unknown age. Additional
             # caller allowance cannot establish that a fresh 120 s round began.
-            deadline=bind_session_origin(address)+min(session_seconds,90.)
+            deadline=bind_session_origin(address)+min(session_seconds,UNKNOWN_AGE_INITIAL_SECONDS)
             result['phase']='session'
             result['instance_address']=address;result['session_deadline_monotonic']=deadline
             guard();emit('session_discovered',instance_address=address,
@@ -199,7 +202,7 @@ def collect_validation_session(backend, *, wait_seconds=300.,session_seconds=90.
                         result['timer_deadline_extension']=dict(
                             deadline_source='existing_active_unknown_age',
                             initial_deadline=initial,
-                            maximum_deadline=initial+min(session_seconds,110.)-min(session_seconds,90.),
+                            maximum_deadline=initial+session_seconds-min(session_seconds,UNKNOWN_AGE_INITIAL_SECONDS),
                             process_identity=copy.deepcopy(identity),
                             session_token=copy.deepcopy(observation['session_token']))
                     emit('baseline_collected',client_board_candidate=mapping.get('client_board_candidate'),

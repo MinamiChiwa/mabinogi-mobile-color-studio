@@ -12,6 +12,25 @@ class RetryRequested(Exception):
     """User retry, distinct from F9; IO may attach a released partial receipt."""
 
 
+MINIMUM_USEFUL_SEARCH_SECONDS=.25
+
+
+def phase_allowances(costs,*,closing=False):
+    """Budget measured IO phases, never another game-end idle reserve.
+
+    Recent maxima plus a small scheduling allowance cover actual reads and
+    preparation. Before a successful warm sample, retain the normal probe
+    defaults rather than pretending a screenshot costs a fraction of a second.
+    """
+    def measured(name,default,jitter):
+        rows=costs.get(name,[])[-3:]
+        return max(rows)+jitter if rows else default
+    native=measured('native',1.5,.15)
+    visual=measured('closing_visual' if closing else 'visual',4.,.15)
+    preparation=measured('input',.6,.1)
+    return native,visual,preparation
+
+
 def retry_budget(route,costs,*,include_reference):
     """Admit a real reset and useful search, then audit any target route itself.
 
@@ -19,13 +38,11 @@ def retry_budget(route,costs,*,include_reference):
     preparation and actual native readback; the reset endpoint owns one complete
     visual read. A search result never inherits authorization to execute input.
     """
-    native=max(1.5,1.5*max(costs['native'][-3:],default=0.)+.3)
-    visual=max(4.,1.5*max(costs['closing_visual'][-3:],default=0.)+.5)
-    preparation=max(.6,1.5*max(costs['input'][-3:],default=0.)+.25)
+    native,visual,preparation=phase_allowances(costs,closing=True)
     duration=sum(g['input_seconds'] for g in route)
     reset=duration+len(route)*(preparation+native)
     reference=native if include_reference else 0.
-    minimum_search=5.;closing=8.25
+    minimum_search=MINIMUM_USEFUL_SEARCH_SECONDS;closing=0.
     return dict(native_allowance_seconds=native,visual_allowance_seconds=visual,
         input_preparation_allowance_seconds=preparation,reset_input_seconds=duration,
         reset_allowance_seconds=reset,reference_allowance_seconds=reference,

@@ -227,7 +227,7 @@ class SessionStatusGoalTests(unittest.TestCase):
         result=run_goal_loop(io,io.session,io.settings,io.rules,engineering_deadline=180.,
             clock=io.clock,pause=io.pause,candidate_choice=choose,event=event,planner=planner,
             timer_grace_baseline=baseline,timer_deadline_extension=extension)
-        self.assertEqual(approved,[190.]);self.assertEqual(result['effective_deadline'],187.)
+        self.assertEqual(approved,[197.]);self.assertEqual(result['effective_deadline'],194.)
         self.assertNotEqual(result['stop_reason'],'observation_failed',result.get('error'))
         self.assertTrue(result['accepted']);self.assertEqual(io.actions,[])
     def timer_baseline(self,io):
@@ -293,7 +293,7 @@ class SessionStatusGoalTests(unittest.TestCase):
         rules=[dict(enabled=True,exact=True,colors=[color],tolerance=0.) for color in io.current['checkpoint']['client_hex']]
         result=run_goal_loop(io,io.session,io.settings,rules,engineering_deadline=io.end,
             clock=io.clock,pause=io.pause,timer_grace_baseline=baseline)
-        self.assertEqual(result['effective_deadline'],81138.171)
+        self.assertEqual(result['effective_deadline'],81145.171)
         self.assertTrue(result['accepted']);self.assertEqual(len(result['deadline_shortenings']),1)
     def test_palette_closes_after_two_verified_frames_keeps_history_only(self):
         io=RecordedGoalIO()

@@ -52,7 +52,10 @@ class ProjectClosedLoopIO(ProjectProbeIO):
         now=time.monotonic()
         if self._planning_probe_at is None or now-self._planning_probe_at>=.25 or now<self._planning_probe_at:
             self.check(deadline)
-            self._planning_probe_at=now
+            # The throttle starts when the expensive read finishes. Starting
+            # it before a >250ms probe makes every next planning callback pay
+            # for another complete read, starving the actual route search.
+            self._planning_probe_at=time.monotonic()
     def input_backend(self,deadline):
         self.check(deadline)
         record=read_input_backend(self.backend,deadline,check=self._input_guard)
@@ -71,7 +74,10 @@ class ProjectClosedLoopIO(ProjectProbeIO):
             if retryable:raise VisualNotReady(str(exc)) from exc
             raise
     def perform_candidate(self,record,label,deadline):
-        return self._perform_candidate(record,label,deadline,feedback_reserve_seconds=8.)
+        # The controller admits actual preparation/readback and complete routes
+        # against the already protected session deadline. An extra idle footer
+        # here would deduct the game's end allowance a second time.
+        return self._perform_candidate(record,label,deadline,feedback_reserve_seconds=0.)
     def perform_protected_candidate(self,record,label,deadline):
         # The controller has already reserved complete return/verification
         # phases outside this deadline; do not reserve the same eight twice.

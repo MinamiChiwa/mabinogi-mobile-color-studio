@@ -35,7 +35,7 @@ class NativeLiveServiceTests(unittest.TestCase):
             result=m.run_native_search(owner,[dict(enabled=True,exact=True,colors=['#000000'],tolerance=0)]*3,target=target)
         self.assertEqual(result['stop_reason'],'already_active_palette');adapter.assert_not_called()
         self.assertTrue(any(call.args[0]=='native_result' for call in owner.event.call_args_list))
-        self.assertEqual(collect.call_args.kwargs['session_seconds'],110.)
+        self.assertEqual(collect.call_args.kwargs['session_seconds'],117.)
 
     def test_active_palette_at_start_is_bound_instead_of_rejected(self):
         from native_live.collect_dye_validation import collect_validation_session

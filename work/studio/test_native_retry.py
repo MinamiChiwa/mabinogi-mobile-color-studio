@@ -5,6 +5,7 @@ import importlib.util
 import inspect
 import json
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
@@ -38,6 +39,10 @@ class RetryIO:
     def check(self,deadline):
         if self.cancel:raise InterruptedError('F9')
         if self.t>=deadline:raise TimeoutError('deadline')
+        identity=json.loads(self.binding)
+        self.last_checked_state=dict(active=True,pose=copy.deepcopy(self.pose),session_token=identity[0])
+        self.last_checked_process_identity=identity[1]
+        self.last_checked_monotonic=self.t
     planning_check=check
     def input_backend(self,deadline):
         self.check(deadline)
@@ -98,8 +103,141 @@ class NativeRetryTests(unittest.TestCase):
                 self.assertEqual(result['best_actual_colors'],io.colors())
                 self.assertFalse(result.get('restoration_rounds'))
                 self.assertTrue(any(row['event']=='native_retry_reset' and row['status']=='searching' for row in events))
+    def test_minimum_scale_twenty_second_retry_has_no_second_idle_tail(self):
+        from native_live.retry import retry_budget
+        budget=retry_budget([],dict(native=[1.093],closing_visual=[4.031],input=[.319]),include_reference=True)
+        self.assertEqual(budget['closing_guard_seconds'],0.)
+        self.assertLess(budget['minimum_search_seconds'],1.)
+        self.assertLess(budget['required_seconds'],7.)
+    def test_fast_close_checks_actual_pose_after_a_slow_check(self):
+        io=RetryIO();frames=io.frames;check=io.check;armed=[False]
+        def warm_frames(label,deadline):
+            io.t+=.8;return frames(label,deadline)
+        def moved_check(deadline):
+            if armed[0]:
+                armed[0]=False;io.t+=.4;io.pose['position'][0]=.02
+            return check(deadline)
+        def event(row):
+            if row['event']=='native_retry_available' and row.get('waiting_for_retry'):armed[0]=True
+        io.frames=warm_frames;io.check=moved_check
+        result=self.run_loop(io,lambda:False,event,deadline=2.7)
+        self.assertFalse(result['accepted'])
+        self.assertFalse(result['verified']);self.assertIsNone(result['current'])
+        self.assertIn('last_verified_retry',result)
+    def test_fast_close_keeps_standard_fresh_frames_after_slow_unchanged_pose_check(self):
+        io=RetryIO();frames=io.frames;check=io.check;armed=[False]
+        def warm_frames(label,deadline):
+            io.t+=.8;return frames(label,deadline)
+        def slow_check(deadline):
+            if armed[0]:armed[0]=False;io.t+=.4
+            return check(deadline)
+        def event(row):
+            if row['event']=='native_retry_available' and row.get('waiting_for_retry'):armed[0]=True
+        io.frames=warm_frames;io.check=slow_check
+        result=self.run_loop(io,lambda:False,event,deadline=2.7)
+        self.assertTrue(result['accepted']);self.assertTrue(result['verified'])
+        self.assertGreater(io.t-result['current']['frames'][-1]['captured_monotonic'],.25)
+        self.assertTrue(result['closing_pose_check']['unchanged'])
+    def test_fast_close_uses_capture_time_before_decode_and_complete_exit_check(self):
+        io=RetryIO();check=io.check;frames=io.frames;decoded=[False]
+        def capture_then_decode(label,deadline):
+            rows=frames(label,deadline)
+            io.t+=.4;decoded[0]=True
+            return rows
+        def full_exit_check(deadline):
+            if decoded[0]:decoded[0]=False;io.t+=.4
+            return check(deadline)
+        io.frames=capture_then_decode;io.check=full_exit_check
+        result=self.run_loop(io,lambda:False,lambda row:None,deadline=2.7)
+        self.assertTrue(result['accepted']);self.assertTrue(result['verified'])
+        self.assertNotIn('retry_wait_closed',io.labels,'The verified endpoint already owns the closing read')
+        self.assertGreater(io.t-result['current']['frames'][-1]['captured_monotonic'],.25)
+        self.assertTrue(result['closing_pose_check']['unchanged'])
+    def test_fast_close_cannot_certify_frames_older_than_standard_freshness(self):
+        io=RetryIO();frames=io.frames
+        def capture_then_slow_decode(label,deadline):
+            rows=frames(label,deadline);io.t+=6.;return rows
+        io.frames=capture_then_slow_decode
+        result=self.run_loop(io,lambda:False,lambda row:None,deadline=10.)
+        self.assertFalse(result['accepted']);self.assertFalse(result['verified'])
+        self.assertIsNone(result['current']);self.assertIn('last_verified_retry',result)
+    def test_late_forward_route_without_complete_return_never_risks_verified_best(self):
+        from native_input_compile import native_drag_gesture
+        from native_live.same_session_dye_planner import _json
+        import hashlib
+        io=RetryIO();io.rules=[dict(enabled=True,exact=True,colors=['#FFFFFF'],tolerance=0.) for _ in range(3)]
+        checkpoint=io.checkpoint;frames=io.frames;perform=io.perform_candidate
+        route=[native_drag_gesture(io.geometry,io.settings,dx,0).record() for dx in (-5,-1)]
+        def measured_checkpoint(label,deadline):
+            io.t+=1.073;return checkpoint(label,deadline)
+        def measured_frames(label,deadline):
+            io.t+=2.898;return frames(label,deadline)
+        def bad_landing(record,label,deadline):
+            before=copy.deepcopy(io.pose);receipt=perform(record,label,deadline)
+            if len(io.actions)==2:
+                drift=native_drag_gesture(io.geometry,io.settings,11,0).record()
+                io.pose=replay_native_route(before,[drift],io.geometry,io.settings,
+                    wheel_delta_per_step=1.,sample_policy='all_recorded_points')['final_pose']
+            return receipt
+        io.checkpoint=measured_checkpoint;io.frames=measured_frames;io.perform_candidate=bad_landing
+        def planner(context,cp,frames,rules,grid,**kw):
+            final=replay_native_route(cp['pose'],route,io.geometry,io.settings,
+                wheel_delta_per_step=1.,sample_policy='all_recorded_points')['final_pose']
+            row=audit_candidate_endpoint(context,cp,rules,dict(input_route=route,final_pose=final,
+                prediction=score_native_pose(io.session,final,rules),needed=_needed(route,3.,.5)))
+            plan=dict(schema=4,context_fingerprint=context['fingerprint'],reference_pose=cp['pose'],
+                reference_frame_monotonic=frames[-1]['captured_monotonic'],planned_at=io.clock(),
+                effective_deadline=kw['engineering_deadline'],candidate=None,compromise_candidate=row,
+                approach_candidate=None,reserve_seconds=3.,verification_margin_seconds=0.,normalized_rules=rules,
+                rules_fingerprint=hashlib.sha256(_json(rules).encode()).hexdigest(),
+                result_classification='not_found_in_budget',nearest_diagnostic=None,reachability_conclusion='not_established')
+            plan['plan_fingerprint']=_plan_fingerprint(plan);return plan
+        with patch('native_live.controller.find_refinement',return_value=None):
+            result=self.run_loop(io,lambda:False,lambda row:None,planner=planner,deadline=17.)
+        self.assertEqual(io.actions,[],'Forward inputs fit, but the audited return and readback do not')
+        self.assertTrue(result['verified']);self.assertTrue(result['best_current'])
+        self.assertLessEqual(result['maximum'],result['initial_maximum'])
+        self.assertTrue(result.get('late_route_decisions'))
+    def test_twenty_second_replanned_four_action_route_keeps_best_without_return_budget(self):
+        io=RetryIO(scale=.5);plans=[];pending=[False];sent=[False]
+        route=[drag_gesture(io.geometry.board,1,0).record() for _ in range(4)]
+        endpoint=replay_native_route(io.pose,route,io.geometry,io.settings,
+            wheel_delta_per_step=1.,sample_policy='all_recorded_points')['final_pose']
+        colors=score_native_pose(io.session,endpoint,io.neutral)['colors']
+        io.rules=[dict(enabled=True,exact=True,colors=[c],tolerance=0.) for c in colors]
+        checkpoint=io.checkpoint;frames=io.frames
+        def measured_checkpoint(label,deadline):
+            io.t+=1.073;return checkpoint(label,deadline)
+        def measured_frames(label,deadline):
+            io.t+=2.898;return frames(label,deadline)
+        io.checkpoint=measured_checkpoint;io.frames=measured_frames
+        def event(row):
+            if row['event']=='native_retry_available' and row.get('reason')=='not_found_in_budget' and not sent[0]:
+                pending[0]=True;sent[0]=True;io.t=69.
+        def requested():
+            value=pending[0];pending[0]=False;return value
+        def planner(context,cp,frames,rules,grid,**kw):
+            plans.append(kw)
+            if len(plans)==1:return dict(candidate=None,compromise_candidate=None,
+                effective_deadline=kw['engineering_deadline'],result_classification='not_found_in_budget')
+            final=replay_native_route(cp['pose'],route,io.geometry,io.settings,
+                wheel_delta_per_step=1.,sample_policy='all_recorded_points')['final_pose']
+            row=audit_candidate_endpoint(context,cp,rules,dict(input_route=route,final_pose=final,
+                prediction=score_native_pose(io.session,final,rules),needed=_needed(route,3.,.5)))
+            plan=dict(schema=1,context_fingerprint=context['fingerprint'],reference_pose=cp['pose'],
+                reference_frame_monotonic=frames[-1]['captured_monotonic'],planned_at=io.clock(),
+                effective_deadline=kw['engineering_deadline'],candidate=row,reserve_seconds=3.,verification_margin_seconds=4.)
+            plan['plan_fingerprint']=_plan_fingerprint(plan)
+            return plan
+        result=self.run_loop(io,requested,event,planner=planner)
+        self.assertEqual(result['retry_epochs'],1)
+        self.assertEqual(len(io.actions),0,result.get('error'))
+        self.assertFalse(result['accepted'],result.get('error'))
+        self.assertTrue(result['screenshot_verified'])
+        self.assertTrue(result['best_current'])
+        self.assertEqual(result['refinement_stop'],'late_route_not_protected')
     def test_retry_without_minimum_search_budget_preserves_current_without_input(self):
-        io=RetryIO();requested,event,events=self.once_ready(io,retry_at=66.)
+        io=RetryIO();requested,event,events=self.once_ready(io,retry_at=86.)
         result=self.run_loop(io,requested,event)
         self.assertEqual(io.actions,[])
         self.assertTrue(result['accepted'])
@@ -134,15 +272,15 @@ class NativeRetryTests(unittest.TestCase):
         self.assertTrue(after['enabled']);self.assertEqual(after['reference_allowance_seconds'],0.)
         self.assertEqual(after['reset_actions'],4)
         self.assertAlmostEqual(after['remaining_seconds'],47.501,places=3)
-        self.assertAlmostEqual(after['visual_allowance_seconds'],6.5465,places=4)
-        self.assertEqual(after['minimum_search_seconds'],5.)
-        self.assertEqual(after['closing_guard_seconds'],8.25)
+        self.assertAlmostEqual(after['visual_allowance_seconds'],4.181,places=4)
+        self.assertEqual(after['minimum_search_seconds'],.25)
+        self.assertEqual(after['closing_guard_seconds'],0.)
     def test_retry_button_and_admission_use_complete_reset_route_cost(self):
         io=RetryIO();pending=[False];events=[];requested_once=[False]
         def event(row):
             events.append(row)
             if row['event']=='observed' and not requested_once[0]:
-                io.t=65.;pending[0]=True;requested_once[0]=True
+                io.t=86.;pending[0]=True;requested_once[0]=True
         def requested():
             value=pending[0];pending[0]=False;return value
         result=self.run_loop(io,requested,event)
@@ -178,12 +316,12 @@ class NativeRetryTests(unittest.TestCase):
         after=next(row for row in result['retry_budget_checks'] if row['phase']=='after_reference')
         self.assertEqual(after['reset_actions'],0)
         self.assertEqual(after['reset_allowance_seconds'],0.)
-        self.assertEqual(after['required_seconds'],17.25)
+        self.assertAlmostEqual(after['required_seconds'],.46)
     def test_fresh_reference_can_reject_slow_reset_without_sending_wheels(self):
         io=RetryIO();requested,event,events=self.once_ready(io,retry_at=34.)
         checkpoint=io.checkpoint
         def slow_reference(label,deadline):
-            if label=='retry_1_reference':io.t+=12.
+            if label=='retry_1_reference':io.t+=45.
             return checkpoint(label,deadline)
         io.checkpoint=slow_reference
         result=self.run_loop(io,requested,event)
@@ -198,7 +336,7 @@ class NativeRetryTests(unittest.TestCase):
         io=RetryIO();requested,original_event,events=self.once_ready(io);plans=[]
         def event(row):
             original_event(row)
-            if row['event']=='native_retry_reset' and row.get('status')=='searching':io.t=77.75
+            if row['event']=='native_retry_reset' and row.get('status')=='searching':io.t=86.5
         def planner(*args,**kw):
             plans.append(kw)
             return dict(candidate=None,compromise_candidate=None,effective_deadline=kw['engineering_deadline'],
@@ -255,14 +393,17 @@ class NativeRetryTests(unittest.TestCase):
                         effective_deadline=kw['engineering_deadline'],candidate=row,
                         reserve_seconds=10.,verification_margin_seconds=8.)
                     plan['plan_fingerprint']=_plan_fingerprint(plan)
-                    if limit=='time':io.t=kw['engineering_deadline']-10.
+                    if limit=='time':io.t=kw['engineering_deadline']-3.
                     return plan
                 result=self.run_loop(io,requested,event,planner=planner,max_actions=4 if limit=='actions' else 64)
                 self.assertEqual(result['retry_epochs'],1)
                 self.assertEqual(len(plans),2)
                 self.assertEqual(len(io.actions),len(reset))
                 self.assertTrue(all(row['kind']=='wheel' for row in io.actions))
-                self.assertEqual(result['stop_reason'],'insufficient_time' if limit=='time' else 'insufficient_route_actions',result.get('error'))
+                if limit=='time':
+                    self.assertEqual(result['refinement_stop'],'late_route_not_protected')
+                    self.assertEqual(result['stop_reason'],'compromise_observed')
+                else:self.assertEqual(result['stop_reason'],'insufficient_route_actions',result.get('error'))
     def test_f9_during_reset_stops_before_the_next_wheel_group(self):
         io=RetryIO();requested,event,events=self.once_ready(io);perform=io.perform_candidate
         def cancel_after_first_wheel(*args):
@@ -292,7 +433,7 @@ class NativeRetryTests(unittest.TestCase):
         self.assertEqual(io.actions,[])
         self.assertTrue(result['accepted']);self.assertEqual(result['stop_reason'],'target_observed')
         self.assertIn('retry_wait_closed',io.labels)
-        self.assertLess(io.t,90.-8.)
+        self.assertLess(io.t,90.)
         self.assertTrue(any(row['event']=='native_retry_available' and
             row.get('reason')=='insufficient_retry_time' and row.get('enabled') is False for row in events))
     def test_wait_final_read_reports_a_user_changed_board_from_actual_pose(self):
@@ -310,7 +451,7 @@ class NativeRetryTests(unittest.TestCase):
         io=RetryIO();original=io.check
         def check(deadline):
             original(deadline)
-            if io.t>75. and io.t<82.:
+            if io.t>89. and io.t<89.9:
                 io.pose['position'][0]=.02;io.t+=10.
         io.check=check
         result=self.run_loop(io,lambda:False,lambda row:None)
@@ -458,7 +599,7 @@ class NativeRetryTests(unittest.TestCase):
         result=self.run_loop(io,lambda:False,lambda row:None)
         self.assertTrue(result['accepted'])
         self.assertIn('retry_wait_closed',io.labels)
-        self.assertLess(io.t,90.-8.)
+        self.assertLess(io.t,90.)
     def test_retry_keeps_mixed_priorities_alternatives_and_disabled_region(self):
         io=RetryIO();io.rules[0].update(exact=False,tolerance=8.,priority=1,
             colors=[io.rules[0]['colors'][0],'#FEFEFE'])
@@ -481,11 +622,11 @@ class RetryMinimumRouteTests(unittest.TestCase):
         costs=dict(native=[1.093],closing_visual=[4.031],input=[.319])
         before=retry_budget(route,costs,include_reference=True)
         after=retry_budget(route,costs,include_reference=False)
-        self.assertAlmostEqual(before['required_seconds'],34.626,places=4)
-        self.assertAlmostEqual(after['required_seconds'],32.6865,places=4)
+        self.assertAlmostEqual(before['required_seconds'],14.540,places=4)
+        self.assertAlmostEqual(after['required_seconds'],13.297,places=4)
         self.assertAlmostEqual(before['reset_input_seconds'],2.218,places=4)
-        self.assertAlmostEqual(before['native_allowance_seconds'],1.9395,places=4)
-        self.assertAlmostEqual(before['input_preparation_allowance_seconds'],.7285,places=4)
+        self.assertAlmostEqual(before['native_allowance_seconds'],1.243,places=4)
+        self.assertAlmostEqual(before['input_preparation_allowance_seconds'],.419,places=4)
         self.assertEqual(before['required_actions'],5)
     def test_minimum_route_uses_complete_native_float_replay_and_bounded_groups(self):
         self.assertIsNotNone(importlib.util.find_spec('native_live.retry'))

@@ -73,13 +73,13 @@ class Rc12UserRefinementTests(unittest.TestCase):
         self.assertTrue(self.io.actions,result.get('refinement_stop'))
         self.assertLess(result['maximum'],result['initial_maximum'])
         self.assertTrue(result['best_current']);self.assertTrue(result['screenshot_verified'])
-        self.assertLess(self.io.t,self.io.case['engineering_deadline']-8.)
+        self.assertLess(self.io.t,self.io.case['engineering_deadline'])
     def test_triple_generic_expanded_search_finds_exact_black(self):
         self.prepare('triple');result=self.run_case('triple-new-cap')
         self.assertTrue(result['accepted'],result.get('refinement_stop'))
         self.assertEqual(result['actual_colors'],['#000000']*3)
         self.assertTrue(result['screenshot_verified']);self.assertTrue(result['best_current'])
-        self.assertLess(self.io.t,self.io.case['engineering_deadline']-8.)
+        self.assertLess(self.io.t,self.io.case['engineering_deadline'])
         stats=result['refinement_searches'][0]
         self.assertGreater(stats['checked_routes'],0)
         self.assertLessEqual(stats['checked_routes'],stats['finite_candidate_upper_bound'])
@@ -108,7 +108,7 @@ class Rc12UserRefinementTests(unittest.TestCase):
         self.assertLessEqual(result['maximum'],result['initial_maximum'])
         self.assertTrue(result['screenshot_verified'])
         self.assertEqual(result['refinement_attempts'][0]['status'],'restored')
-        self.assertLess(self.io.t,self.io.case['engineering_deadline']-8.)
+        self.assertLess(self.io.t,self.io.case['engineering_deadline'])
     def test_cold_initial_visual_cost_does_not_block_warm_refinement(self):
         self.prepare('double');original=self.io.frames
         self.io.extra_initial_visual_seconds=3.
@@ -119,7 +119,7 @@ class Rc12UserRefinementTests(unittest.TestCase):
         self.assertTrue(self.io.actions,result.get('refinement_stop'))
         self.assertLess(result['maximum'],result['initial_maximum'])
         self.assertTrue(result['verified']);self.assertTrue(result['best_current'])
-        self.assertLess(self.io.t,self.io.case['engineering_deadline']-8.)
+        self.assertLess(self.io.t,self.io.case['engineering_deadline'])
 
 
 if __name__=='__main__':unittest.main()

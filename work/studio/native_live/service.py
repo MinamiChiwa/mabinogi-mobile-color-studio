@@ -15,6 +15,7 @@ from .probe_timer import prepare_timer_assets
 from .dye_hex_glyphs import prepare_hex_assets
 from .same_session_dye_planner import normalize_target_rules
 from .controller import run_goal_loop
+from .time_policy import SESSION_MAX_SECONDS
 from dye_regions import session_region_count,bind_region_rules
 from process_access import ProcessReadDenied
 
@@ -141,7 +142,7 @@ def run_native_search(owner,rules,*,mode='search',target=None,activate=False,**u
         owner.event('native_progress',stage='native_validate',message='正在检查当前游戏与取色数据。')
         backend,prepared=_prepare(selected.pid,folder,check,selected.hwnd)
         result['preflight']=prepared
-        baseline=collect_validation_session(backend,wait_seconds=300.,session_seconds=110.,check=check,event=event)
+        baseline=collect_validation_session(backend,wait_seconds=300.,session_seconds=SESSION_MAX_SECONDS,check=check,event=event)
         (folder/'native-baseline.json').write_text(json.dumps(baseline,indent=2),encoding='utf-8')
         if baseline['stop_reason']!='passive_baseline_collected':result['stop_reason']=baseline['stop_reason']
         else:

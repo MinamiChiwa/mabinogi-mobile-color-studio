@@ -115,10 +115,11 @@ class NativeProtectedIOTests(unittest.TestCase):
         self.assertEqual(self.io.input_attempts, 0)
         self.assertFalse(self.io.sent_any)
 
-    def test_ordinary_input_keeps_its_eight_second_feedback_reserve(self):
-        with self.assertRaises(TimeoutError):
-            self.io.perform_candidate(self.record, 'ordinary', 13.)
-        self.assert_no_inputs()
+    def test_ordinary_input_uses_controller_owned_feedback_budget_without_extra_tail(self):
+        receipt=self.io.perform_candidate(self.record, 'ordinary', 13.)
+        self.assertTrue(receipt['completed'])
+        self.assertEqual(len(self.game.inputs),1)
+        self.assertLess(self.clock.now,13.)
 
     def test_protected_input_uses_the_reserved_short_phase(self):
         receipt = self.protected()
@@ -129,6 +130,27 @@ class NativeProtectedIOTests(unittest.TestCase):
         self.assertFalse(self.io._performing_input)
         saved = json.loads((self.io.folder / 'protected.input.json').read_text())
         self.assertTrue(saved['completed'])
+    def test_planning_read_interval_starts_after_a_slow_full_read_finishes(self):
+        reads=[]
+        def slow_check(deadline):
+            reads.append(self.clock.now);self.clock.now+=.5
+        self.io.check=slow_check;self.io._planning_probe_at=None
+        self.io.planning_check(100.)
+        self.io.planning_check(100.)
+        self.assertEqual(len(reads),1,'A slow read consumed its own throttle interval')
+        self.clock.now+=.249;self.io.planning_check(100.)
+        self.assertEqual(len(reads),1)
+        self.clock.now+=.002;self.io.planning_check(100.)
+        self.assertEqual(len(reads),2)
+    def test_real_probe_top_level_pose_is_recorded_without_reusing_full_checkpoint(self):
+        pose=copy.deepcopy(self.io.last_observation['motion']['pose'])
+        raw=dict(active=True,session_token=['palette'],region_count=3,pose=pose)
+        self.backend.probe=lambda *a:copy.deepcopy(raw)
+        before=copy.deepcopy(self.io.last_observation)
+        self.io.check(100.)
+        self.assertEqual(self.io.last_checked_state,raw)
+        self.assertEqual(self.io.last_checked_process_identity,[42,11,1000,'build'])
+        self.assertEqual(self.io.last_observation,before)
 
     def test_expired_protected_phase_never_sends_input(self):
         with self.assertRaises(TimeoutError):

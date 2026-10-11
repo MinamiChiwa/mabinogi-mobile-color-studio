@@ -2,6 +2,8 @@
 import copy
 import json
 import math
+from .time_policy import (GAME_TAIL_SECONDS, SESSION_MAX_SECONDS,
+                          UNKNOWN_AGE_CORRECTION_MAX_SECONDS, EARLY_TIMER_GRACE_SECONDS)
 
 
 def verified_timer_grace_until(metadata, *, session_token, process_identity, now):
@@ -17,8 +19,8 @@ def verified_timer_grace_until(metadata, *, session_token, process_identity, now
     observed=metadata.get('session_origin_observed_monotonic')
     collected=metadata.get('baseline_collected_monotonic');end=metadata.get('session_deadline_monotonic')
     if (not all(finite(value) for value in (seen,until,observed,collected,end))
-            or until!=seen+30. or not seen<=observed<=collected<=now<end
-            or not 0<end-seen<=120.):reject()
+            or until!=seen+EARLY_TIMER_GRACE_SECONDS or not seen<=observed<=collected<=now<end
+            or not 0<end-seen<=SESSION_MAX_SECONDS):reject()
     if metadata.get('stop_reason')!='passive_baseline_collected':reject()
     capture=metadata.get('capture');baseline=metadata.get('baseline');evidence=metadata.get('session_origin_evidence')
     if (not isinstance(capture,dict) or capture.get('session_binding_verified') is not True
@@ -48,11 +50,13 @@ def verified_timer_grace_until(metadata, *, session_token, process_identity, now
 
 def _verified_timer_pair(checkpoint, frames, timer_grace_until, now):
     """Independent screenshot colors and a fresh, decreasing countdown pair."""
-    finite=lambda value:type(value) in (int,float) and math.isfinite(value)
+    finite=lambda value:type(value) in (int,float) and math.isfinite(value) and value>=0
     if not all(finite(value) for value in (timer_grace_until,now)):return None
     if (not isinstance(checkpoint,dict) or checkpoint.get('checkpoint_valid') is not True
             or checkpoint.get('cpu_matches') is not True):return None
-    try:binding=json.loads(checkpoint['binding'])
+    try:
+        binding=json.loads(checkpoint['binding'])
+        json.dumps(binding,allow_nan=False)
     except (ValueError,TypeError,KeyError):return None
     if (not isinstance(binding,list) or len(binding)<2
             or any(not isinstance(part,list) or not part for part in binding[:2])):return None
@@ -76,16 +80,16 @@ def _verified_timer_pair(checkpoint, frames, timer_grace_until, now):
 
 
 def verified_timer_shortening(checkpoint, frames, *, current_deadline, timer_grace_until, now):
-    """A qualified late pair may reduce the current cap with a 10 s reserve."""
+    """A qualified late pair may reduce the current cap with the game tail."""
     if (type(current_deadline) not in (int,float) or not math.isfinite(current_deadline)
             or type(now) not in (int,float) or not math.isfinite(now) or now>=current_deadline):return None
     implied=_verified_timer_pair(checkpoint,frames,timer_grace_until,now)
     if implied is None:return None
-    deadline=min(implied)-10.
+    deadline=min(implied)-GAME_TAIL_SECONDS
     if deadline>=current_deadline:return None
     return dict(deadline=deadline,evidence=dict(checkpoint=copy.deepcopy(checkpoint),frames=copy.deepcopy(list(frames)),
         timer_grace_until=timer_grace_until,previous_deadline=current_deadline,
-        implied_timer_ends=implied,reserve_seconds=10.))
+        implied_timer_ends=implied,reserve_seconds=GAME_TAIL_SECONDS))
 
 
 def verified_timer_extension(checkpoint, frames, *, initial_engineering_deadline,
@@ -95,13 +99,14 @@ def verified_timer_extension(checkpoint, frames, *, initial_engineering_deadline
     The optional metadata must come from the passive collector for this exact
     session. An intentionally shorter engineering deadline is never corrected.
     """
-    finite=lambda value:type(value) in (int,float) and math.isfinite(value)
+    finite=lambda value:type(value) in (int,float) and math.isfinite(value) and value>=0
     clocks=(initial_engineering_deadline,current_deadline,timer_grace_until,now)
     if not all(finite(value) for value in clocks):return None
     if not isinstance(extension,dict) or extension.get('deadline_source')!='existing_active_unknown_age':return None
     initial=extension.get('initial_deadline');maximum=extension.get('maximum_deadline')
     if (not finite(initial) or not finite(maximum) or initial_engineering_deadline!=initial
-            or not initial<=current_deadline<maximum or maximum-initial>20.
+            or not 0<=initial<=current_deadline<maximum
+            or maximum-initial>UNKNOWN_AGE_CORRECTION_MAX_SECONDS
             or now>=current_deadline):return None
     if (not isinstance(checkpoint,dict) or checkpoint.get('checkpoint_valid') is not True
             or checkpoint.get('cpu_matches') is not True):return None
@@ -116,10 +121,10 @@ def verified_timer_extension(checkpoint, frames, *, initial_engineering_deadline
             or binding[0]!=token or binding[1]!=identity):return None
     implied=_verified_timer_pair(checkpoint,frames,timer_grace_until,now)
     if implied is None:return None
-    deadline=min(maximum,min(implied)-10.)
+    deadline=min(maximum,min(implied)-GAME_TAIL_SECONDS)
     if deadline<=current_deadline:return None
     evidence=dict(checkpoint=copy.deepcopy(checkpoint),frames=copy.deepcopy(list(frames)),
         timer_grace_until=timer_grace_until,initial_engineering_deadline=initial_engineering_deadline,
         previous_deadline=current_deadline,maximum_deadline=maximum,
-        implied_timer_ends=implied,reserve_seconds=10.)
+        implied_timer_ends=implied,reserve_seconds=GAME_TAIL_SECONDS)
     return dict(deadline=deadline,evidence=evidence)

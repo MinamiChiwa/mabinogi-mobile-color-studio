@@ -40,7 +40,8 @@ class VerifiedTimerExtensionTests(unittest.TestCase):
             initial_engineering_deadline=180., current_deadline=180.,
             extension=self.extension(), timer_grace_until=130., now=154.)
         self.assertIsNotNone(result)
-        self.assertEqual(result['deadline'], 190.)
+        self.assertEqual(result['deadline'], 197.)
+        self.assertEqual(result['evidence']['reserve_seconds'], 3.)
 
     def test_new_session_source_cannot_extend(self):
         checkpoint, frames = self.frames(); extension = self.extension()
@@ -71,10 +72,31 @@ class VerifiedTimerExtensionTests(unittest.TestCase):
             initial_engineering_deadline=180., current_deadline=180.,
             extension=extension, timer_grace_until=130., now=154.)
         self.assertEqual(result['deadline'], 200.)
-        extension['maximum_deadline'] = 201.
+        extension['maximum_deadline'] = 208.
         self.assertIsNone(verified_timer_extension(checkpoint, frames,
             initial_engineering_deadline=180., current_deadline=180.,
             extension=extension, timer_grace_until=130., now=154.))
+
+    def test_unknown_age_correction_can_recover_the_full_twenty_seven_seconds(self):
+        checkpoint, frames = self.frames(); extension = self.extension()
+        extension['maximum_deadline'] = 207.
+        frames[0]['remaining_seconds'] = 70; frames[1]['remaining_seconds'] = 66
+        result = verified_timer_extension(checkpoint, frames,
+            initial_engineering_deadline=180., current_deadline=180.,
+            extension=extension, timer_grace_until=130., now=154.)
+        self.assertIsNotNone(result)
+        self.assertEqual(result['deadline'], 207.)
+
+    def test_nonfinite_boolean_negative_and_wrong_bound_metadata_cannot_extend(self):
+        checkpoint, frames = self.frames()
+        for key, value in [('maximum_deadline',float('nan')),('maximum_deadline',float('inf')),
+                           ('maximum_deadline',True),('initial_deadline',-1.),
+                           ('maximum_deadline',208.),('deadline_source','new_session')]:
+            extension=self.extension();extension[key]=value
+            with self.subTest(key=key,value=value):
+                self.assertIsNone(verified_timer_extension(checkpoint, frames,
+                    initial_engineering_deadline=180., current_deadline=180.,
+                    extension=extension, timer_grace_until=130., now=154.))
 
     def test_invalid_or_weak_evidence_does_not_correct_deadline(self):
         checkpoint, frames = self.frames()
@@ -114,17 +136,26 @@ class VerifiedTimerExtensionTests(unittest.TestCase):
             initial_engineering_deadline=180., current_deadline=180.,
             extension=self.extension(), timer_grace_until=130., now=154.))
 
+    def test_invalid_grace_clock_cannot_supply_deadline_extension(self):
+        checkpoint,frames=self.frames()
+        for grace in (-1.,float('nan'),float('inf'),True):
+            with self.subTest(grace=grace):
+                self.assertIsNone(verified_timer_extension(checkpoint,frames,
+                    initial_engineering_deadline=180.,current_deadline=180.,
+                    extension=self.extension(),timer_grace_until=grace,now=154.))
+
 
 class VerifiedTimerShorteningTests(unittest.TestCase):
     def approve(self,checkpoint,frames,*,current=210.,grace=130.,now=154.):
         method=getattr(session_deadline,'verified_timer_shortening',None)
         self.assertTrue(callable(method),'Verified timer shortening missing')
         return method(checkpoint,frames,current_deadline=current,timer_grace_until=grace,now=now)
-    def test_checked_decreasing_pair_keeps_ten_second_execution_reserve(self):
+    def test_checked_decreasing_pair_keeps_only_three_second_game_tail(self):
         checkpoint,frames=VerifiedTimerExtensionTests().frames()
         approved=self.approve(checkpoint,frames)
-        self.assertEqual(approved['deadline'],190.)
+        self.assertEqual(approved['deadline'],197.)
         self.assertEqual(approved['evidence']['implied_timer_ends'],[200.,200.])
+        self.assertEqual(approved['evidence']['reserve_seconds'],3.)
     def test_early_or_discontinuous_countdown_keeps_caller_deadline(self):
         checkpoint,frames=VerifiedTimerExtensionTests().frames()
         self.assertIsNone(self.approve(checkpoint,frames,grace=155.))
@@ -152,6 +183,13 @@ class VerifiedTimerShorteningTests(unittest.TestCase):
     def test_pair_never_extends_shorter_caller_deadline(self):
         checkpoint,frames=VerifiedTimerExtensionTests().frames()
         self.assertIsNone(self.approve(checkpoint,frames,current=180.))
+
+    def test_nonfinite_binding_atoms_cannot_authorize_timer_shortening(self):
+        checkpoint,frames=VerifiedTimerExtensionTests().frames()
+        for value in (float('nan'),float('inf')):
+            with self.subTest(value=value):
+                changed=dict(checkpoint,binding=json.dumps([['session',value],['pid','token']]))
+                self.assertIsNone(self.approve(changed,frames))
 
 
 if __name__ == '__main__':

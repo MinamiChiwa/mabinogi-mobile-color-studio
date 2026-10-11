@@ -289,6 +289,11 @@ class ProjectProbeIO:
                         'probe',changed_fields=[],error=exc)
                 time.sleep(min(.05,max(0.,self.deadline-time.monotonic())))
         self._check_observed_session(state,'probe')
+        # Independent cheap closing evidence; do not replace the checkpoint's
+        # full observation or authorize input from this session-only probe.
+        self.last_checked_state=state
+        self.last_checked_process_identity=list(identity)
+        self.last_checked_monotonic=time.monotonic()
 
     def set_verified_session_deadline(self,deadline,evidence):
         """Accept only the collector-bound timer pair, preserving its fixed cap."""

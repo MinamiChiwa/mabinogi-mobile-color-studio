@@ -70,6 +70,11 @@ class TimerGraceOriginTests(unittest.TestCase):
     def test_old_origin_does_not_authorize_controller_for_expired_session(self):
         result,_=self.collect()
         with self.assertRaises(ValueError):self.checked(result,111.)
+
+    def test_origin_never_authorizes_less_than_three_second_game_tail(self):
+        result,clock=self.collect()
+        result['session_deadline_monotonic']=result['session_first_seen_monotonic']+118.
+        with self.assertRaises(ValueError):self.checked(result,clock())
     def test_timer_grace_never_borrows_a_different_process_identity(self):
         result,clock=self.collect()
         method=getattr(session_deadline,'verified_timer_grace_until',None)

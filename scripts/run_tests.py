@@ -37,6 +37,7 @@ test_vision_stage_deadline test_native_probe_card_cache test_native_probe_glyph_
 test_native_runtime_bridge test_native_runtime_discovery test_native_runtime_geometry
 test_native_runtime_observation test_native_runtime_adapter
 test_native_periodic_scale_compile
+test_native_periodic_large_rotation test_native_planner_tail test_native_planner_candidate_budget
 '''.split())
 
 # Add a current feature here once its tests have been reviewed for this profile.

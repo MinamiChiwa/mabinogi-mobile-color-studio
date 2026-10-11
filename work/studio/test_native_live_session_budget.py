@@ -1,4 +1,4 @@
-"""New rounds use the live 110 s envelope; unknown active rounds keep 90 s."""
+"""New rounds keep a 3 s game tail; unknown active rounds need timer proof."""
 import unittest
 from native_live.collect_dye_validation import collect_validation_session
 
@@ -25,7 +25,7 @@ class PassiveBackend:
 
 
 class NativeSessionBudgetTests(unittest.TestCase):
-    def collect(self,existing,seconds=110.):
+    def collect(self,existing,seconds=117.):
         tick=[1.];events=[]
         result=collect_validation_session(PassiveBackend(existing),session_seconds=seconds,dwell_seconds=.1,
             poll_seconds=.1,clock=lambda:tick[0],pause=lambda dt:tick.__setitem__(0,tick[0]+dt),event=events.append)
@@ -33,7 +33,7 @@ class NativeSessionBudgetTests(unittest.TestCase):
         return result,events
     def test_new_round_uses_requested_extended_envelope(self):
         result,events=self.collect(False)
-        self.assertAlmostEqual(result['session_deadline_monotonic'],111.)
+        self.assertAlmostEqual(result['session_deadline_monotonic'],118.)
         self.assertFalse(result['existing_active_palette'])
     def test_unknown_age_active_round_is_not_assumed_new(self):
         result,events=self.collect(True)
@@ -42,7 +42,7 @@ class NativeSessionBudgetTests(unittest.TestCase):
         self.assertEqual(result['timer_deadline_extension']['deadline_source'],
                          'existing_active_unknown_age')
         self.assertAlmostEqual(result['timer_deadline_extension']['initial_deadline'],91.)
-        self.assertAlmostEqual(result['timer_deadline_extension']['maximum_deadline'],111.)
+        self.assertAlmostEqual(result['timer_deadline_extension']['maximum_deadline'],118.)
         self.assertEqual(result['timer_deadline_extension']['process_identity'],[7,8,9,'fixture'])
         self.assertEqual(result['timer_deadline_extension']['session_token'],['same'])
     def test_shorter_caller_deadline_is_not_extended(self):
@@ -51,6 +51,14 @@ class NativeSessionBudgetTests(unittest.TestCase):
             self.assertAlmostEqual(result['session_deadline_monotonic'],21.)
     def test_envelope_cannot_exceed_game_round(self):
         with self.assertRaises(ValueError):self.collect(False,121.)
+
+    def test_full_game_allowance_still_preserves_three_second_tail(self):
+        for existing in (False,True):
+            result,_=self.collect(existing,120.)
+            if existing:
+                self.assertAlmostEqual(result['session_deadline_monotonic'],91.)
+                self.assertAlmostEqual(result['timer_deadline_extension']['maximum_deadline'],118.)
+            else:self.assertAlmostEqual(result['session_deadline_monotonic'],118.)
 
 
 if __name__=='__main__':unittest.main()

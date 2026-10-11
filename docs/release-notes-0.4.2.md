@@ -1,7 +1,10 @@
-# 0.4.2rc3 — 本局重试与跨电脑修复
+# 0.4.2rc4 — 本局重试与三白路线修复
 
 ## 简体中文
 
+- 尾部统一最多预留 3 秒，取消重复的 8／10 秒空闲预留；实际输入、回读、回程和会话检查仍按真实耗时保护。倒计时仍保留首次 30 秒宽限。
+- 全局大角度色板路线允许受控的最多 90°平滑旋转，同时保留 12°与微调候选；数学近似目标需完整动作回放和实际色码复核，不能据此宣称精准命中。
+- 已完成的实测候选不会因后续有限 CPU 搜索耗尽而被清除；若更好的路线无法保证回程，会保留当前最佳并继续尝试更短安全路线。
 - 修正剩余约 50 秒却拒绝本局重试的预算门槛。按实际缩小路线及颜色复核预留时间，新搜索使用本局剩余余量；按钮与点击后的预算判断一致，实际目标路线仍单独复核。
 - 重试不可用时分别说明时间、操作额度、搜索次数和缩小路线原因，避免统一误报为时间不足。
 - 精准模式移除预测候选列表，改为浮窗「重新寻色」和 F7。停止当前搜索、释放鼠标并缩小画板至最大可见范围后，在同局重新搜索。
@@ -16,6 +19,9 @@
 
 ## 繁體中文
 
+- 尾部統一最多預留 3 秒，移除重複的 8／10 秒空閒預留；實際輸入、回讀、回程與會話檢查仍依真實耗時保護。倒數計時仍保留首次 30 秒寬限。
+- 全域大角度色板路線允許受控的最多 90°平滑旋轉，同時保留 12°與微調候選；數學近似目標仍須完整動作重播與實際色碼複核，不能宣稱精準命中。
+- 已完成的實測候選不會因後續有限 CPU 搜尋耗盡而被清除；若更佳路線無法保證回程，會保留目前最佳並繼續嘗試更短安全路線。
 - 修正剩餘約 50 秒仍拒絕本局重試的預算門檻。依實際縮小路線與顏色複核預留時間，新搜尋使用本局剩餘餘量；按鈕與點擊後的預算判斷一致，實際目標路線仍單獨複核。
 - 重試無法使用時分別說明時間、操作額度、搜尋次數與縮小路線原因，避免統一誤報為時間不足。
 - 精準模式移除預測候選清單，改為浮窗「重新尋色」與 F7。停止目前搜尋、釋放滑鼠並縮小色板至最大可見範圍後，在同局重新搜尋。
@@ -30,6 +36,9 @@
 
 ## English
 
+- Uses a single three-second game-tail reserve and removes duplicate eight/ten-second idle padding. Real input, readback, return and session checks remain charged by their measured cost. The initial 30-second countdown grace remains.
+- Global palette approaches may use controlled smooth rotations up to 90 degrees while retaining 12-degree and micro-adjustment proposals. Mathematical near targets still require full route replay and actual HEX verification; they never prove an exact match.
+- Completed measured candidates are retained when later bounded CPU search is exhausted. If a better route cannot guarantee a return, the current best is kept while shorter safe routes continue to be considered.
 - Fixes overly conservative retry admission with about 50 seconds left. It reserves the actual zoom-out route and color verification, then searches within the round's remaining allowance. Button availability and retry admission use the same budget; real target routes still require independent approval.
 - Unavailable retries now distinguish time, action allowance, search count and zoom-out route causes instead of reporting every refusal as insufficient time.
 - Precise Search replaces predicted alternatives with Retry in the overlay and F7. It ends the current search, releases the mouse, zooms out to the maximum visible area and searches again in the same round.

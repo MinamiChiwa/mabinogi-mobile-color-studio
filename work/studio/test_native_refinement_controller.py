@@ -78,6 +78,56 @@ class ProtectedRefinementControllerTests(unittest.TestCase):
         self.assertTrue(result['best_current']);self.assertTrue(result['screenshot_verified'])
         self.assertEqual(len(result['planning_rounds']),1)
         self.assertEqual(result['refinement_attempts'][0]['status'],'promoted')
+    def test_twenty_second_window_can_try_one_short_audited_improvement(self):
+        result=self.run_loop(deadline=28.)
+        self.assertTrue(self.io.actions,'A short trial and audited return fit; repeated idle tails blocked it')
+        self.assertEqual(result['refinement_attempts'][0]['status'],'promoted')
+        self.assertTrue(result['best_current']);self.assertTrue(result['verified'])
+        self.assertLess(self.io.t,28.)
+    def test_slow_entry_and_exit_checks_are_measured_as_real_observation_cost(self):
+        original=self.io.check
+        def charged_check(deadline):
+            self.io.t+=.2;return original(deadline)
+        self.io.check=charged_check
+        result=self.run_loop(deadline=90.)
+        self.assertTrue(self.io.actions,result.get('error'))
+        self.assertEqual(result['refinement_attempts'][0]['status'],'promoted')
+        self.assertTrue(result['best_current']);self.assertTrue(result['verified'])
+    def test_late_global_short_route_uses_a_checked_return_transaction(self):
+        original=self.plan
+        def plan(context,cp,frames,rules,grid,**kw):
+            record=original(context,cp,frames,rules,grid,**kw)
+            row=self.candidate(context,cp,[native_drag_gesture(self.io.geometry,self.io.settings,5,0).record()])
+            record['compromise_candidate']=row
+            record['plan_fingerprint']=_plan_fingerprint(record);return record
+        self.plan=plan
+        result=self.run_loop(deadline=28.,refine=lambda *a,**kw:None)
+        self.assertTrue(result['late_route_decisions'][0]['prefix_returns_verified'])
+        self.assertEqual(result['refinement_attempts'][0]['status'],'promoted')
+        self.assertLess(result['maximum'],result['initial_maximum'])
+        self.assertTrue(result['verified']);self.assertTrue(result['best_current'])
+    def test_equal_measured_trial_tries_another_safe_route_while_time_remains(self):
+        original=self.io.perform_candidate
+        def first_landing_unchanged(record,label,deadline):
+            receipt=original(record,label,deadline)
+            if len(self.io.actions)==1:self.io.pose=copy.deepcopy(self.baseline)
+            return receipt
+        self.io.perform_candidate=first_landing_unchanged;seen=[]
+        def refine(context,cp,rules,**kw):
+            seen.append(copy.deepcopy(kw['excluded']))
+            if len(seen)>2:return None
+            dx=4+len(seen)
+            route=[native_drag_gesture(self.io.geometry,self.io.settings,dx,0).record()]
+            row=self.candidate(context,cp,route)
+            endpoint=dict(cp,pose=row['final_pose'],client_hex=row['prediction']['colors'])
+            recovery=self.candidate(context,endpoint,
+                [native_drag_gesture(self.io.geometry,self.io.settings,-dx,0).record()])
+            row['prefix_recoveries']=[recovery];return row
+        result=self.run_loop(refine=refine)
+        self.assertEqual(len(self.io.actions),2)
+        self.assertEqual([r['status'] for r in result['refinement_attempts']],['retained','promoted'])
+        self.assertTrue(seen[1],'The non-improving route must be excluded')
+        self.assertTrue(result['best_current']);self.assertTrue(result['verified'])
 
     def test_worse_actual_trial_returns_from_actual_pose_before_deadline(self):
         original=self.io.perform_candidate
@@ -93,11 +143,11 @@ class ProtectedRefinementControllerTests(unittest.TestCase):
         self.assertGreaterEqual(len(self.io.actions),2)
         self.assertEqual(result['actual_colors'],result['initial']['checkpoint']['client_hex'])
         self.assertEqual(result['refinement_attempts'][0]['status'],'restored')
-        self.assertLess(self.io.t,90.-8.)
+        self.assertLess(self.io.t,90.)
         self.assertTrue(result['steps'][0].get('model_response_warning'))
 
     def test_budget_includes_return_and_final_visual_before_any_input(self):
-        result=self.run_loop(deadline=23.)
+        result=self.run_loop(deadline=21.)
         self.assertEqual(self.io.actions,[])
         self.assertEqual(result.get('refinement_stop'),'insufficient_protected_time')
         self.assertTrue(result['verified']);self.assertTrue(result['best_current'])
@@ -126,7 +176,7 @@ class ProtectedRefinementControllerTests(unittest.TestCase):
         result=self.run_loop()
         self.assertGreaterEqual(len(self.io.actions),2)
         self.assertEqual(result['actual_colors'],result['initial']['checkpoint']['client_hex'])
-        self.assertTrue(result['verified']);self.assertLess(self.io.t,82.)
+        self.assertTrue(result['verified']);self.assertLess(self.io.t,90.)
 
     def test_missing_prefix_recovery_never_admits_trial(self):
         def unsafe(*a,**kw):
@@ -146,10 +196,15 @@ class ProtectedRefinementControllerTests(unittest.TestCase):
         row.update(prefix_recoveries=returns,recovery_route=returns[-1]['input_route'])
         return row
 
-    def test_two_returns_reserve_an_extra_correction_action_each(self):
-        result=self.run_loop(refine=self.refine_two,max_actions=6)
-        self.assertEqual(self.io.actions,[],'Trial plus two corrected three-action returns requires eight slots')
+    def test_one_complete_corrected_return_is_reserved_before_trial(self):
+        result=self.run_loop(refine=self.refine_two,max_actions=4)
+        self.assertEqual(self.io.actions,[],'Two trial actions plus a corrected three-action return require five slots')
         self.assertEqual(result.get('refinement_stop'),'insufficient_protected_actions')
+    def test_safe_trial_can_use_one_return_when_a_second_would_exceed_action_quota(self):
+        result=self.run_loop(refine=self.refine_two,max_actions=5)
+        self.assertTrue(self.io.actions)
+        self.assertEqual(result['refinement_attempts'][0]['maximum_recovery_attempts'],1)
+        self.assertTrue(result['best_current']);self.assertTrue(result['verified'])
 
     def test_local_search_can_use_ten_seconds_without_borrowing_return_time(self):
         offered=[]
@@ -157,7 +212,7 @@ class ProtectedRefinementControllerTests(unittest.TestCase):
             offered.append(kw['deadline']-self.io.clock());return self.refine(*args,**kw)
         result=self.run_loop(deadline=110.,refine=search)
         self.assertGreaterEqual(offered[0],9.9)
-        self.assertTrue(result['best_current']);self.assertLess(self.io.t,102.)
+        self.assertTrue(result['best_current']);self.assertLess(self.io.t,110.)
 
     def test_cold_start_visual_cost_does_not_block_warm_refinement(self):
         original=self.io.frames

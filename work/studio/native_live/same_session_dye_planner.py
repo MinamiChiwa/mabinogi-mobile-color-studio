@@ -20,6 +20,7 @@ from .compromise import predicted_quality,choose_compromise
 from native_periodic_search import search_periodic_targets
 from native_periodic_route import compile_periodic_approach
 from dye_regions import region_count, rule_region_count, session_region_count, validate_region_rules
+from .time_policy import EARLY_TIMER_GRACE_SECONDS, GAME_TAIL_SECONDS
 
 POLICY='all_recorded_points'
 PLAN_OBSERVATION_MAX_AGE_SECONDS=15.
@@ -128,8 +129,7 @@ def bind_planning_context(session, checkpoint, geometry, settings, *, wheel_delt
     return context
 
 
-EARLY_TIMER_GRACE_SECONDS=30.
-EXECUTION_RESERVE_SECONDS=10.
+EXECUTION_RESERVE_SECONDS=GAME_TAIL_SECONDS
 
 def _frames(checkpoint, frames):
     if not isinstance(frames,(list,tuple)) or len(frames)!=2:
@@ -361,7 +361,7 @@ def _refine_single_wheels(session,pose,geometry,settings,rules,seeds,*,now,deadl
 
 
 def plan_from_checkpoint(context, checkpoint, frames, rules, grid, *, now, engineering_deadline,
-        time_budget_seconds=12., reserve_seconds=EXECUTION_RESERVE_SECONDS, verification_margin_seconds=8., clock=time.monotonic,
+        time_budget_seconds=12., reserve_seconds=EXECUTION_RESERVE_SECONDS, verification_margin_seconds=3., clock=time.monotonic,
         check=lambda:None,collect_candidates=False):
     """Rebase the existing fresh search on the observed pose, with bounded time.
 
@@ -371,7 +371,7 @@ def plan_from_checkpoint(context, checkpoint, frames, rules, grid, *, now, engin
     started=clock();check();rules=normalize_target_rules(rules)
     feedback=assess_feedback(context,checkpoint,frames,rules);_fresh(now,frames)
     if (not all(math.isfinite(v) for v in (engineering_deadline,time_budget_seconds,reserve_seconds,verification_margin_seconds))
-        or time_budget_seconds<=0 or not 10<=reserve_seconds<=40 or not 3<=verification_margin_seconds<=20):
+        or time_budget_seconds<=0 or not 0<=reserve_seconds<=GAME_TAIL_SECONDS or not 0<=verification_margin_seconds<=20):
         raise ValueError('Invalid deadline/reserve/search bounds')
     end=_timer_deadline(frames,engineering_deadline,reserve_seconds)
     pose=feedback['observed_pose']
@@ -413,7 +413,9 @@ def plan_from_checkpoint(context, checkpoint, frames, rules, grid, *, now, engin
         retain_compromise(row)
         if not row['prediction']['predicted_accepted'] and (result['nearest_diagnostic'] is None
                 or rank(row)<rank(result['nearest_diagnostic'])):
-            result['nearest_diagnostic']=audit_candidate_endpoint(context,checkpoint,rules,row,check=check)
+            audited=audit_candidate_endpoint(context,checkpoint,rules,row,check=check)
+            result['nearest_diagnostic']=audited
+            retain_compromise(audited)
     def finish(candidate,reason):
         if collect_candidates:
             # Candidate collection owns its finite allowance inside this same
@@ -434,6 +436,18 @@ def plan_from_checkpoint(context, checkpoint, frames, rules, grid, *, now, engin
             selected=choose_compromise(context,checkpoint,rules,
                 [stationary_row,*sorted(compromise_rows.values(),key=lambda row:(*predicted_quality(row['prediction'],rules),row['needed']))[:16]],
                 deadline=started+time_budget_seconds-.05,clock=clock,check=check)
+            if selected is None:
+                # Finite search/risk-scoring expiry does not erase endpoint
+                # audits already completed. Keep the actual reference among
+                # those options; a worse proposal must not replace it merely
+                # because the optional neighborhood tie-break ran out of time.
+                check()
+                owned=[audit_candidate_endpoint(context,checkpoint,rules,stationary_row,check=check)]
+                owned.extend(row for row in compromise_rows.values()
+                    if row.get('endpoint_audit',{}).get('full_route_replayed') is True)
+                selected=min(owned,key=lambda row:(*predicted_quality(row['prediction'],rules),row['needed'],len(row['input_route'])))
+                selected=copy.deepcopy(selected)
+                selected['compromise_neighborhood_verified']=False
             if selected is not None:result['compromise_candidate']=selected
         approach=result['approach_candidate'];compromise=result['compromise_candidate']
         if approach is not None and compromise is not None:
@@ -442,13 +456,13 @@ def plan_from_checkpoint(context, checkpoint, frames, rules, grid, *, now, engin
         completed=max(0.,clock()-started);result['planned_at']=now+completed
         def fits(row):return row is not None and now+completed+row['needed']+verification_margin_seconds<end
         if isinstance(candidate,list):candidate=next((row for row in candidate if fits(row)),None)
-        if completed>=time_budget_seconds and not collect_candidates:candidate=None;reason='search_budget_exhausted'
+        result.update(search_budget_seconds=time_budget_seconds,planning_elapsed_seconds=completed,
+            search_budget_exhausted=completed>=time_budget_seconds)
+        if completed>=time_budget_seconds and candidate is None:reason='search_budget_exhausted'
         if not fits(candidate):candidate=None
         if not fits(result['nearest_diagnostic']):result['nearest_diagnostic']=None
         if not fits(result['compromise_candidate']):result['compromise_candidate']=None
         if not fits(result['approach_candidate']):result['approach_candidate']=None
-        if completed>=time_budget_seconds and not collect_candidates:result['compromise_candidate']=None
-        if completed>=time_budget_seconds and not collect_candidates:result['approach_candidate']=None
         classification=('predicted_exact' if candidate['prediction']['target_exact'] else 'predicted_within_tolerance') if candidate else 'not_found_in_budget'
         if candidate is None and now+completed+_needed([],3.,.5)+verification_margin_seconds>=end:
             classification='insufficient_time'
@@ -487,7 +501,7 @@ def plan_from_checkpoint(context, checkpoint, frames, rules, grid, *, now, engin
     if triple:
         markers=np.array(session['picker_uv'],float);l,t,r,b=geometry.board
         markers=np.column_stack((l+markers[:,0]*(r-l),b-markers[:,1]*(b-t)))
-        stage_end=min(started+search_budget,clock()+min(6.,search_budget*.3))
+        stage_end=min(started+search_budget,clock()+min(8.,search_budget*.45))
         targets=periodic['candidates'] or periodic.get('nearest_candidates',[])
         for target in targets:
             check()
@@ -498,7 +512,7 @@ def plan_from_checkpoint(context, checkpoint, frames, rules, grid, *, now, engin
                 # plus fractional-scale wheel pairs. Keep the same total
                 # stage allowance, but finish each promising model target
                 # before retaining another incomplete large-error endpoint.
-                time_budget_seconds=max(.001,min(1.,stage_end-clock())),clock=clock,check=check)
+                time_budget_seconds=min(4.,stage_end-clock()),clock=clock,check=check)
             route=compiled['input_route']
             if not route or not _research_route_allowed(route,context['board']):continue
             prediction=score_native_pose(session,compiled['final_pose'],rules,check=check)
@@ -513,7 +527,8 @@ def plan_from_checkpoint(context, checkpoint, frames, rules, grid, *, now, engin
             bundle=bind_native_route_seeds(session,geometry,settings,
                 [row['input_route'] for row in periodic_routes[:16]],
                 wheel_delta_per_step=context['wheel_delta_per_step'],sample_policy=POLICY)
-            elapsed=max(0.,clock()-started);cap=max(.001,search_budget-elapsed-2.)
+            elapsed=max(0.,clock()-started);cap=search_budget-elapsed-min(2.,search_budget*.15)
+            if cap<=0.:return finish(None,'search_budget_exhausted')
             pipeline=search_native_input_pipeline(session,grid,geometry,settings,rules,
                 wheel_delta_per_step=context['wheel_delta_per_step'],sample_policy=POLICY,
                 now=now+elapsed,deadline=end-verification_margin_seconds,
@@ -621,7 +636,8 @@ def plan_from_checkpoint(context, checkpoint, frames, rules, grid, *, now, engin
     return finish(eligible,'no_supported_accepted_candidate')
 
 
-def validate_plan_reference(context, plan, checkpoint, frames, *, now, rules=None,purpose='target'):
+def validate_plan_reference(context, plan, checkpoint, frames, *, now, rules=None,purpose='target',
+        reference_observation_paid=False):
     """Detect stale plans; this check does not grant permission to send input."""
     pose=_checked_checkpoint(context,checkpoint);_frames(checkpoint,frames);_fresh(now,frames)
     if plan.get('plan_fingerprint')!=_plan_fingerprint(plan):
@@ -636,7 +652,9 @@ def validate_plan_reference(context, plan, checkpoint, frames, *, now, rules=Non
     if purpose not in ('target','compromise','approach'):raise ValueError('Invalid plan validation purpose')
     candidate=plan.get({'target':'candidate','compromise':'compromise_candidate','approach':'approach_candidate'}[purpose])
     end=_timer_deadline(frames,plan['effective_deadline'],plan['reserve_seconds'])
-    if candidate is None or now+candidate['needed']+plan['verification_margin_seconds']>=end:
+    if type(reference_observation_paid) is not bool:raise ValueError('Invalid reference observation accounting')
+    reference_cost=0. if reference_observation_paid else plan['verification_margin_seconds']
+    if candidate is None or now+candidate['needed']+reference_cost>=end:
         raise ValueError('Plan has no accepted candidate or insufficient remaining time')
     if plan.get('schema',1)>=2:
         audited=audit_candidate_endpoint(context,checkpoint,rules,candidate)
