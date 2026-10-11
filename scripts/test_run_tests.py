@@ -6,6 +6,20 @@ import unittest
 
 
 class RegressionEntryTests(unittest.TestCase):
+    def test_release_verdict_requires_evidence_even_when_unittest_succeeds(self):
+        m = self.module()
+        for skipped, expected in (
+            ([], True),
+            ([{'id': 'test_native_input_backend_mapping.C.test_mapping', 'reason': 'missing fixture'}], False),
+            ([{'id': 'test_ocr_setup.OcrSetupTests.test_archived_heldout_hex_including_four_previous_misses',
+               'reason': 'Local capture archive unavailable'}], True),
+        ):
+            with self.subTest(skipped=skipped):
+                self.assertEqual(m.release_evidence_complete('release', False, True, skipped), expected)
+        self.assertFalse(m.release_evidence_complete('release', True, True, []))
+        self.assertFalse(m.release_evidence_complete('quick', False, True, []))
+        self.assertFalse(m.release_evidence_complete('release', False, False, []))
+
     def module(self):
         path = Path(__file__).with_name('run_tests.py')
         self.assertTrue(path.is_file(), 'The profiled test entry point is missing')

@@ -1,15 +1,19 @@
 [CmdletBinding()]
 param(
-    [ValidateSet('production', 'diagnostics', 'legacy', 'fixtures', 'all')]
-    [string]$Profile = 'production',
-    [switch]$List
+    [ValidateSet('quick', 'release', 'research', 'full')]
+    [string]$Suite = 'quick',
+    [switch]$List,
+    [switch]$NoDesktop,
+    [string]$Json
 )
 $ErrorActionPreference = 'Stop'
-$python = Join-Path $PSScriptRoot '.venv\Scripts\python.exe'
-if (-not (Test-Path -LiteralPath $python)) {
+$testPython = Join-Path $PSScriptRoot '.venv\Scripts\python.exe'
+if (-not (Test-Path -LiteralPath $testPython)) {
     throw 'Project Python is missing. Set up .venv before running tests.'
 }
-$testArgs = @((Join-Path $PSScriptRoot 'run_tests.py'), '--profile', $Profile)
+$testArgs = @((Join-Path $PSScriptRoot 'scripts\run_tests.py'), '--suite', $Suite)
 if ($List) { $testArgs += '--list' }
-& $python -X utf8 @testArgs
+if ($NoDesktop) { $testArgs += '--no-desktop' }
+if ($Json) { $testArgs += @('--json', $Json) }
+& $testPython -X utf8 @testArgs
 exit $LASTEXITCODE

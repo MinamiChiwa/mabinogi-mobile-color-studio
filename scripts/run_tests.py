@@ -289,6 +289,15 @@ def result_summary(result):
     }
 
 
+def release_evidence_complete(profile, no_desktop, success, skips):
+    # Historical private OCR is supplemental. Missing current route, DPI or UI
+    # evidence must never turn a partial checkout into a release verdict.
+    optional = {('test_ocr_setup.OcrSetupTests.test_archived_heldout_hex_including_four_previous_misses',
+                 'Local capture archive unavailable')}
+    return (profile == 'release' and not no_desktop and success
+            and all((row['id'], row['reason']) in optional for row in skips))
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--suite', choices=PROFILES, default='quick')
@@ -322,8 +331,8 @@ def main(argv=None):
             stream=sys.stdout, verbosity=2 if args.verbose else 1, resultclass=TimedResult,
         ).run(unittest.TestSuite(selected))
         report.update(result_summary(result))
-        report['release_complete'] = (args.suite == 'release' and not args.no_desktop
-                                      and result.wasSuccessful())
+        report['release_complete'] = release_evidence_complete(
+            args.suite, args.no_desktop, result.wasSuccessful(), report['skips'])
         counts = report['counts']
         print(f"Passed {counts['passed']}; skipped {counts['skipped']}; failed {counts['failed']}; "
               f"errors {counts['errors']}; expected failures {counts['expected_failures']}; "
@@ -334,6 +343,9 @@ def main(argv=None):
         for row in report['slowest']:
             print(f"  {row['seconds']:7.3f}s  {row['id']}")
         status = 0 if result.wasSuccessful() else 1
+        if args.suite == 'release' and not args.no_desktop and not report['release_complete']:
+            print('Release verification incomplete: failures or required evidence skipped.')
+            status = 1
     report['elapsed_seconds'] = round(time.perf_counter() - began, 6)
     print(f"Total elapsed: {report['elapsed_seconds']:.3f}s")
     if args.json:

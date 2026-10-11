@@ -159,7 +159,14 @@ class ServiceIntegrationTests(unittest.TestCase):
                 capture={'capture_folder':'fixture'},baseline={'motion':{'settings':io.case['settings']}})
             backend=SimpleNamespace(close=lambda:None)
             def loop(adapter,session,settings,received,**kwargs):
-                if planner is not None:kwargs['planner']=planner
+                if planner is not None:
+                    kwargs['planner']=planner
+                    # This case verifies service events and persistence for an
+                    # explicit compromise. Refinement search has separate real
+                    # solver tests; do not repeat its entire CPU budget here.
+                    with patch('native_live.controller.find_refinement',return_value=None):
+                        return run_goal_loop(adapter,session,settings,received,clock=io.clock,
+                            pause=lambda seconds:setattr(io,'t',io.t+seconds),**kwargs)
                 return run_goal_loop(adapter,session,settings,received,clock=io.clock,
                     pause=lambda seconds:setattr(io,'t',io.t+seconds),**kwargs)
             with patch.object(service,'_prepare',return_value=(backend,{})), \
