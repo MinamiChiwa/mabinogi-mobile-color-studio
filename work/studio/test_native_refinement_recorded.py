@@ -11,9 +11,12 @@ import test_native_live_controller as io_fixture
 import test_native_refinement_controller as controller_fixture
 from native_input_compile import native_drag_gesture
 from native_input_response import InputSettings,InputGeometry,replay_native_route
+from input_gestures import PointerGesture
+from native_input_route_search import _needed
 from native_palette_scoring import load_session,score_native_pose
 from native_live.controller import run_goal_loop
 from native_live import refinement
+from native_live.compromise import observed_quality
 from native_live.project_closed_loop_io import InputNotStarted
 
 FIXTURE=Path(__file__).parent/'fixtures/native_live/rc11_refinement'
@@ -38,7 +41,10 @@ class RecordedIO(io_fixture.FixtureIO):
         return cp
     def frames(self,label,deadline):
         self.clock();self.check(deadline);self.t+=self.case['visual_seconds'];self.check(deadline)
-        if self.trial_visual_timeout and label=='refine_0_1_after' and not self.trial_visual_timed_out:
+        if self.trial_visual_timeout and (label=='refine_0_1_after' or label.startswith('refine_0_1_after_retry_')):
+            # The fault covers this trial endpoint's visual retries. A single
+            # transient read failure can correctly recover and promote the
+            # better endpoint, bypassing the partial-return fault under test.
             self.trial_visual_timed_out=True;raise TimeoutError('simulated final trial visual timeout')
         colors=score_native_pose(self.session,self.pose,self.case['rules'])['colors']
         return [dict(hex=colors,remaining_seconds=None,timer_advisory=True,
@@ -66,6 +72,22 @@ class RecordedRefinementTests(unittest.TestCase):
     plan=controller_fixture.ProtectedRefinementControllerTests.plan
     def setUp(self):
         self.io=RecordedIO();self.rules=self.io.case['rules'];self.recovery_calls=0
+    def prepared_return_fault_refinement(self,context,cp,rules,**kw):
+        # Fault-injection tests isolate actual-pose recovery from the recorded
+        # three-second discovery boundary. This proposal is independently
+        # replayed, scalar-scored and protected for every prefix on each use;
+        # discovery remains covered by the unpatched recorded search tests.
+        route=[PointerGesture('rotate',((963,678),(1146,678),(1146,679)),right=True,
+                    requested_angle=.3,arc_start=1).record(),
+               PointerGesture('rotate',((965,664),(1175,665),(1175,664)),right=True,
+                    requested_angle=-.3,arc_start=1).record()]
+        pose=replay_native_route(cp['pose'],route,self.io.geometry,self.io.settings,
+            wheel_delta_per_step=1.,sample_policy='all_recorded_points')['final_pose']
+        row=dict(input_route=route,final_pose=pose,prediction=score_native_pose(self.io.session,pose,rules),
+            needed=_needed(route,3.,.5),source='recorded_return_fault_fixture')
+        candidate=refinement._protect(context,cp,rules,row,observed_quality(cp['client_hex'],rules),kw['check'])
+        self.assertIsNotNone(candidate)
+        return candidate
     def run_recorded(self,name,allowance=None,perturb=False,perturb_after_action=2):
         self.io.perturb_trial=perturb
         self.io.perturb_after_action=perturb_after_action
@@ -103,7 +125,8 @@ class RecordedRefinementTests(unittest.TestCase):
         self.assertTrue(result['verified']);self.assertTrue(result['best_current'])
         self.assertEqual(result.get('refinement_stop'),'insufficient_protected_time')
     def test_actual_perturbed_trial_recovers_from_actual_pose_with_real_solver(self):
-        result=self.run_recorded('perturbed-return',perturb=True)
+        with patch('native_live.controller.find_refinement',self.prepared_return_fault_refinement):
+            result=self.run_recorded('perturbed-return',perturb=True)
         self.assertTrue(self.io.perturbed,result.get('refinement_stop'))
         self.assertGreater(self.recovery_calls,0,'Prepared inverse route must be insufficient for a perturbed actual pose')
         self.assertTrue(result['best_current'],result.get('refinement_stop'))
@@ -136,25 +159,7 @@ class RecordedRefinementTests(unittest.TestCase):
         self.assertFalse(result['verified']);self.assertEqual(self.io.releases,1)
     def test_return_interrupted_after_one_inverse_recovers_actual_prefix_pose(self):
         self.io.trial_visual_timeout=True;self.io.interrupt_second_return=True
-        # Inject a fully re-audited recorded refinement to isolate the partial
-        # return fault from a three-second wall-clock search admission race.
-        # Discovery time/coverage remains exercised by separate recorded tests.
-        from input_gestures import PointerGesture
-        from native_input_route_search import _needed
-        from native_live.compromise import observed_quality
-        route=[PointerGesture('rotate',((963,678),(1146,678),(1146,679)),right=True,
-                    requested_angle=.3,arc_start=1).record(),
-               PointerGesture('rotate',((965,664),(1175,665),(1175,664)),right=True,
-                    requested_angle=-.3,arc_start=1).record()]
-        def prepared(context,cp,rules,**kw):
-            pose=replay_native_route(cp['pose'],route,self.io.geometry,self.io.settings,
-                wheel_delta_per_step=1.,sample_policy='all_recorded_points')['final_pose']
-            row=dict(input_route=route,final_pose=pose,prediction=score_native_pose(self.io.session,pose,rules),
-                needed=_needed(route,3.,.5),source='recorded_partial_return_fault_fixture')
-            candidate=refinement._protect(context,cp,rules,row,observed_quality(cp['client_hex'],rules),lambda:None)
-            self.assertIsNotNone(candidate)
-            return candidate
-        with patch('native_live.controller.find_refinement',prepared):
+        with patch('native_live.controller.find_refinement',self.prepared_return_fault_refinement):
             result=self.run_recorded('interrupted-return-prefix')
         self.assertTrue(self.io.trial_visual_timed_out)
         self.assertTrue(self.io.return_not_started)

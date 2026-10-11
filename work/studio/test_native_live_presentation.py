@@ -137,5 +137,36 @@ class NativePresentationTests(unittest.TestCase):
                             self.assertFalse(any('\u4e00'<=char<='\u9fff' for char in text),text)
         finally:i18n.set_language(original)
 
+    def test_retry_reasons_distinguish_time_limits_from_actions_and_reset_state(self):
+        helper=getattr(self.module(),'retry_reason_text',None)
+        self.assertTrue(callable(helper),'Retry availability needs its actual reason')
+        self.assertEqual(helper('insufficient_retry_time'),'剩余时间不足以完成重试，已保留当前颜色。')
+        for reason,expected in (('insufficient_retry_actions','操作'),('action_limit','操作'),
+                ('round_limit','搜索'),('unsupported_retry_settings','缩小'),
+                ('retry_resetting','动作'),('session_closing','结束')):
+            with self.subTest(reason=reason):
+                body=helper(reason)
+                self.assertIn(expected,body)
+                self.assertNotIn('时间不足',body)
+                self.assertNotIn(reason,body)
+
+    def test_retry_reasons_are_fully_translated_without_raw_exception_text(self):
+        import i18n
+        helper=getattr(self.module(),'retry_reason_text',None)
+        self.assertTrue(callable(helper))
+        original=i18n.language
+        try:
+            for language in ('简体中文','繁體中文','English'):
+                i18n.set_language(language)
+                for reason in ('insufficient_retry_time','insufficient_retry_actions','action_limit',
+                        'round_limit','unsupported_retry_settings','retry_resetting','session_closing',
+                        'RuntimeError: implementation detail'):
+                    with self.subTest(language=language,reason=reason):
+                        text=str(i18n.tr(helper(reason)))
+                        self.assertNotIn(reason,text)
+                        if language=='English':
+                            self.assertFalse(any('\u4e00'<=char<='\u9fff' for char in text),text)
+        finally:i18n.set_language(original)
+
 
 if __name__=='__main__':unittest.main()

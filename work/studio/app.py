@@ -785,6 +785,7 @@ class App(ct.CTk):
             title,body=progress_text(d)
             self.status.configure(text=tr(title));self.set_detail(tr(body))
         elif k=='native_retry_available':
+            from native_status import retry_reason_text
             self._retry_enabled=bool(d.get('enabled'))
             if d.get('verified') and d.get('screenshot_verified'):
                 for card,color in zip(self.cards,d.get('current_colors') or []):
@@ -792,7 +793,7 @@ class App(ct.CTk):
             if d.get('waiting_for_retry'):
                 self.status.configure(text=tr('本轮寻色已完成'))
                 self.set_detail(tr('可按 F7 或点击浮窗重试；剩余时间不足时保留当前颜色。' if d.get('enabled')
-                    else '剩余时间不足以完成重试，已保留当前颜色。'))
+                    else retry_reason_text(d.get('reason'))))
         elif k=='native_retry_reset':
             self._retry_enabled=False
             status=d.get('status')
@@ -803,8 +804,9 @@ class App(ct.CTk):
                 self.status.configure(text=tr('重新搜索目标颜色'))
                 self.set_detail(tr('沿用本局剩余时间重新寻色；F9 可停止。'))
             elif status=='rejected':
+                from native_status import retry_reason_text
                 self.status.configure(text=tr('暂时无法重试'))
-                self.set_detail(tr('剩余时间不足以完成重试，已保留当前颜色。'))
+                self.set_detail(tr(retry_reason_text(d.get('reason'))))
         elif k in ('native_candidates','native_candidate_ready','native_candidate_selected','native_candidate_closed'):
             return
         elif k=='native_result':

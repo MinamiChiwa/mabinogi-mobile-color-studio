@@ -54,6 +54,17 @@ class NativeRetryUITests(unittest.TestCase):
             deltas=[1.]*3,maximum=1.,average=1.,accepted=False)],current_candidate_id=None))
         self.assertEqual(self.ui.overlay.candidate_rows,{})
         self.assertIsNone(self.ui.overlay._candidate_data)
+    def test_unavailable_and_rejected_retry_show_actual_cause_in_both_surfaces(self):
+        for reason,expected in (('insufficient_retry_actions','操作'),('unsupported_retry_settings','缩小')):
+            for kind,fields in (('native_retry_available',dict(enabled=False,waiting_for_retry=True)),
+                    ('native_retry_reset',dict(status='rejected'))):
+                with self.subTest(reason=reason,kind=kind):
+                    self.emit(kind,dict(fields,reason=reason))
+                    for widget in (self.ui.detail,self.ui.overlay.copy):
+                        body=str(widget.cget('text'))
+                        self.assertIn(expected,body)
+                        self.assertNotIn('时间不足',body)
+                    self.assertEqual(self.ui.overlay.retry_button.cget('state'),'disabled')
     def test_finish_hides_retry_surface_and_releases_main_window_controls(self):
         self.emit('native_retry_available',dict(enabled=True))
         self.emit('finished',{})

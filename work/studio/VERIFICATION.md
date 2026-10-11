@@ -1,5 +1,13 @@
 # Current verification scope
 
+## Candidate 0.4.2rc3: Retry budgets from the actual reset route (2026-10-11)
+
+Policy: `native-measured-retry-reset-budget-v21`. The supplied desktop rc2 session requested retry with 48.594 seconds before its engineering cutoff. After a fresh native read, 47.516 remained. The original formula required 55.569 seconds for four reset groups, fixed 15-second search and assumed future gestures/reads, while the button used an empty reset route. The refusal did not establish that a retry was physically impossible.
+
+Admission now pays the actual reset, one post-reset screenshot verification, at least five seconds of search and the existing closing guard. It pays the fresh reference once, before reading it; the equivalent recorded allowance is 34.626 seconds before and 32.6865 afterward. UI availability uses the same complete route and action budget. Actual target routes still require their full time/action audit and final verification. Retry search removes the old fixed 15-second footer, allocates remaining time dynamically and never starts a fictitious positive budget when the allowance is exhausted. Deadlines, grace, rules, F9, released receipts and measured minimum scale remain bound to the same round. User-facing refusal text distinguishes the actual cause in all three languages.
+
+Final release regression: 742 tests, 741 passed, one optional private OCR fixture skipped, zero failures/errors; 240.878 seconds total. The actual 101-tick recorded-scale retry, low-time/no-input refusal, slow fresh reference, no-reset late search, actual route budget, F9, translations and isolated UI behavior are covered. A previous recorded recovery fault test was made deterministic with an independently protected proposal while retaining the real actual-pose recovery solver and charged IO; production time protection was not changed. No new game capture, input or dye item was used. Real rc3 same-round retry remains unverified until a user run. Public release remains 0.4.1.
+
 ## Candidate 0.4.2rc2: Complete discovery, session timers and stop diagnostics (2026-10-11)
 
 Policy: `native-fast-discovery-session-timer-diagnostics-v20`. The six supplied data3 records are all 0.4.1: four F9 stops before input and two sessions ending after verified colors with a generic session-change error. They do not show a DPI or coordinate failure, and the saved countdowns do not justify calling the final error natural expiry.

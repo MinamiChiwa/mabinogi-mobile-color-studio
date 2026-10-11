@@ -32,6 +32,25 @@ def candidate_reason_text(reason):
     return '所选方案暂时无法安全切换，已保留当前实测结果。'
 
 
+def retry_reason_text(reason):
+    """Explain a disabled reset without presenting every refusal as a timeout."""
+    if reason=='insufficient_retry_time':
+        return '剩余时间不足以完成重试，已保留当前颜色。'
+    if reason=='insufficient_retry_actions':
+        return '剩余操作次数不足以完成重试，已保留当前颜色。'
+    if reason=='action_limit':
+        return '本局自动操作次数已达上限，已保留当前颜色。'
+    if reason=='round_limit':
+        return '本局自动搜索次数已达上限，已保留当前颜色。'
+    if reason=='unsupported_retry_settings':
+        return '无法确认当前画板的缩小路线，已保留当前颜色。'
+    if reason=='retry_resetting':
+        return '当前动作尚未结束，请稍候再重试。'
+    if reason=='session_closing':
+        return '本局正在结束，已保留当前颜色。'
+    return '当前状态暂时无法重试，已保留当前颜色。'
+
+
 def result_text(data):
     reason=data.get('stop_reason')
     if reason=='palette_ended':

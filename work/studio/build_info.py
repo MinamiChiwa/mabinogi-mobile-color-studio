@@ -5,8 +5,8 @@ import json
 from pathlib import Path
 import sys
 
-APP_VERSION = '0.4.2rc2'
-POLICY_REVISION = 'native-fast-discovery-session-timer-diagnostics-v20'
+APP_VERSION = '0.4.2rc3'
+POLICY_REVISION = 'native-measured-retry-reset-budget-v21'
 
 
 def source_identity(root):

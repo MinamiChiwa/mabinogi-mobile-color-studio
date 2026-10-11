@@ -461,12 +461,13 @@ class SearchOverlay(ct.CTkToplevel):
         if kind in ('native_candidates','native_candidate_ready','native_candidate_selected','native_candidate_closed'):
             return
         if kind=='native_retry_available':
+            from native_status import retry_reason_text
             self._native_run=True
             self._retry_enabled=bool(data.get('enabled')) and not self._retry_pending
             self.retry_button.configure(state='normal' if self._retry_enabled and callable(self.retry_action) else 'disabled')
             self.retry_button.grid(row=3,column=0,padx=16,pady=(0,10),sticky='ew')
             if data.get('waiting_for_retry'):
-                body='可按 F7 或点击浮窗重试；剩余时间不足时保留当前颜色。' if data.get('enabled') else '剩余时间不足以完成重试，已保留当前颜色。'
+                body='可按 F7 或点击浮窗重试；剩余时间不足时保留当前颜色。' if data.get('enabled') else retry_reason_text(data.get('reason'))
                 if data.get('verified') and data.get('screenshot_verified') and data.get('current_colors'):
                     body+='\n'+'当前实测颜色：'+' / '.join(c or '—' for c in data['current_colors'])
                 self.render('本轮寻色已完成',body)
@@ -478,7 +479,9 @@ class SearchOverlay(ct.CTkToplevel):
             self._retry_pending=status not in ('searching','rejected')
             if status=='zooming':self.render('正在重试','正在缩小画板并重新搜索。')
             elif status=='searching':self.render('重新搜索目标颜色','沿用本局剩余时间重新寻色；F9 可停止。')
-            elif status=='rejected':self.render('暂时无法重试','剩余时间不足以完成重试，已保留当前颜色。')
+            elif status=='rejected':
+                from native_status import retry_reason_text
+                self.render('暂时无法重试',retry_reason_text(data.get('reason')))
             return
         if kind=='region_layout':
             self.rules=list(data['rules'])

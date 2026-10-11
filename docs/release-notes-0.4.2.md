@@ -1,7 +1,9 @@
-# 0.4.2rc2 — 本局重试与跨电脑修复
+# 0.4.2rc3 — 本局重试与跨电脑修复
 
 ## 简体中文
 
+- 修正剩余约 50 秒却拒绝本局重试的预算门槛。按实际缩小路线及颜色复核预留时间，新搜索使用本局剩余余量；按钮与点击后的预算判断一致，实际目标路线仍单独复核。
+- 重试不可用时分别说明时间、操作额度、搜索次数和缩小路线原因，避免统一误报为时间不足。
 - 精准模式移除预测候选列表，改为浮窗「重新寻色」和 F7。停止当前搜索、释放鼠标并缩小画板至最大可见范围后，在同局重新搜索。
 - 修复屏幕吸管的 DPI/多屏坐标混用；冻结截图与物理鼠标坐标逐像素对应，去除全屏及强制前台，禁止定位非本工具窗口。
 - 修复100px色码卡识别和强字模色块边界，提高原失败截图复核速度。计时证据可靠时，仅对已打开色板的保守截止最多校正20秒。
@@ -14,6 +16,8 @@
 
 ## 繁體中文
 
+- 修正剩餘約 50 秒仍拒絕本局重試的預算門檻。依實際縮小路線與顏色複核預留時間，新搜尋使用本局剩餘餘量；按鈕與點擊後的預算判斷一致，實際目標路線仍單獨複核。
+- 重試無法使用時分別說明時間、操作額度、搜尋次數與縮小路線原因，避免統一誤報為時間不足。
 - 精準模式移除預測候選清單，改為浮窗「重新尋色」與 F7。停止目前搜尋、釋放滑鼠並縮小色板至最大可見範圍後，在同局重新搜尋。
 - 修復螢幕吸管的 DPI／多螢幕座標混用；凍結截圖與實體滑鼠座標逐像素對應，移除全螢幕與強制前景，禁止定位非本工具視窗。
 - 修復100px色碼卡辨識與強字模色塊邊界，提高原失敗截圖複核速度。計時證據可靠時，僅對已開啟色板的保守截止最多校正20秒。
@@ -26,6 +30,8 @@
 
 ## English
 
+- Fixes overly conservative retry admission with about 50 seconds left. It reserves the actual zoom-out route and color verification, then searches within the round's remaining allowance. Button availability and retry admission use the same budget; real target routes still require independent approval.
+- Unavailable retries now distinguish time, action allowance, search count and zoom-out route causes instead of reporting every refusal as insufficient time.
 - Precise Search replaces predicted alternatives with Retry in the overlay and F7. It ends the current search, releases the mouse, zooms out to the maximum visible area and searches again in the same round.
 - Fixes mixed DPI and multi-monitor eyedropper coordinates. Physical cursor pixels map directly to the frozen screenshot. Fullscreen and forced focus are removed, and foreign windows cannot be repositioned.
 - Improves 100px HEX-card decoding and strong-glyph swatch validation. Reliable timer evidence can correct the conservative cap of an already-open board by at most 20 seconds.

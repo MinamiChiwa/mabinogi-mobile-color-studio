@@ -17,7 +17,7 @@ from native_input_route_search import _needed
 from dye_regions import session_region_count,bind_region_rules
 from .candidate_selection import (candidate_id,candidate_observation,present_candidates,
     compile_candidate_selection,CandidateUnavailable,exact_observed_rules,actual_colors)
-from .retry import RetryRequested,minimum_scale_route,at_minimum_scale
+from .retry import RetryRequested,minimum_scale_route,at_minimum_scale,retry_budget
 from .session_deadline import verified_timer_extension,verified_timer_grace_until,verified_timer_shortening
 from .session_status import SessionStatusError,SessionBindingChanged,session_diagnostic
 
@@ -52,7 +52,7 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
     result=dict(rules=rules,region_count=count,stop_reason='not_started',accepted=False,target_exact=False,verified=False,
         planning_rounds=[],steps=[],observations=[],actual_input_attempts=0,
         server_confirmation_verified=False,initial_visual_retries=0,observation_retries=0,compromise_selected=False,
-        retry_epochs=0,retries=[])
+        retry_epochs=0,retries=[],retry_budget_checks=[])
     compromise_route=None;compromise_template=None;best_observed=None
     target_route=None;target_template=None
     candidate_rows=[];candidate_observations={};batch_id='native-'+str(time.monotonic_ns())
@@ -311,34 +311,59 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                     assess_feedback(context,current['checkpoint'],current['frames'],rules)['screenshot_verified']))
         else:fields.update(current_colors=[None]*count,verified=False,screenshot_verified=False)
         return fields
-    def retry_allowance(route):
-        native=max(1.5,1.5*max(costs['native'][-3:],default=0.)+.3)
-        visual=max(4.,1.5*max(costs['closing_visual'][-3:],default=0.)+.5)
-        preparation=max(.6,1.5*max(costs['input'][-3:],default=0.)+.25)
-        # A retry admits the complete reset, a useful bounded new search and
-        # two ordinary gestures with measured final readback before any wheel.
-        reset=sum(g['input_seconds']+preparation+native for g in route)
-        return native+reset+visual+15.+2*(preparation+.5)+native+visual+8.25
+    retry_route_cache={}
+    def retry_assessment(phase,*,include_reference=True,permit_unknown=False,checkpoint=None):
+        checkpoint=checkpoint if checkpoint is not None else (current or {}).get('checkpoint')
+        route=[];route_known=checkpoint is not None;route_error=None
+        if route_known:
+            key=json.dumps(checkpoint['pose'],sort_keys=True)
+            try:
+                if key not in retry_route_cache:
+                    retry_route_cache.clear()
+                    retry_route_cache[key]=minimum_scale_route(checkpoint['pose'],geometry,settings)
+                route=retry_route_cache[key]
+            except ValueError as exc:route_error=str(exc)
+        budget=retry_budget(route,costs,include_reference=include_reference)
+        budget.update(phase=phase,at_monotonic=clock(),remaining_seconds=end-clock(),effective_deadline=end,
+            epoch=result['retry_epochs'],reset_route_known=route_known,reset_wheel_steps=[g['wheel_steps'] for g in route],
+            remaining_actions=max_actions-result['actual_input_attempts'],remaining_rounds=max_rounds-planning_count,
+            measured_native_seconds=list(costs['native'][-3:]),measured_visual_seconds=list(costs['closing_visual'][-3:]),
+            measured_input_preparation_seconds=list(costs['input'][-3:]))
+        if planning_count>=max_rounds:reason='round_limit'
+        elif result['actual_input_attempts']>=max_actions:reason='action_limit'
+        elif route_error is not None:reason='unsupported_retry_settings'
+        elif not route_known and not permit_unknown:reason='retry_resetting'
+        elif budget['required_actions']>budget['remaining_actions']:reason='insufficient_retry_actions'
+        elif budget['required_seconds']>=budget['remaining_seconds']:reason='insufficient_retry_time'
+        else:reason=None
+        budget.update(enabled=reason is None,reason=reason)
+        if route_error is not None:budget['route_error']=route_error
+        return budget
+    def record_retry_budget(budget):
+        result['retry_budget_checks'].append(copy.deepcopy(budget))
+        emit('native_retry_budget',phase=budget['phase'],enabled=budget['enabled'],budget=copy.deepcopy(budget))
     def retry_available(reason,*,waiting=False):
-        if retry_requested is None:return
-        enabled=(planning_count<max_rounds and result['actual_input_attempts']<max_actions
-            and clock()+retry_allowance([])<end)
-        emit('native_retry_available',enabled=enabled,reason=reason if enabled else
-            ('action_limit' if result['actual_input_attempts']>=max_actions else
-             'round_limit' if planning_count>=max_rounds else 'insufficient_retry_time'),waiting_for_retry=waiting,**retry_fields())
+        if retry_requested is None:return False
+        budget=retry_assessment('availability');record_retry_budget(budget)
+        emit('native_retry_available',enabled=budget['enabled'],reason=reason if budget['enabled'] else budget['reason'],
+            waiting_for_retry=waiting,budget=budget,**retry_fields())
+        return budget['enabled']
     def wait_for_retry():
         nonlocal cp,frames,current,retry_suppressed
         if retry_requested is None:return False
-        retry_available(result['stop_reason'],waiting=True)
-        budget_disabled=clock()+retry_allowance([])>=end
+        budget_disabled=not retry_available(result['stop_reason'],waiting=True)
         while True:
             visual=max(4.,1.5*max(costs['closing_visual'][-3:],default=0.)+.5)
             native=max(1.5,1.5*max(costs['native'][-3:],default=0.)+.3)
             close=visual+native+8.25
             if clock()+close>=end:break
-            if not budget_disabled and clock()+retry_allowance([])>=end:
-                emit('native_retry_available',enabled=False,reason='insufficient_retry_time',waiting_for_retry=True,**retry_fields())
-                budget_disabled=True
+            if not budget_disabled:
+                budget=retry_assessment('availability')
+                if not budget['enabled']:
+                    record_retry_budget(budget)
+                    emit('native_retry_available',enabled=False,reason=budget['reason'],waiting_for_retry=True,
+                        budget=budget,**retry_fields())
+                    budget_disabled=True
             try:
                 io.check(end);check_retry()
             except RetryRequested:return True
@@ -388,18 +413,18 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                     raise GoalStop('input_outcome_unknown')
                 if receipt is not None and receipt.get('released') is not True:
                     raise GoalStop('input_outcome_unknown')
-            if planning_count>=max_rounds:return reject('round_limit')
-            if result['actual_input_attempts']>=max_actions:return reject('action_limit')
-            if clock()+retry_allowance([])>=end:return reject('insufficient_retry_time')
+            # A released partial gesture has no current pose. Its only initial
+            # authorization is a fresh read; no wheel is admitted until that
+            # actual pose has passed the complete reset budget below.
+            budget=retry_assessment('before_reference',permit_unknown=True)
+            record_retry_budget(budget);attempt['before_reference_budget']=copy.deepcopy(budget)
+            if not budget['enabled']:return reject(budget['reason'])
             fresh=observe_native('retry_'+str(epoch)+'_reference')
             try:route=minimum_scale_route(fresh['pose'],geometry,settings)
             except ValueError:return reject('unsupported_retry_settings')
-            if len(route)+2>max_actions-result['actual_input_attempts']:
-                cp,frames=observe_resilient('retry_'+str(epoch)+'_rejected')
-                return reject('insufficient_retry_actions')
-            if clock()+retry_allowance(route)>=end:
-                cp,frames=observe_resilient('retry_'+str(epoch)+'_rejected')
-                return reject('insufficient_retry_time')
+            budget=retry_assessment('after_reference',include_reference=False,checkpoint=fresh)
+            record_retry_budget(budget);attempt['after_reference_budget']=copy.deepcopy(budget)
+            if not budget['enabled']:return reject(budget['reason'])
             cp=fresh;frames=None
             emit('native_retry_available',enabled=False,reason='retry_resetting',**retry_fields())
             emit('native_retry_reset',status='zooming',reason='user_retry',**retry_fields())
@@ -848,11 +873,25 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                 (scale*.99,scale,scale*1.01,scale*.9999),(pose['rotation_degrees'],))
             search_cap=25.
             if result['retry_epochs']:
-                native=max(1.5,1.5*max(costs['native'][-3:],default=0.)+.3)
                 visual=max(4.,1.5*max(costs['closing_visual'][-3:],default=0.)+.5)
-                preparation=max(.6,1.5*max(costs['input'][-3:],default=0.)+.25)
-                route_reserve=2*(preparation+.5)+native+2*visual+8.25
-                search_cap=min(25.,max(.01,end-clock()-route_reserve))
+                # Reserve a real closing read, not a hypothetical two-gesture
+                # route. The planner and reserve_route independently admit any
+                # actual target sequence, its revalidation and final readback.
+                search_cap=min(25.,end-clock()-visual-8.25)
+                search_budget=dict(phase='search',at_monotonic=clock(),effective_deadline=end,
+                    epoch=result['retry_epochs'],remaining_seconds=end-clock(),visual_allowance_seconds=visual,
+                    closing_guard_seconds=8.25,search_cap_seconds=max(0.,search_cap),enabled=search_cap>0.,
+                    reason=None if search_cap>0. else 'insufficient_retry_time')
+                record_retry_budget(search_budget)
+                if search_cap<=0.:raise GoalStop('insufficient_time')
+            def planner_search_budget():
+                if not result['retry_epochs']:return min(search_cap,max(.01,end-clock()-15))
+                # Rebased templates can consume time before falling back to a
+                # new search. Recheck its actual remainder without the legacy
+                # fixed 15-second footer or a fictitious .01-second allowance.
+                cap=min(search_cap,end-clock()-visual-8.25)
+                if cap<=0.:raise GoalStop('insufficient_time')
+                return cap
             emit('planning',round=number,purpose='compromise' if compromise_route is not None else 'target')
             if target_route is not None:
                 plan=rebase_compromise_plan(context,cp,frames,rules,target_route,target_template,
@@ -860,12 +899,12 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                 if plan['candidate'] is None:
                     target_route=target_template=None
                     plan=planner(context,cp,frames,rules,grid,now=clock(),engineering_deadline=end,
-                        time_budget_seconds=min(search_cap,max(.01,end-clock()-15)),clock=clock,
+                        time_budget_seconds=planner_search_budget(),clock=clock,
                         check=planning_guard,
                         **({'collect_candidates':True} if candidate_choice is not None else {}))
             elif compromise_route is None:
                 plan=planner(context,cp,frames,rules,grid,now=clock(),engineering_deadline=end,
-                    time_budget_seconds=min(search_cap,max(.01,end-clock()-15)),clock=clock,
+                    time_budget_seconds=planner_search_budget(),clock=clock,
                     check=planning_guard,
                     **({'collect_candidates':True} if candidate_choice is not None else {}))
             else:
