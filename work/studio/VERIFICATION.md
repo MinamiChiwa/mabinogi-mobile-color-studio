@@ -1,3 +1,12 @@
+# Local candidate 0.4.2rc13 — retry retention and measured route admission (2026-10-12)
+
+- The recorded retry had 63.313 seconds left at admission and 32.797 after reset/search. Its selected ten-action route needed about 34 seconds with measured input/readback, despite a 9.2-second model estimate. This was a route-budget failure, not a blanket inability to retry with 60 seconds left.
+- Retains the prior best measurement, prepares a checked return before zoom-out, and reserves its actual actions/execution plus bounded preparation. Missing wheel corrections cannot spend that allowance. Normal same-epoch route behavior is preserved; no new game-end idle reserve is added.
+- Affordable exact candidates continue after rejected exact candidates. Return completion requires independently verified actual colors; F9, changed sessions and unknown input cannot claim restoration.
+- Final quick:619 selected,618 passed,one optional historical OCR skip,zero failures/errors;90.751 seconds total. Independent final retry/protected review:75 tests passed with time, quota, correction and rejected-exact boundary reproductions. Full release/live-round verification remains incomplete; two original rc16 similarity captures are still absent.
+
+Report:`docs/verification-retry-retention-2026-10-12.md`. No live input, new dye item or public release in this change.
+
 # Local candidate 0.4.2rc12 — Korean validation integration (2026-10-12)
 
 - Fingerprint-bound Korean palette/marker/input/getter parameters and shared Unity/managed layouts are connected. Normal launch retains diagnostic capability; an explicit known-build validation launch permits the complete existing input/search/retry workflow without claiming input verification.

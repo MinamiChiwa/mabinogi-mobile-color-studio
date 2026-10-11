@@ -44,6 +44,8 @@ def retry_reason_text(reason):
         return '本局自动搜索次数已达上限，已保留当前颜色。'
     if reason=='unsupported_retry_settings':
         return '无法确认当前画板的缩小路线，已保留当前颜色。'
+    if reason=='retry_recovery_unavailable':
+        return '无法确认重试后的恢复路线，已保留当前颜色。'
     if reason=='retry_resetting':
         return '当前动作尚未结束，请稍候再重试。'
     if reason=='session_closing':

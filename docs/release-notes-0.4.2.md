@@ -1,6 +1,9 @@
-# 0.4.2rc12 — 搜索提速与韩服验证接入
+# 0.4.2rc13 — 重试预算与实测结果恢复
 
 ## 简体中文
+
+- 修复重试后选中执行与复核来不及完成的路线。按本机最近的实际耗时筛选可执行方案；首条精准路线不可执行时，继续寻找后面的可执行路线。
+- 重试保留此前最佳实测结果，缩小前准备恢复路线，并为其操作与复核留出时间。新搜索未得到更好结果时恢复旧方案；连恢复都无法完成时保留当前结果，不先缩小画板。漏收滚轮的补齐也不会用掉恢复额度。F9 仍立即停止；只有实际颜色复核通过才显示恢复完成。
 
 - 按完整构建指纹接入当前韩服的对象、鼠标和几何参数；新增 `Korean-validation.cmd` 完整染色验证入口及 `Korean-preflight.cmd` 只读检查。韩服拖动、缩放、旋转和重试沿用现有流程；尚未完成活跃色板和实机响应验收，不列为正式完整支持。
 
@@ -39,6 +42,9 @@
 
 ## 繁體中文
 
+- 修正重試後選中來不及完成操作與複核的路線。依本機最近的實際耗時篩選可執行方案；第一條精準路線無法執行時，繼續尋找後面的可執行路線。
+- 重試保留先前最佳實測結果，縮小前準備恢復路線，並為操作與複核保留時間。新搜尋未得到更好結果時恢復舊方案；無法完成恢復時保留目前結果，不先縮小色板。漏收滾輪的補齊也不會用掉恢復額度。F9 仍立即停止；只有實際顏色複核通過才顯示恢復完成。
+
 - 依完整版本指紋接入目前韓服的物件、滑鼠及幾何參數；新增 `Korean-validation.cmd` 完整染色驗證入口及 `Korean-preflight.cmd` 唯讀檢查。韓服拖動、縮放、旋轉與重試沿用現有流程；尚未完成實際色板與操作響應驗收，不列為正式完整支援。
 
 - 重用相同顏色的距離計算，減少路線模擬中重複的 float32 資料轉換；保留原本的顏色算法、事件順序、搜尋範圍及實際核驗。未命中時仍會使用剩餘搜尋時間，以檢查更多候選。
@@ -75,6 +81,9 @@
 重試不增加遊戲時間、不消耗新道具，不自動開啟或套用染色。有限搜尋無法保證多色精準成功。本機候選版尚未完成新一局實機驗收。
 
 ## English
+
+- Fixes retry selecting routes that cannot finish execution and verification in time. Candidates are filtered using recent measured costs on the current computer. An unaffordable exact route no longer prevents searching for later executable matches.
+- Keeps the best measured result across retries and prepares a return before zooming out. Search reserves the concrete return and verification costs. If no better result is reached, the previous result is restored; a retry that cannot complete a return keeps the current board. Wheel corrections also preserve the return allowance. F9 stops immediately, and restoration is reported only after actual color verification.
 
 - Selects the current Korean object, mouse and geometry parameters by complete build fingerprint. `Korean-validation.cmd` enables the full dye workflow for testing; `Korean-preflight.cmd` runs read-only checks. Drag, zoom, rotation and retry use the existing workflow. Live palette and response validation is pending; Korean support is not yet declared complete.
 

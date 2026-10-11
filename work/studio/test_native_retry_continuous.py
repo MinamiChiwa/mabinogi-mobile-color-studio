@@ -36,15 +36,17 @@ class ContinuousRetryControllerTests(unittest.TestCase):
             with self.subTest(count=count):
                 io=ContinuousRetryIO(count,scale=1.8610960245132446)
                 result,events=self.run_retry(io)
-                self.assertEqual([a['wheel_steps'] for a in io.actions],[-131])
+                reset_steps=[s for s in result['steps'] if s['purpose']=='retry_reset']
+                self.assertEqual([s['requested_gesture']['wheel_steps'] for s in reset_steps],[-131])
                 self.assertEqual(result['retry_epochs'],1,result.get('error'))
-                self.assertEqual(result['actual_input_attempts'],1)
+                self.assertEqual(result['actual_input_attempts'],len(io.actions))
                 self.assertEqual(result['effective_deadline'],90.)
                 self.assertEqual(io.timer_grace_until,31.)
-                self.assertEqual(io.pose['scale'],.5)
+                self.assertEqual(reset_steps[0]['after']['pose']['scale'],.5)
                 reset_labels=[o['label'] for o in result['observations'] if o['label'].startswith('retry_1_')]
                 self.assertEqual(reset_labels,['retry_1_reference','retry_1_after'])
-                self.assertEqual(result['best_actual_colors'],io.colors())
+                self.assertEqual(result['best_actual_colors'],result['initial']['checkpoint']['client_hex'])
+                self.assertEqual(result['actual_colors'],io.colors());self.assertTrue(result['best_current'])
                 reset=result['steps'][0]
                 self.assertEqual([g['wheel_steps'] for g in reset['requested_route']],[-32,-32,-32,-32,-3])
                 self.assertTrue(reset['screenshot_verified'])
@@ -81,10 +83,10 @@ class ContinuousRetryControllerTests(unittest.TestCase):
         io.perform_retry_reset=drop_last
         result,events=self.run_retry(io)
         self.assertEqual(result['retry_epochs'],1,result.get('error'))
-        self.assertEqual([g['wheel_steps'] for g in io.actions],[-69,-1])
-        self.assertEqual(io.pose['scale'],.5)
+        reset_steps=[s for s in result['steps'] if s['purpose']=='retry_reset']
+        self.assertEqual([s['requested_gesture']['wheel_steps'] for s in reset_steps],[-69,-1])
+        self.assertEqual(reset_steps[-1]['after']['pose']['scale'],.5)
         self.assertEqual(result['retries'][0]['correction_passes'],1)
-        self.assertEqual(result['steps'][-1]['after']['pose']['scale'],.5)
 
     def test_continuous_budget_pays_one_preparation_and_one_final_visual_read(self):
         route=[PointerGesture('wheel',((260,260),),wheel_steps=n).record() for n in (-32,-32,-32,-32,-3)]

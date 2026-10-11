@@ -362,13 +362,15 @@ def _refine_single_wheels(session,pose,geometry,settings,rules,seeds,*,now,deadl
 
 def plan_from_checkpoint(context, checkpoint, frames, rules, grid, *, now, engineering_deadline,
         time_budget_seconds=12., reserve_seconds=EXECUTION_RESERVE_SECONDS, verification_margin_seconds=3., clock=time.monotonic,
-        check=lambda:None,collect_candidates=False):
+        check=lambda:None,collect_candidates=False,candidate_admission=None):
     """Rebase the existing fresh search on the observed pose, with bounded time.
 
     No recorded routes or after-action pose enter the search. Caller grid is
     heuristic coverage, not a target pose. The selected route is diagnostic.
     """
     started=clock();check();rules=normalize_target_rules(rules)
+    if candidate_admission is not None and not callable(candidate_admission):raise ValueError('Invalid candidate admission')
+    def admissible(row):return row is not None and (candidate_admission is None or candidate_admission(row))
     feedback=assess_feedback(context,checkpoint,frames,rules);_fresh(now,frames)
     if (not all(math.isfinite(v) for v in (engineering_deadline,time_budget_seconds,reserve_seconds,verification_margin_seconds))
         or time_budget_seconds<=0 or not 0<=reserve_seconds<=GAME_TAIL_SECONDS or not 0<=verification_margin_seconds<=20):
@@ -417,6 +419,8 @@ def plan_from_checkpoint(context, checkpoint, frames, rules, grid, *, now, engin
             result['nearest_diagnostic']=audited
             retain_compromise(audited)
     def finish(candidate,reason):
+        if isinstance(candidate,list):candidate=[row for row in candidate if admissible(row)]
+        elif candidate is not None and not admissible(candidate):candidate=None
         if collect_candidates:
             # Candidate collection owns its finite allowance inside this same
             # planning budget. It never starts a second global search after a
@@ -434,7 +438,8 @@ def plan_from_checkpoint(context, checkpoint, frames, rules, grid, *, now, engin
             if target:candidate=target
         if not candidate and compromise_rows:
             selected=choose_compromise(context,checkpoint,rules,
-                [stationary_row,*sorted(compromise_rows.values(),key=lambda row:(*predicted_quality(row['prediction'],rules),row['needed']))[:16]],
+                [row for row in [stationary_row,*sorted(compromise_rows.values(),key=lambda row:(*predicted_quality(row['prediction'],rules),row['needed']))]
+                    if admissible(row)][:17],
                 deadline=started+time_budget_seconds-.05,clock=clock,check=check)
             if selected is None:
                 # Finite search/risk-scoring expiry does not erase endpoint
@@ -442,19 +447,20 @@ def plan_from_checkpoint(context, checkpoint, frames, rules, grid, *, now, engin
                 # those options; a worse proposal must not replace it merely
                 # because the optional neighborhood tie-break ran out of time.
                 check()
-                owned=[audit_candidate_endpoint(context,checkpoint,rules,stationary_row,check=check)]
+                owned=[audit_candidate_endpoint(context,checkpoint,rules,stationary_row,check=check)] if admissible(stationary_row) else []
                 owned.extend(row for row in compromise_rows.values()
-                    if row.get('endpoint_audit',{}).get('full_route_replayed') is True)
-                selected=min(owned,key=lambda row:(*predicted_quality(row['prediction'],rules),row['needed'],len(row['input_route'])))
-                selected=copy.deepcopy(selected)
-                selected['compromise_neighborhood_verified']=False
+                    if row.get('endpoint_audit',{}).get('full_route_replayed') is True and admissible(row))
+                if owned:
+                    selected=min(owned,key=lambda row:(*predicted_quality(row['prediction'],rules),row['needed'],len(row['input_route'])))
+                    selected=copy.deepcopy(selected)
+                    selected['compromise_neighborhood_verified']=False
             if selected is not None:result['compromise_candidate']=selected
         approach=result['approach_candidate'];compromise=result['compromise_candidate']
         if approach is not None and compromise is not None:
             if predicted_quality(compromise['prediction'],rules)<=predicted_quality(approach['prediction'],rules):
                 result['approach_candidate']=None
         completed=max(0.,clock()-started);result['planned_at']=now+completed
-        def fits(row):return row is not None and now+completed+row['needed']+verification_margin_seconds<end
+        def fits(row):return admissible(row) and now+completed+row['needed']+verification_margin_seconds<end
         if isinstance(candidate,list):candidate=next((row for row in candidate if fits(row)),None)
         result.update(search_budget_seconds=time_budget_seconds,planning_elapsed_seconds=completed,
             search_budget_exhausted=completed>=time_budget_seconds)
@@ -519,7 +525,7 @@ def plan_from_checkpoint(context, checkpoint, frames, rules, grid, *, now, engin
             row=dict(input_route=route,final_pose=compiled['final_pose'],prediction=prediction,
                 needed=_needed(route,3.,.5),source='periodic_balanced_endpoint')
             row=audit_candidate_endpoint(context,checkpoint,rules,row,check=check)
-            if prediction['predicted_accepted']:return finish(row,'predicted_candidate')
+            if prediction['predicted_accepted'] and admissible(row):return finish(row,'predicted_candidate')
             periodic_routes.append(row);remember_nearest(row)
         result['periodic_routes_evaluated']=len(periodic_routes)
         if periodic_routes:
@@ -567,7 +573,7 @@ def plan_from_checkpoint(context, checkpoint, frames, rules, grid, *, now, engin
             row=audit_candidate_endpoint(context,checkpoint,rules,row,check=check)
             completed=max(0.,clock()-started)
             if completed>=time_budget_seconds or now+completed+needed+verification_margin_seconds>=end:break
-            return finish(row,'no_supported_accepted_candidate')
+            if admissible(row):return finish(row,'no_supported_accepted_candidate')
         remember_nearest(row)
     elapsed=max(0.,clock()-started);search_now=now+elapsed;result['planned_at']=search_now
     if elapsed>=search_budget or search_now+verification_margin_seconds>=end:
@@ -585,7 +591,7 @@ def plan_from_checkpoint(context, checkpoint, frames, rules, grid, *, now, engin
                 check()
                 if clock()-started>=time_budget_seconds:break
                 audited=audit_candidate_endpoint(context,checkpoint,rules,row,check=check)
-                if audited['prediction']['predicted_accepted']:return finish(audited,'no_supported_accepted_candidate')
+                if audited['prediction']['predicted_accepted'] and admissible(audited):return finish(audited,'no_supported_accepted_candidate')
                 remember_nearest(audited)
             elapsed=max(0.,clock()-started);search_now=now+elapsed;result['planned_at']=search_now
             if elapsed>=search_budget or search_now+verification_margin_seconds>=end:
@@ -610,7 +616,7 @@ def plan_from_checkpoint(context, checkpoint, frames, rules, grid, *, now, engin
                 target_pose=target['native_pose'],target_prediction=target['prediction'],
                 initial_marker_error=compiled['initial_marker_error'],final_marker_error=compiled['final_marker_error'])
             row=audit_candidate_endpoint(context,checkpoint,rules,row,check=check)
-            if prediction['predicted_accepted']:return finish(row,'predicted_candidate')
+            if prediction['predicted_accepted'] and admissible(row):return finish(row,'predicted_candidate')
             prior=result['approach_candidate']
             if prior is None or predicted_quality(prediction,rules)<predicted_quality(prior['prediction'],rules):
                 result['approach_candidate']=row

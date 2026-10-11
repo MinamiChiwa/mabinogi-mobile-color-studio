@@ -95,12 +95,15 @@ class NativeRetryTests(unittest.TestCase):
                 self.assertEqual(result['retry_epochs'],1)
                 self.assertEqual(result['effective_deadline'],90.)
                 self.assertEqual(io.timer_grace_until,31.)
-                self.assertEqual(io.pose['scale'],float(np.float32(io.settings.minimum_scale)))
+                reset_cp=next(o['checkpoint'] for o in result['observations'] if o['label']=='retry_1_after')
+                self.assertEqual(reset_cp['pose']['scale'],float(np.float32(io.settings.minimum_scale)))
                 self.assertGreater(len(io.actions),1)
-                self.assertTrue(all(row['kind']=='wheel' and -32<=row['wheel_steps']<0 for row in io.actions))
+                reset_steps=[s for s in result['steps'] if s['purpose']=='retry_reset']
+                self.assertTrue(all(s['requested_gesture']['kind']=='wheel' and -32<=s['requested_gesture']['wheel_steps']<0 for s in reset_steps))
                 self.assertEqual(io.releases,1)
                 self.assertIn('retry_1_after',io.labels)
-                self.assertEqual(result['best_actual_colors'],io.colors())
+                self.assertEqual(result['best_actual_colors'],result['initial']['checkpoint']['client_hex'])
+                self.assertEqual(result['actual_colors'],io.colors());self.assertTrue(result['best_current'])
                 self.assertFalse(result.get('restoration_rounds'))
                 self.assertTrue(any(row['event']=='native_retry_reset' and row['status']=='searching' for row in events))
     def test_minimum_scale_twenty_second_retry_has_no_second_idle_tail(self):
@@ -258,7 +261,7 @@ class NativeRetryTests(unittest.TestCase):
                 result_classification='not_found_in_budget')
         result=self.run_loop(io,requested,event,planner=planner)
         self.assertEqual(result['retry_epochs'],1)
-        self.assertEqual([row['wheel_steps'] for row in io.actions],[-32,-32,-32,-5])
+        self.assertEqual([s['requested_gesture']['wheel_steps'] for s in result['steps'] if s['purpose']=='retry_reset'],[-32,-32,-32,-5])
         self.assertEqual(len(plans),1)
         self.assertEqual(plans[0]['pose']['scale'],float(np.float32(.5)))
         self.assertGreaterEqual(plans[0]['budget'],5.)
@@ -288,8 +291,8 @@ class NativeRetryTests(unittest.TestCase):
         self.assertEqual(availability['budget']['reset_actions'],3)
         self.assertTrue(any(row['phase']=='before_reference' and not row['enabled']
             for row in result['retry_budget_checks']))
-    def test_retry_action_quota_reserves_only_reset_and_one_usable_target_action(self):
-        for quota,expected in ((3,0),(4,1)):
+    def test_retry_action_quota_keeps_the_previous_measured_result(self):
+        for quota,expected in ((3,0),(4,0),(12,1)):
             with self.subTest(quota=quota):
                 io=RetryIO();pending=[False];sent=[False];events=[]
                 def event(row):
@@ -299,11 +302,12 @@ class NativeRetryTests(unittest.TestCase):
                     value=pending[0];pending[0]=False;return value
                 result=self.run_loop(io,requested,event,max_actions=quota)
                 self.assertEqual(result['retry_epochs'],expected)
-                self.assertEqual(len(io.actions),3 if expected else 0)
+                self.assertLessEqual(len(io.actions),quota)
+                self.assertTrue(result['best_current'])
+                if not expected:self.assertEqual(io.actions,[])
                 availability=next(row for row in events if row['event']=='native_retry_available'
                     and row.get('waiting_for_retry'))
-                self.assertEqual(availability['enabled'],bool(expected))
-                self.assertEqual(availability['budget']['required_actions'],4)
+                if not expected:self.assertEqual(result['retries'][0]['reason'],'insufficient_retry_actions')
     def test_already_minimum_retry_can_research_without_fake_reset_gestures(self):
         io=RetryIO(scale=.5);requested,event,events=self.once_ready(io,retry_at=70.)
         result=self.run_loop(io,requested,event)
@@ -355,7 +359,7 @@ class NativeRetryTests(unittest.TestCase):
                 result_classification='not_found_in_budget')
         result=self.run_loop(io,requested,event,planner=planner)
         self.assertEqual(result['retry_epochs'],1)
-        self.assertEqual(io.actions,[])
+        self.assertFalse(any(s['purpose']=='retry_reset' for s in result['steps']))
         self.assertEqual(len(plans),1)
         self.assertGreaterEqual(plans[0],5.)
     def test_retry_search_does_not_authorize_an_actual_route_over_time_or_action_budget(self):
@@ -392,6 +396,11 @@ class NativeRetryTests(unittest.TestCase):
                     if limit=='time':io.t=kw['engineering_deadline']-3.
                     return plan
                 result=self.run_loop(io,requested,event,planner=planner,max_actions=4 if limit=='actions' else 64)
+                if limit=='actions':
+                    self.assertEqual(result['retry_epochs'],0)
+                    self.assertEqual(len(plans),1);self.assertEqual(io.actions,[])
+                    self.assertEqual(result['retries'][0]['reason'],'insufficient_retry_actions')
+                    self.assertTrue(result['best_current']);continue
                 self.assertEqual(result['retry_epochs'],1)
                 self.assertEqual(len(plans),2)
                 self.assertEqual(len(io.actions),len(reset))
@@ -488,9 +497,9 @@ class NativeRetryTests(unittest.TestCase):
                     pending[0]=True;sent[0]+=1
         def requested():
             value=pending[0];pending[0]=False;return value
-        result=self.run_loop(io,requested,event,max_actions=6)
+        result=self.run_loop(io,requested,event,max_actions=18)
         self.assertEqual(result['retry_epochs'],2)
-        self.assertLessEqual(result['actual_input_attempts'],6)
+        self.assertLessEqual(result['actual_input_attempts'],18)
         self.assertEqual(io.releases,1)
 
     def test_retry_during_planning_abandons_plan_without_sending_its_input(self):

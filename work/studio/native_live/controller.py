@@ -1,5 +1,6 @@
 """Bounded user-goal controller; IO owns reads and actual input, never apply."""
 import copy,json,math,time,traceback
+import inspect
 import numpy as np
 from native_input_response import InputGeometry,replay_native_route
 from native_palette_search import PoseGrid
@@ -21,6 +22,7 @@ from .retry import (RetryRequested,minimum_scale_route,at_minimum_scale,retry_bu
     phase_allowances,MINIMUM_USEFUL_SEARCH_SECONDS)
 from .session_deadline import verified_timer_extension,verified_timer_grace_until,verified_timer_shortening
 from .session_status import SessionStatusError,SessionBindingChanged,session_diagnostic
+from .retry_recovery import prepare_retry_recovery
 
 
 class GoalStop(Exception):pass
@@ -60,7 +62,7 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
     if candidate_choice is not None and not callable(candidate_choice):raise ValueError('Invalid candidate choice callback')
     if retry_requested is not None and not callable(retry_requested):raise ValueError('Invalid retry callback')
     if candidate_choice is not None and retry_requested is not None:raise ValueError('Candidate selection and retry are exclusive')
-    retry_suppressed=True;retry_pending=False;planning_count=0
+    retry_suppressed=True;retry_pending=False;planning_count=0;retry_anchor=None;retry_return=None;retry_return_reference=None
     previous_retry_check=getattr(io,'retry_check',None)
     costs=dict(native=[],visual=[],input=[],closing_visual=[])
     io.timer_grace_until=timer_grace_until
@@ -108,12 +110,20 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
         native,visual,preparation=phase_allowances(costs)
         measured=sum(g['input_seconds']+preparation for g in route)+native*max(0,count-1)+visual
         return max(row['needed'],measured),visual
+    def retry_recovery_allowance():
+        # Reserve work for this concrete return, not another idle game tail.
+        if (retry_return is None or retry_anchor is None or current is not None and
+                observed_quality(current['checkpoint']['client_hex'],rules)<=
+                observed_quality(retry_anchor['checkpoint']['client_hex'],rules)):return 0.,0
+        native,_,_=phase_allowances(costs)
+        return route_allowance(retry_return)[0]+2.+native,len(retry_return['input_route'])
     def reserve_route(row,purpose,*,include_revalidation=False):
         count=len(row['input_route'])
-        if count>max_actions-result['actual_input_attempts']:
+        return_cost,return_actions=(retry_recovery_allowance() if purpose in ('target','compromise','approach') else (0.,0))
+        if count+return_actions>max_actions-result['actual_input_attempts']:
             raise GoalStop('insufficient_compromise_actions' if purpose=='compromise' else 'insufficient_route_actions')
         allowance,visual=route_allowance(row)
-        if count and clock()+allowance+(visual if include_revalidation else 0.)>=end:
+        if count and clock()+allowance+return_cost+(visual if include_revalidation else 0.)>=end:
             raise GoalStop('insufficient_time')
     def observe(label,phase_deadline=None):
         nonlocal end,backend_binding,previous_timer,current,qualified_timer_frame,qualified_timer_checkpoint,timer_shortening_observed
@@ -451,7 +461,7 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
         finally:retry_suppressed=False
         return False
     def reset_retry():
-        nonlocal cp,frames,current,best_observed,retry_suppressed,retry_pending
+        nonlocal cp,frames,current,best_observed,retry_suppressed,retry_pending,retry_anchor,retry_return,retry_return_reference
         nonlocal target_route,target_template,compromise_route,compromise_template
         retry_pending=False;retry_suppressed=True
         epoch=result['retry_epochs']+1
@@ -485,6 +495,28 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
             budget=retry_assessment('after_reference',include_reference=False,checkpoint=fresh)
             record_retry_budget(budget);attempt['after_reference_budget']=copy.deepcopy(budget)
             if not budget['enabled']:return reject(budget['reason'])
+            saved_anchor=copy.deepcopy(best_observed)
+            # Compile a return before destructive zooming. The proposed reset
+            # uses the production float32 kernel; actual input is still checked
+            # below, and any differing endpoint is recompiled from its readback.
+            reset_reference=copy.deepcopy(fresh)
+            reset_reference['pose']=replay_native_route(fresh['pose'],route,geometry,settings,
+                wheel_delta_per_step=1.,sample_policy='all_recorded_points')['final_pose']
+            reset_reference['client_hex']=actual_colors(context,reset_reference['pose'])
+            prepared=None
+            if saved_anchor and observed_quality(reset_reference['client_hex'],rules)>observed_quality(saved_anchor['checkpoint']['client_hex'],rules):
+                prepared=prepare_retry_recovery(context,reset_reference,saved_anchor['checkpoint'],rules,
+                    deadline=min(end,clock()+2.),clock=clock,check=planning_guard)
+                if prepared is None:return reject('retry_recovery_unavailable')
+                return_cost,_=route_allowance(prepared)
+                budget.update(recovery_actions=len(prepared['input_route']),recovery_allowance_seconds=return_cost)
+                budget['required_actions']=max(budget['required_actions'],budget['reset_actions']+len(prepared['input_route']))
+                budget['required_seconds']+=return_cost+2.+phase_allowances(costs)[0]
+                budget.update(at_monotonic=clock(),remaining_seconds=end-clock())
+                if budget['required_actions']>max_actions-result['actual_input_attempts']:return reject('insufficient_retry_actions')
+                if budget['required_seconds']>=end-clock():return reject('insufficient_retry_time')
+                attempt['after_reference_budget']=copy.deepcopy(budget)
+            retry_anchor=saved_anchor;retry_return=prepared;retry_return_reference=reset_reference
             cp=fresh;frames=None
             emit('native_retry_available',enabled=False,reason='retry_resetting',**retry_fields())
             emit('native_retry_reset',status='zooming',reason='user_retry',**retry_fields())
@@ -503,6 +535,18 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                     record_retry_budget(budget)
                     if not budget['enabled']:raise GoalStop('retry_minimum_unconfirmed')
                     route=minimum_scale_route(cp['pose'],geometry,settings)
+                    if prepared is not None:
+                        recover_cost,_=route_allowance(prepared)
+                        correction_budget=retry_budget(route,costs,include_reference=False,continuous=True)
+                        reason=('insufficient_retry_actions' if correction_budget['reset_actions']+len(prepared['input_route'])>
+                            max_actions-result['actual_input_attempts'] else 'insufficient_retry_time' if
+                            correction_budget['required_seconds']+recover_cost+2.+phase_allowances(costs)[0]>=end-clock() else None)
+                        if reason:
+                            # A missed wheel event does not authorize spending
+                            # the actions reserved for the earlier result.
+                            retry_return=None;retry_return_reference=None
+                            restore_retry_anchor()
+                            return reject(reason)
                     correction+=1;attempt['correction_passes']=correction
             else:
                 for index,gesture in enumerate(route):
@@ -514,9 +558,22 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
             if not at_minimum_scale(cp['pose'],settings):raise GoalStop('retry_minimum_unconfirmed')
             if frames is None:cp,frames=observe_resilient('retry_'+str(epoch)+'_after')
             if not at_minimum_scale(cp['pose'],settings):raise GoalStop('retry_minimum_unconfirmed')
-            # A deliberate retry owns a new measured anchor. Returning to a
-            # previous epoch's best would undo the user's requested zoom out.
-            best_observed=copy.deepcopy(current)
+            # Zoom-out is a search reference, not a replacement for the best
+            # measured result. Keep a checked return before spending search time.
+            if (retry_anchor and observed_quality(cp['client_hex'],rules)>
+                    observed_quality(retry_anchor['checkpoint']['client_hex'],rules)):
+                if cp['pose']!=reset_reference['pose'] or cp['client_hex']!=reset_reference['client_hex']:
+                    retry_return=prepare_retry_recovery(context,cp,retry_anchor['checkpoint'],rules,
+                        deadline=min(end,clock()+2.),clock=clock,check=planning_guard,
+                        preferred_routes=[prepared['input_route']] if prepared else [])
+                retry_return_reference=copy.deepcopy(cp)
+                attempt['recovery_preparation']=dict(prepared=retry_return is not None,
+                    anchor_colors=retry_anchor['checkpoint']['client_hex'],
+                    route=copy.deepcopy(retry_return['input_route']) if retry_return else None)
+            else:retry_return=None;retry_return_reference=None
+            if (best_observed is None or observed_quality(cp['client_hex'],rules)<
+                    observed_quality(best_observed['checkpoint']['client_hex'],rules)):
+                best_observed=copy.deepcopy(current)
             target_route=target_template=compromise_route=compromise_template=None
             result.update(retry_epochs=epoch,accepted=False,stop_reason='not_started',compromise_selected=False)
             attempt.update(status='searching',actual_pose=copy.deepcopy(cp['pose']),actual_colors=list(cp['client_hex']))
@@ -526,6 +583,59 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
             retry_suppressed=False
             # Repeated presses during the reset are coalesced into this reset.
             if retry_requested is not None:retry_requested()
+
+    def restore_retry_anchor():
+        nonlocal cp,frames,current,retry_return,retry_suppressed,best_observed
+        if retry_anchor is None or current is None:return False
+        baseline=retry_anchor['checkpoint']
+        if observed_quality(current['checkpoint']['client_hex'],rules)<=observed_quality(baseline['client_hex'],rules):
+            return False
+        saved_suppressed=retry_suppressed;retry_suppressed=True
+        transaction=dict(status='preparing',anchor_colors=list(baseline['client_hex']),attempts=[])
+        result['retries'][-1]['recovery']=transaction
+        try:
+            if clock()>=end:return False
+            # The reset endpoint is already screenshot-verified. Re-read only
+            # if intervening input/failed observation invalidated that reference.
+            fresh=current['checkpoint']
+            for attempt in range(2):
+                reference_pose=copy.deepcopy(fresh['pose'])
+                guard()
+                checked_pose=(getattr(io,'last_checked_state',{}) or {}).get('pose')
+                if checked_pose is not None and checked_pose!=reference_pose:
+                    fresh=observe_native('retry_return_reference_'+str(attempt))
+                preferred=[retry_return['input_route']] if retry_return is not None else []
+                unchanged=(retry_return_reference is not None and all(fresh[key]==retry_return_reference[key]
+                    for key in ('binding','pose','client_hex')))
+                candidate=(retry_return if unchanged else prepare_retry_recovery(context,fresh,baseline,rules,
+                    deadline=min(end,clock()+2.),clock=clock,check=planning_guard,preferred_routes=preferred))
+                if candidate is None:
+                    transaction['status']='route_unavailable';return False
+                try:reserve_route(candidate,'restore_retry')
+                except GoalStop as exc:
+                    transaction['status']=str(exc);return False
+                transaction['attempts'].append(copy.deepcopy(candidate))
+                emit('action',kind='return',purpose='restore_retry')
+                route=candidate['input_route'];reference=fresh
+                for index,gesture in enumerate(route):
+                    cp,frames,feedback=submit(gesture,'retry_return_'+str(result['retry_epochs'])+'_'+str(attempt)+'_'+str(index),
+                        reference,'restore_retry',visual_required=index==len(route)-1)
+                    reference=cp
+                    if (complete_screenshot(cp,frames) and observed_quality(cp['client_hex'],rules)<=
+                            observed_quality(baseline['client_hex'],rules)):break
+                if not route:cp,frames=observe_resilient('retry_return_current')
+                if (complete_screenshot(cp,frames) and observed_quality(cp['client_hex'],rules)<=
+                        observed_quality(baseline['client_hex'],rules)):
+                    transaction.update(status='restored',actual_colors=list(cp['client_hex']))
+                    if observed_quality(cp['client_hex'],rules)<observed_quality(best_observed['checkpoint']['client_hex'],rules):
+                        best_observed=copy.deepcopy(current)
+                    retry_return=None
+                    result.update(stop_reason='target_observed' if score_codes(cp['client_hex'],rules)['accepted'] else 'compromise_observed',
+                        accepted=score_codes(cp['client_hex'],rules)['accepted'],retry_recovered=True)
+                    return True
+                fresh=cp;retry_return=None
+            transaction['status']='unconfirmed';return False
+        finally:retry_suppressed=saved_suppressed
 
     def retain_candidates(plan):
         nonlocal candidate_rows
@@ -961,11 +1071,27 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
             # shortest complete input/final read. No second idle tail applies.
             native,visual,preparation=phase_allowances(costs)
             shortest_route=max(3.5,preparation+.296+visual)
-            cap=min(25.,end-clock()-visual-shortest_route)
+            recover_cost=retry_recovery_allowance()[0]
+            cap=min(25.,end-clock()-max(visual+shortest_route,recover_cost))
             if cap<MINIMUM_USEFUL_SEARCH_SECONDS:raise GoalStop('insufficient_time')
             return cap
+        admission_failures=set()
+        def measured_admission(row):
+            # Filter before ranking the final candidates, not after publishing
+            # one long route that leaves the user stranded at the reset pose.
+            return_cost,return_actions=retry_recovery_allowance()
+            if len(row['input_route'])+return_actions>max_actions-result['actual_input_attempts']:
+                admission_failures.add('actions');return False
+            if clock()+route_allowance(row)[0]+return_cost+phase_allowances(costs)[1]>=end:
+                admission_failures.add('time');return False
+            return True
+        def call_planner(*args,**kwargs):
+            if 'candidate_admission' in inspect.signature(planner).parameters:
+                kwargs['candidate_admission']=measured_admission
+            return planner(*args,**kwargs)
         while planning_count<max_rounds:
             number=planning_count;planning_count+=1
+            admission_failures.clear()
             search_cap=25.
             retry_available('searching')
             guard();observed=assess_feedback(context,cp,frames,rules)
@@ -976,7 +1102,7 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                     p=cp['pose'];x,y=p['position'];s=p['scale']
                     grid=PoseGrid((x-.04,x+.04),(y-.02,y+.02),9,5,
                         (s*.99,s,s*1.01,s*.9999),(p['rotation_degrees'],))
-                    plan=planner(context,cp,frames,rules,grid,now=clock(),engineering_deadline=end,
+                    plan=call_planner(context,cp,frames,rules,grid,now=clock(),engineering_deadline=end,
                         time_budget_seconds=planner_search_budget(),clock=clock,
                         verification_margin_seconds=phase_allowances(costs)[1],
                         check=planning_guard,collect_candidates=True)
@@ -988,7 +1114,8 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                 (scale*.99,scale,scale*1.01,scale*.9999),(pose['rotation_degrees'],))
             if result['retry_epochs']:
                 native,visual,preparation=phase_allowances(costs)
-                search_cap=max(0.,min(25.,end-clock()-visual-max(3.5,preparation+.296+visual)))
+                recover_cost=retry_recovery_allowance()[0]
+                search_cap=max(0.,min(25.,end-clock()-max(visual+max(3.5,preparation+.296+visual),recover_cost)))
                 search_budget=dict(phase='search',at_monotonic=clock(),effective_deadline=end,
                     epoch=result['retry_epochs'],remaining_seconds=end-clock(),visual_allowance_seconds=visual,
                     closing_guard_seconds=0.,search_cap_seconds=search_cap,enabled=search_cap>=MINIMUM_USEFUL_SEARCH_SECONDS,
@@ -1001,13 +1128,13 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                     now=clock(),check=planning_guard,purpose='target')
                 if plan['candidate'] is None:
                     target_route=target_template=None
-                    plan=planner(context,cp,frames,rules,grid,now=clock(),engineering_deadline=end,
+                    plan=call_planner(context,cp,frames,rules,grid,now=clock(),engineering_deadline=end,
                         time_budget_seconds=planner_search_budget(),clock=clock,
                         verification_margin_seconds=phase_allowances(costs)[1],
                         check=planning_guard,
                         **({'collect_candidates':True} if candidate_choice is not None else {}))
             elif compromise_route is None:
-                plan=planner(context,cp,frames,rules,grid,now=clock(),engineering_deadline=end,
+                plan=call_planner(context,cp,frames,rules,grid,now=clock(),engineering_deadline=end,
                     time_budget_seconds=planner_search_budget(),clock=clock,
                     verification_margin_seconds=phase_allowances(costs)[1],
                     check=planning_guard,
@@ -1023,6 +1150,7 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                     purpose='approach'
                     emit('target_approach',prediction=plan['approach_candidate']['target_prediction'])
                 elif plan.get('compromise_candidate') is None:
+                    if 'actions' in admission_failures:raise GoalStop('insufficient_route_actions')
                     raise GoalStop('insufficient_time' if plan.get('result_classification')=='insufficient_time' else 'not_found_in_budget')
                 else:
                     purpose='compromise';selected=plan['compromise_candidate']
@@ -1096,7 +1224,8 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                 compromise_route=compromise_template=None
                 result['stop_reason']='compromise_observed';break
         else:result['stop_reason']='round_limit'
-        if (result['stop_reason']=='compromise_observed' and best_observed is not None and
+        if retry_anchor is not None:restore_retry_anchor()
+        if (retry_anchor is None and result['stop_reason']=='compromise_observed' and best_observed is not None and
             observed_quality(cp['client_hex'],rules)>observed_quality(best_observed['checkpoint']['client_hex'],rules)):
             # Restore actual measured colors through a new native search. No
             # inverse-wheel assumption or reused old-pose route is permitted.
@@ -1157,7 +1286,9 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                 # A return is complete only when its actual HEX is independently
                 # visible at the final endpoint; native-only hits remain reads.
                 if frames and assess_feedback(context,cp,frames,restore_rules)['observed_target_accepted']:break
-        if result['stop_reason']=='compromise_observed':protected_refinement()
+        if result['stop_reason']=='compromise_observed':
+            restore_retry_anchor()
+            protected_refinement()
         try:candidate_choices()
         except Exception:
             # A cancelled or rebound waiting session cannot certify its cached
@@ -1197,13 +1328,16 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
             should_retry=False
             try:
                 execute_search()
+                restore_retry_anchor()
                 should_retry=wait_for_retry()
             except RetryRequested:should_retry=True
             except GoalStop as exc:
                 reason=str(exc)
-                if retry_requested is None or reason not in ('not_found_in_budget','insufficient_time','round_limit','action_limit'):
+                if retry_requested is None or reason not in ('not_found_in_budget','insufficient_time','round_limit','action_limit',
+                        'insufficient_route_actions','insufficient_compromise_actions'):
                     raise
                 result['stop_reason']=reason
+                restore_retry_anchor()
                 try:should_retry=wait_for_retry()
                 except RetryRequested:should_retry=True
             if not should_retry:break
@@ -1258,12 +1392,14 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
             result.update(best_actual_colors=best_observed['checkpoint']['client_hex'],
                 best_current=observed_quality(score['colors'],rules)<=observed_quality(best_observed['checkpoint']['client_hex'],rules))
             result['restored']=(bool(result['best_current'] and result['screenshot_verified'])
-                if result.get('restoration_rounds') else None)
+                if result.get('restoration_rounds') or result.get('retry_recovered') else None)
     else:
         result.update(verified=False,accepted=False,target_exact=False,
             actual_colors=[None]*count,actual_deltas=[None]*count,current=None,screenshot_verified=False)
         if current is not None:
             result['native_current']=current
+    if best_observed is not None and 'best_actual_colors' not in result:
+        result.update(best_actual_colors=list(best_observed['checkpoint']['client_hex']),best_current=False)
     if last_verified_observation is not None:
         last_colors=list(last_verified_observation['checkpoint']['client_hex'])
         result.update(last_verified_colors=last_colors,last_verified_deltas=score_codes(last_colors,rules)['deltas'],

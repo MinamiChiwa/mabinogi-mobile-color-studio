@@ -133,7 +133,7 @@ def run_native_search(owner,rules,*,mode='search',target=None,activate=False,**u
         if name=='compromise_selected':message='未找到精准方案，正在定位并复核色差较小的妥协方案。'
         if name=='target_approach':message='已找到目标色板位置，正在定位并复核。'
         if name=='action' and row.get('purpose')=='refine':message='正在细化颜色，已预留恢复时间。'
-        if name=='action' and row.get('purpose')=='restore_refinement':message='正在恢复已验证的颜色。'
+        if name=='action' and row.get('purpose') in ('restore_refinement','restore_retry'):message='正在恢复已验证的颜色。'
         if stage:
             payload={k:v for k,v in row.items() if k not in ('event','stage','message','discovery','phase_seconds')}
             # Runner.event reserves ``kind`` for the event name. Native action

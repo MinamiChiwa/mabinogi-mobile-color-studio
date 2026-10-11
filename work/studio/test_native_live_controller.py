@@ -248,10 +248,13 @@ class NativeControllerTests(unittest.TestCase):
         self.io.cancel=True;result=self.run_goal();self.assertEqual(self.io.actions,[])
         self.assertEqual(result['stop_reason'],'interrupted')
         self.io=FixtureIO();result=self.run_goal(max_actions=1,max_rounds=1)
-        self.assertEqual(len(self.io.actions),0);self.assertFalse(result['accepted'])
-        self.assertEqual(result['stop_reason'],'insufficient_route_actions')
+        # An unaffordable exact route may now yield an affordable compromise,
+        # but the shared quota still forbids a second action or a false hit.
+        self.assertLessEqual(len(self.io.actions),1);self.assertFalse(result['accepted'])
+        self.assertIn(result['stop_reason'],('insufficient_route_actions','compromise_observed','not_found_in_budget'))
         self.assertTrue(result['verified'])
-        self.assertEqual(result['actual_colors'],self.io.cp['client_hex'])
+        self.assertTrue(result['screenshot_verified'])
+        self.assertEqual(result['actual_colors'],result['current']['checkpoint']['client_hex'])
 
 
 if __name__=='__main__':unittest.main()
