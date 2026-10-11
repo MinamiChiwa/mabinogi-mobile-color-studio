@@ -26,3 +26,5 @@ Local reports: `outputs/native-integration/verification/optimization-2026-10-11/
 Required data3 session evidence was recovered from the user-provided archive (about 700 KB). Other retained fixtures remain local and are excluded from Git and portable packages. Do not delete referenced fixtures when cleaning build outputs. Prior version details remain in Git history and `docs/research`.
 
 No real game input, dye item, automatic application or public release was used for this maintenance work. Package integrity and launch evidence are recorded separately in the local report folder; they do not replace missing live or archived route evidence.
+
+Package check: 122 production modules, native assets and source fingerprint match. A target-bound computer-use smoke confirmed startup, maximized layout, restored layout and normal close on this machine. Generated test configuration was moved out of the portable package.
