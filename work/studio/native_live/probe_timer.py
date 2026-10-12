@@ -19,6 +19,8 @@ def prepare_timer_assets(path=None):
     if image.size!=(14,21):raise ValueError('Unexpected timer template size')
     if path is None:
         _template.cache_clear();_template()
+        from .game_font_reader import prepare_game_font_assets
+        prepare_game_font_assets()
     return dict(path=str(image_path),bitmap_sha256=actual,template_size=list(image.size),preloaded=path is None)
 
 def locate_timer(image,*,deadline=None,clock=time.monotonic,check=lambda:None):
@@ -33,6 +35,9 @@ def locate_timer(image,*,deadline=None,clock=time.monotonic,check=lambda:None):
     region=image[:max(1,round(h*.25)),:max(1,round(w*.5))]
     mask=np.all(region>=210,axis=2).astype('uint8')
     _,labels,stats,_=cv2.connectedComponentsWithStats(mask)
+    # White icon matching remains strict. The complete digit count must also
+    # see dim antialiased strokes that the actual text reader can read.
+    digit_stats=cv2.connectedComponentsWithStats(np.all(region>=170,axis=2).astype('uint8'))[2]
     template=_template();candidates=[]
     for index,(x,y,cw,ch,area) in enumerate(stats[1:],1):
         guard();x,y,cw,ch,area=map(int,(x,y,cw,ch,area))
@@ -42,15 +47,19 @@ def locate_timer(image,*,deadline=None,clock=time.monotonic,check=lambda:None):
         score=float(2*np.count_nonzero(normalized & template)/(np.count_nonzero(normalized)+np.count_nonzero(template)))
         if score<.86:continue
         digits=[]
-        for dx,dy,dw,dh,da in stats[1:]:
-            if (x+cw+ch*.25<=dx<x+cw+ch*3 and .7*ch<=dh<=1.3*ch
+        for dx,dy,dw,dh,da in digit_stats[1:]:
+            if (x+cw+ch*.15<=dx<x+cw+ch*3 and .7*ch<=dh<=1.3*ch
                     and abs(float(dy+dh/2)-(y+ch/2))<ch*.2 and da>=ch):
                 digits.append([int(dx),int(dy),int(dw),int(dh)])
         if not 1<=len(digits)<=3:continue
         digits.sort();first=digits[0]
-        if first[0]-(x+cw)>ch*.85:continue
+        # The centered countdown caption leaves more icon-to-digit space when
+        # it contains only one digit; rounding grows that gap at scaled sizes.
+        if first[0]-(x+cw)>ch*(1.25 if len(digits)==1 else .85):continue
         if any(b[0]-(a[0]+a[2])>ch*.6 for a,b in zip(digits,digits[1:])):continue
-        l=max(0,round(x+cw*1.2857));r=min(w,round(x+cw*5))
+        # A narrow leading 1 can start left of the old fixed icon ratio.
+        # Crop around measured complete digits with margin for antialiasing.
+        l=max(0,x+cw+1);r=min(w,round(x+cw*5))
         t=max(0,round(y-ch*.2857));b=min(h,round(y+ch*1.2381))
         if any(dx<l or dx+dw>r or dy<t or dy+dh>b for dx,dy,dw,dh in digits):continue
         candidates.append(dict(anchor_box=[x,y,cw,ch],digit_box=[l,t,r,b],shape_score=score,
@@ -79,6 +88,15 @@ def select_timer_candidate(values,*,digit_count=None,previous=None,captured_at=N
 
 def read_timer(image,*,deadline,clock=time.monotonic,check=lambda:None,previous=None,captured_at=None):
     located=locate_timer(image,deadline=deadline,clock=clock,check=check)
+    from .game_font_reader import read_countdown
+    font_read=read_countdown(image,located,deadline=deadline,clock=clock,check=check)
+    if font_read.get('remaining_seconds') is not None:
+        value=font_read['remaining_seconds']
+        seconds,confidence=select_timer_candidate([value,value],digit_count=len(located['digit_components']),
+            previous=previous,captured_at=captured_at)
+        return dict(remaining_seconds=seconds,timer_confidence=confidence,timer_font_read=font_read,
+            timer_ocr_variants=[],timer_segmented_variants=[],timer_segmented_psm_fallbacks=[],
+            timer_ocr_methods=[],timer_localization=located)
     l,t,r,b=located['digit_box'];gray=cv2.cvtColor(image[t:b,l:r],cv2.COLOR_RGB2GRAY)
     values=[]
     for threshold,psm in ((170,7),(200,8)):
@@ -111,5 +129,5 @@ def read_timer(image,*,deadline,clock=time.monotonic,check=lambda:None,previous=
         if seconds is not None:confidence='segmented_selected'
     return dict(remaining_seconds=seconds,timer_ocr_variants=values,timer_segmented_variants=segmented,
         timer_segmented_psm_fallbacks=segmented_fallbacks,
-        timer_confidence=confidence,
+        timer_confidence=confidence,timer_font_read=font_read,
         timer_ocr_methods=[dict(threshold=170,psm=7),dict(threshold=200,psm=8)],timer_localization=located)

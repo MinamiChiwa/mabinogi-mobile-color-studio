@@ -57,7 +57,7 @@ def build_assets(package,out,version,channel,private_seed,*,release_sequence=1,p
         'data_schema_read':[1],'data_schema_write':1,'key_id':key_id,'files':rows}
     raw=json.dumps(manifest,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode('utf-8')
     signature=sign_ed25519(raw,_hex_seed(private_seed));(out/'update-manifest.json').write_bytes(raw);(out/'update-manifest.sig').write_bytes(signature)
-    offline_name=f'ColorStudio-offline-{version}-win-x64.zip'
+    offline_name=f'UPDATE-ONLY-ColorStudio-{version}-win-x64.zip'
     with zipfile.ZipFile(out/offline_name,'w',zipfile.ZIP_STORED) as archive:
         for name,data in [('update-manifest.json',raw),('update-manifest.sig',signature),*blobs.items()]:
             info=zipfile.ZipInfo(name,(1980,1,1,0,0,0));info.external_attr=0o600<<16;archive.writestr(info,data)
@@ -66,7 +66,7 @@ def build_assets(package,out,version,channel,private_seed,*,release_sequence=1,p
         prior=Path(previous_manifest).read_bytes();previous=json.loads(prior)
         unchanged={(r['path'].casefold(),r['sha256']) for r in previous['files']}
         changed=sorted({r['blob'] for r in rows if (r['path'].casefold(),r['sha256']) not in unchanged})
-        delta_name=f"ColorStudio-offline-from-{previous['version']}-to-{version}-win-x64.zip"
+        delta_name=f"UPDATE-ONLY-ColorStudio-from-{previous['version']}-to-{version}-win-x64.zip"
         delta=dict(schema=1,key_id=key_id,base_manifest_sha256=hashlib.sha256(prior).hexdigest(),
             target_manifest_sha256=hashlib.sha256(raw).hexdigest())
         delta_raw=json.dumps(delta,sort_keys=True,separators=(',',':')).encode('utf-8')

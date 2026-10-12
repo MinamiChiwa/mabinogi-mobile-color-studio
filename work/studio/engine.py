@@ -94,10 +94,11 @@ def bounded_zoom(ticks,current,best):
     return int(np.clip(round(target-current),-32,32))
 
 class Runner:
-    def __init__(self,emit,folder,atlas_runner=None,native_runner=None):
+    def __init__(self,emit,folder,atlas_runner=None,native_runner=None,screenshot_runner=None):
         self.emit=emit; self.stop=threading.Event(); self.folder=Path(folder); self.trace=deque(maxlen=2048);self.store=SessionStore(self.folder)
         self.atlas_runner=atlas_runner
         self.native_runner=native_runner
+        self.screenshot_runner=screenshot_runner
         self.candidate_choices=queue.Queue()
         self.retry_requests=threading.Event()
         self._retry_lock=threading.Lock()
@@ -178,8 +179,8 @@ class Runner:
                     start_session_cleanup(self.folder.parent);self.emit('finished',{});self.trace.clear()
             return None
         if strategy=='atlas':
-            single=mode=='search' and sum(bool(r.get('enabled')) for r in rules)==1
-            if not single and self.atlas_runner is None:
+            single=self.screenshot_runner is None and mode=='search' and sum(bool(r.get('enabled')) for r in rules)==1
+            if not single and self.atlas_runner is None and self.screenshot_runner is None:
                 raise RuntimeError('Atlas strategy is not connected to this Runner')
             # A normal atlas/quick-search session has no opt-in SessionStore
             # worker. Mark its root explicitly so retention can recognize it.
@@ -190,8 +191,11 @@ class Runner:
                 # Atlas capture performs OCR before entering the legacy loop;
                 # initialize the bundled/system Tesseract path here as well.
                 configure_ocr()
-                self.event('config',rules=rules,strategy='single_current_board' if single else strategy,auto_apply=False,
+                self.event('config',rules=rules,strategy='screenshot' if self.screenshot_runner else 'single_current_board' if single else strategy,auto_apply=False,
                            build=runtime_identity())
+                if self.screenshot_runner is not None:
+                    return self.screenshot_runner(self,rules,mode=mode,auto=False,
+                        activate=activate,target=target,**strategy_context)
                 if single:
                     from single_region_live import run_live_single_region
                     return run_live_single_region(self,rules,activate=activate,target=target,

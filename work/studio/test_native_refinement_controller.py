@@ -12,6 +12,23 @@ from native_live.controller import run_goal_loop
 
 
 class ProtectedRefinementControllerTests(unittest.TestCase):
+    def test_pending_cpu_slice_continues_without_input_or_a_new_global_plan(self):
+        calls = []
+        def refine(context,cp,rules,**kw):
+            calls.append((kw.get('search_state'),len(self.io.actions)))
+            if len(calls) == 1:
+                kw['stats'].update(search_pending=True,checked_routes=123)
+                return None
+            kw['stats'].update(search_pending=False,family_exhausted=True)
+            return None
+        result = self.run_loop(refine=refine)
+        self.assertEqual(len(calls), 2)
+        self.assertIsNotNone(calls[0][0])
+        self.assertIs(calls[0][0], calls[1][0])
+        self.assertEqual([count for _,count in calls], [0,0])
+        self.assertEqual(len(result['planning_rounds']), 1)
+        self.assertTrue(result['best_current'])
+
     def setUp(self):
         fixture=compromise_fixture.NativeCompromiseTests();fixture.setUp()
         self.io=fixture.io;self.rules=fixture.rules;self.io.clock=lambda:self.io.t

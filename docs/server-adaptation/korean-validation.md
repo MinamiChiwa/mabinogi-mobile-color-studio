@@ -1,3 +1,5 @@
+> 历史验证记录：专用 CMD 已退出发布包。当前请使用主界面服务器选择，见 [服务器说明](server-selection.md)。
+
 # 韩服验证启动 / 韓服驗證啟動 / Korean validation launch
 
 只读预检 / 唯讀預檢 / Read-only preflight：保持韩服窗口可见，运行 `Korean-preflight.cmd`，结果保存到包内 `data/korean-preflight`。该入口不操作游戏，也不消耗道具；同时运行台服时仍绑定韩服窗口并核对完整构建指纹。

@@ -76,7 +76,13 @@ def score_codes(codes, rules):
     ok=accepted(actual,rules)
     from region_priority import priority_components
     ordered=priority_components(actual,rules,deltas)
-    rank=(not ok,*(ordered or ()),max(normalized),sum(violations),float(np.mean(normalized)))
+    if ordered is None:
+        rank=(not ok,max(normalized),sum(violations),float(np.mean(normalized)))
+    else:
+        values=[delta for delta in deltas if delta is not None]
+        # Prioritized plans, measured best retention and native route quality
+        # must break equal bins using the same actual Delta-E metrics.
+        rank=(not ok,*ordered,max(values),float(np.mean(values)))
     target_exact=all(not r['enabled'] or error(actual[i],r['colors'],True)==0
                      for i,r in enumerate(rules))
     return dict(colors=actual,deltas=deltas,accepted=ok,target_exact=target_exact,rank=rank)

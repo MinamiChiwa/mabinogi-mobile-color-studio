@@ -20,12 +20,12 @@ def verify_ed25519(message, signature, public_key):
 
 _HEX=re.compile(r'^[0-9a-f]{64}$')
 _BLOB=re.compile(r'^blob-[0-9a-f]{64}\.zip$')
-APP_ROOT_FILES={'colorstudio.exe','colorstudioupdater.exe','readme.md','readme.zh-tw.md','readme.en.md','testing.md','release_notes.md','native-window-check.ps1','window_check.zh-cn.md','window_check.zh-tw.md','window_check.en.md','korean-preflight.cmd','korean-validation.cmd'}
+APP_ROOT_FILES={'colorstudio.exe','colorstudioupdater.exe','readme.md','readme.zh-tw.md','readme.en.md','testing.md','release_notes.md','native-window-check.ps1','window_check.zh-cn.md','window_check.zh-tw.md','window_check.en.md','korean-preflight.cmd','korean-validation.cmd','screenshot_preview.md'}
 APP_DIRS={'_internal','third_party'}
 
 def application_path(value):
     parts=value.split('/')
-    return (len(parts)>1 and parts[0].casefold() in APP_DIRS) or value.casefold() in APP_ROOT_FILES or value in ('work/studio/VERIFICATION.md','docs/automatic-updates.md','docs/korean-validation.md')
+    return (len(parts)>1 and parts[0].casefold() in APP_DIRS) or value.casefold() in APP_ROOT_FILES or value in ('work/studio/VERIFICATION.md','docs/automatic-updates.md','docs/korean-validation.md','docs/server-selection.md')
 
 _DEVICE={'CON','PRN','AUX','NUL',*(f'COM{i}' for i in range(1,10)),*(f'LPT{i}' for i in range(1,10))}
 

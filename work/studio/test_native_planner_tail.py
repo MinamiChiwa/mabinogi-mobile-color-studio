@@ -3,6 +3,8 @@ import importlib
 import json
 from pathlib import Path
 import unittest
+from unittest.mock import patch
+import copy
 
 from native_input_response import InputGeometry, InputSettings, replay_native_route
 from native_palette_scoring import score_native_pose
@@ -18,6 +20,7 @@ class PlannerTailTests(unittest.TestCase):
         self.session = load_local_palette_session(folder / 'palette')
         self.cp = self.case['initial']
         geometry = InputGeometry(self.cp['board'], self.cp['local_size'], 'windows_legacy_mouse_pixels')
+        self.geometry = geometry
         self.settings = InputSettings(**self.case['settings'])
         self.context = self.planner.bind_planning_context(self.session, self.cp, geometry, self.settings,
             wheel_delta_per_step=1., calibration_evidence=dict(source='saved-stage68', viewport_origin=[0, 0],
@@ -27,8 +30,20 @@ class PlannerTailTests(unittest.TestCase):
         self.grid = PoseGrid((0, 0), (0, 0), 1, 1, (1.,), (0.,))
 
     def plan(self, **options):
-        return self.planner.plan_from_checkpoint(self.context, self.cp, self.frames, self.case['rules'], self.grid,
-            now=100.2, engineering_deadline=200., time_budget_seconds=6., clock=lambda: 100.2, **options)
+        # This suite owns late admission and paid-read accounting, not another
+        # global search matrix under a frozen clock. Use the recorded short
+        # route as a completed compiler response; the production planner still
+        # fully replays and independently scores its original descriptors.
+        route = [copy.deepcopy(step['gesture']) for step in self.case['actual_steps']]
+        pose = replay_native_route(self.cp['pose'],route,self.geometry,self.settings,
+            wheel_delta_per_step=1.,sample_policy='all_recorded_points')['final_pose']
+        assert score_native_pose(self.session,pose,self.case['rules'])['predicted_accepted']
+        with patch.object(self.planner,'search_periodic_targets',return_value=dict(
+                candidates=[dict(native_pose=pose)],nearest_candidates=[],enabled_regions=[0,1,2])), \
+             patch.object(self.planner,'compile_periodic_approach',return_value=dict(
+                input_route=route,final_pose=pose)):
+            return self.planner.plan_from_checkpoint(self.context, self.cp, self.frames, self.case['rules'], self.grid,
+                now=100.2, engineering_deadline=200., time_budget_seconds=6., clock=lambda: 100.2, **options)
 
     def test_twenty_second_remaining_window_preserves_a_real_short_exact_route(self):
         result = self.plan()

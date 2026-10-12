@@ -9,13 +9,16 @@ def verify_assets(asset_dir,package=None,*,trusted_keys):
     asset_dir=Path(asset_dir);raw=(asset_dir/'update-manifest.json').read_bytes()
     manifest=verify_manifest(raw,(asset_dir/'update-manifest.sig').read_bytes(),trusted_keys)
     expected={r.path for r in manifest.files}
+    archives=sorted({*asset_dir.glob('ColorStudio-offline-*.zip'),*asset_dir.glob('UPDATE-ONLY-ColorStudio-*.zip')})
+    if not archives:raise ValueError('Full offline package missing')
+    full_count=0
     with tempfile.TemporaryDirectory() as temporary:
         for row in manifest.files:
             unpack_blob(asset_dir/row.blob,row,Path(temporary)/row.path)
             if package is not None:
                 target=Path(package)/row.path
                 if not target.is_file() or hash_file(target)!=row.sha256:raise ValueError('Application mismatch: '+row.path)
-        for archive in asset_dir.glob('ColorStudio-offline-*.zip'):
+        for archive in archives:
             with zipfile.ZipFile(archive) as source:
                 signed=verify_manifest(source.read('update-manifest.json'),source.read('update-manifest.sig'),trusted_keys)
                 if signed.version!=manifest.version or signed.files!=manifest.files:raise ValueError('Offline manifest mismatch')
@@ -29,7 +32,10 @@ def verify_assets(asset_dir,package=None,*,trusted_keys):
                         expected_row=next((r for r in manifest.files if r.blob==name),None)
                         if expected_row is None or info.file_size!=expected_row.download_size or hashlib.sha256(source.read(name)).hexdigest()!=expected_row.blob_sha256:
                             raise ValueError('Offline blob mismatch')
-                if signed.base_manifest_sha256 is None and 'offline-base.json' not in source.namelist() and not {r.blob for r in manifest.files}.issubset(source.namelist()):raise ValueError('Full offline package incomplete')
+                if signed.base_manifest_sha256 is None and 'offline-base.json' not in source.namelist():
+                    full_count+=1
+                    if not {r.blob for r in manifest.files}.issubset(source.namelist()):raise ValueError('Full offline package incomplete')
+        if not full_count:raise ValueError('Full offline package missing')
     if package is not None:
         actual={p.relative_to(package).as_posix() for p in Path(package).rglob('*') if p.is_file()}
         actual={p for p in actual if not p.startswith('data/') and p not in {'update-manifest.json','update-manifest.sig','update-location.json'}}

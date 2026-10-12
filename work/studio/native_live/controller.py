@@ -8,7 +8,7 @@ from native_palette_scoring import score_native_pose
 from hex_refinement import score_codes
 from .same_session_dye_planner import (normalize_target_rules,bind_planning_context,assess_feedback,
     plan_from_checkpoint,validate_plan_reference,assess_native_feedback,_frames,EARLY_TIMER_GRACE_SECONDS,EXECUTION_RESERVE_SECONDS,
-    audit_candidate_endpoint)
+    audit_candidate_endpoint,observation_reference_fingerprint,_fresh)
 from .read_dye_input_backend import input_backend_binding
 from .project_closed_loop_io import validate_research_gesture,validate_retry_reset_route,InputNotStarted
 from .dye_visual_readiness import VisualNotReady
@@ -23,9 +23,15 @@ from .retry import (RetryRequested,minimum_scale_route,at_minimum_scale,retry_bu
 from .session_deadline import verified_timer_extension,verified_timer_grace_until,verified_timer_shortening
 from .session_status import SessionStatusError,SessionBindingChanged,session_diagnostic
 from .retry_recovery import prepare_retry_recovery
+from .route_feedback import correct_remaining_route
 
 
 class GoalStop(Exception):pass
+
+
+def _prefix_is_safe(actual_quality, baseline_quality, suffix_quality):
+    """Keep a measured prefix when it improves the anchor and ties the suffix."""
+    return actual_quality < baseline_quality and actual_quality <= suffix_quality
 
 
 def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.monotonic,
@@ -72,6 +78,10 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
         return bool(frames and len(frames)==2 and all(frame.get('screenshot_hex',frame['hex'])==colors
             and frame.get('hex_source',['screenshot']*count)==['screenshot']*count
             and frame.get('screenshot_hex_verified',True) is True for frame in frames))
+    def current_reference_fresh():
+        if current is None or not current.get('frames'):return False
+        try:_fresh(clock(),current['frames'],current['checkpoint']);return True
+        except ValueError:return False
     def invalidate_current():
         nonlocal current
         if current is not None and not current.get('frames'):
@@ -125,7 +135,7 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
         allowance,visual=route_allowance(row)
         if count and clock()+allowance+return_cost+(visual if include_revalidation else 0.)>=end:
             raise GoalStop('insufficient_time')
-    def observe(label,phase_deadline=None):
+    def observe(label,phase_deadline=None,*,planning_reference=False):
         nonlocal end,backend_binding,previous_timer,current,qualified_timer_frame,qualified_timer_checkpoint,timer_shortening_observed
         current=None;io.session_status_label=label
         began=clock();guard(phase_deadline);until=end if phase_deadline is None else min(end,phase_deadline)
@@ -142,7 +152,13 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
             raise SessionBindingChanged('Timer grace checkpoint binding changed',session_diagnostic(expected,observed,
                 error_type=SessionBindingChanged,stage='timer_grace_binding',observed_monotonic=clock()))
         native_before_frames=max(0.,clock()-began)
-        try:frames=io.frames(label,until)
+        # Initial and pre-input references can use bound native colors and a
+        # fast actual layout capture. An apparent target hit still requires
+        # the independent full screenshot read before being called a success.
+        layout_reader=getattr(io,'planning_frames',None)
+        layout_only=bool(planning_reference and callable(layout_reader) and
+            not score_codes(cp['client_hex'],rules)['accepted'])
+        try:frames=(layout_reader if layout_only else io.frames)(label,until)
         except TimeoutError:
             # Retain only this fresh checkpoint, never a previous screenshot
             # pose. A decoder timeout does not invalidate the native readback.
@@ -158,6 +174,19 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
         frames=copy.deepcopy(frames)
         for frame in frames:frame['timer_advisory']=True
         _frames(cp,frames)
+        if clock()-frames[-1]['captured_monotonic']>5.:
+            # Image age is a reason to reread state, not to abort a valid round.
+            # Preserve the original capture timestamp and bind the new evidence
+            # only if pose, colors, session and geometry are actually unchanged.
+            refreshed=io.checkpoint(label+'_post_decode',until)
+            if refreshed.get('checkpoint_valid') is not True or refreshed.get('cpu_matches') is not True:
+                raise GoalStop('checkpoint_unavailable')
+            fields=('binding','pose','client_hex','board','local_size','pixel_mapping')
+            if any(cp.get(key)!=refreshed.get(key) for key in fields):
+                raise VisualNotReady('Observation reference changed during color read')
+            validation=dict(checked_monotonic=clock(),
+                checkpoint_fingerprint=observation_reference_fingerprint(cp,frames))
+            for frame in frames:frame['reference_validation']=copy.deepcopy(validation)
         remember_verified(cp,frames)
         timer_shortened=False
         # Metadata distinguishes the conservative unknown-age startup cap from
@@ -216,12 +245,18 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
         result['observations'].append(dict(label=label,checkpoint=cp,frames=frames,input_before=before,input_after=after))
         exit_began=clock();guard(phase_deadline)
         costs['native'].append(native_before_frames+native_after_frames+max(0.,clock()-exit_began))
-        costs['closing_visual'].append(max(0.,clock()-began))
-        if not label.startswith('initial'):costs['visual'].append(max(0.,clock()-began))
+        if not layout_only:
+            costs['closing_visual'].append(max(0.,clock()-began))
+            if not label.startswith('initial'):costs['visual'].append(max(0.,clock()-began))
+        # Publish measured client colors on every successful readback. This
+        # presentation event does not certify a target or request extra OCR.
+        emit('native_observed',colors=list(cp['client_hex']),label=label,
+            screenshot_verified=complete_screenshot(cp,frames))
         return cp,frames
-    def observe_resilient(label,phase_deadline=None):
+    def observe_resilient(label,phase_deadline=None,*,planning_reference=False):
         for retry in range(3):
-            try:return observe(label if retry==0 else label+'_retry_'+str(retry),phase_deadline)
+            try:return observe(label if retry==0 else label+'_retry_'+str(retry),phase_deadline,
+                planning_reference=planning_reference)
             except (VisualNotReady,TimeoutError) as exc:
                 # Recheck the actual phase/session deadline and F9 before
                 # retrying a local frame allowance. Never repeat the input.
@@ -337,7 +372,8 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
             guard(phase_deadline)
             replay=replay_native_route(reference['pose'],suffix,geometry,settings,
                 wheel_delta_per_step=1.,sample_policy='all_recorded_points')
-            return actual<predicted_quality(score_native_pose(session,replay['final_pose'],rules),rules)
+            return _prefix_is_safe(actual,baseline_quality,
+                predicted_quality(score_native_pose(session,replay['final_pose'],rules),rules))
         if not suffix or not better_than_suffix(checkpoint):
             return checkpoint,visual_frames,feedback,False
         if not visual_frames:
@@ -404,8 +440,7 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
         # inside that read's allowance; waiting would only make it stale.
         # This call has not begun waiting. Capture timestamps precede decoding
         # and its closing guard, so use the standard freshness window here.
-        if (clock()+closing_visual>=end and current is not None and current.get('frames')
-                and 0.<=clock()-current['frames'][-1]['captured_monotonic']<=5.):
+        if clock()+closing_visual>=end and current_reference_fresh():
             io.check(end)
             checked=getattr(io,'last_checked_state',None)
             checked_at=getattr(io,'last_checked_monotonic',None)
@@ -417,8 +452,7 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                 and checked_identity is not None and list(checked_identity)==expected_binding[1]
                 and actual_pose==current['checkpoint']['pose'] and checked_at is not None
                 and checked_at>=current['frames'][-1]['captured_monotonic'])
-            if (clock()<end and unchanged
-                    and 0.<=clock()-current['frames'][-1]['captured_monotonic']<=5.):
+            if clock()<end and unchanged and current_reference_fresh():
                 result['closing_pose_check']=dict(unchanged=True,observed_monotonic=checked_at,pose=copy.deepcopy(actual_pose))
                 emit('native_retry_available',enabled=False,reason='session_closing',**retry_fields())
                 return False
@@ -886,11 +920,15 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
             # family use the usable remainder; successful candidates return
             # promptly after polishing, while every trial still owns recovery.
             search_end=end-minimum
-            stats={};search_started=clock()
+            stats={};search_started=clock();search_state={}
             try:
-                row=find_refinement(context,baseline,rules,deadline=search_end,clock=clock,
-                    check=lambda:planning_guard(search_end),excluded=excluded,
-                    stats=stats,progress=lambda update:emit('refinement_search_progress',**update,**display))
+                while True:
+                    row=find_refinement(context,baseline,rules,deadline=search_end,clock=clock,
+                        check=lambda:planning_guard(search_end),excluded=excluded,
+                        stats=stats,search_state=search_state,slice_seconds=2.,
+                        progress=lambda update:emit('refinement_search_progress',**update,**display))
+                    if row is not None or not stats.get('search_pending'):break
+                    planning_guard(search_end)
             except TimeoutError:
                 stop('local_search_timeout');return
             finally:
@@ -1165,14 +1203,15 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
             # any gesture, independent of whether it is target or compromise.
             reserve_route(selected,purpose,include_revalidation=True)
             try:
-                fresh,fresh_frames=observe_resilient('plan_'+str(number)+'_revalidate')
+                fresh,fresh_frames=observe_resilient('plan_'+str(number)+'_revalidate',
+                    planning_reference=bool(selected['input_route']))
                 validate_plan_reference(context,plan,fresh,fresh_frames,now=clock(),rules=rules,purpose=purpose,
                     reference_observation_paid=True)
             except ValueError as exc:
                 if 'Plan reference differs' not in str(exc):raise
                 result['reference_replans']=result.get('reference_replans',0)+1
                 compromise_route=None;compromise_template=None
-                fresh,fresh_frames=observe_resilient('plan_'+str(number)+'_reference_refresh')
+                fresh,fresh_frames=observe_resilient('plan_'+str(number)+'_reference_refresh',planning_reference=True)
                 cp,frames=fresh,fresh_frames
                 continue
             route=selected['input_route']
@@ -1185,14 +1224,50 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
             # previous endpoint; response residuals update that reference and
             # the remaining-route forecast instead of restarting global search.
             route_fresh=fresh
-            for gesture_index,gesture in enumerate(route):
+            gesture_index=0
+            while gesture_index<len(route):
+                gesture=route[gesture_index]
                 cp,frames,feedback=submit(
                     gesture,
                     'candidate_'+str(number) if gesture_index==0 else
                     'candidate_'+str(number)+'_step_'+str(gesture_index),
                     route_fresh,purpose,visual_required=gesture_index==len(route)-1)
+                suffix=route[gesture_index+1:]
+                warning=result['steps'][-1].get('model_response_warning')
+                if warning and not feedback['observed_target_accepted']:
+                    replay=replay_native_route(cp['pose'],suffix,geometry,settings,
+                        wheel_delta_per_step=1.,sample_policy='all_recorded_points')
+                    prediction=score_native_pose(session,replay['final_pose'],rules)
+                    # A drifted forecast is a reason to restore the selected
+                    # destination, not to abandon it for unrelated local work.
+                    if predicted_quality(prediction,rules)>predicted_quality(selected['prediction'],rules):
+                        original_remainder=dict(input_route=suffix,needed=_needed(suffix,3.,.5))
+                        until=min(clock()+(2. if suffix else 3.),
+                            end-route_allowance(original_remainder)[0]-retry_recovery_allowance()[0])
+                        repaired=correct_remaining_route(context,cp,rules,suffix,
+                            expected_pose=result['steps'][-1]['expected_pose'],target_pose=selected['final_pose'],
+                            deadline=until,clock=clock,check=planning_guard,admission=measured_admission)
+                        if repaired is not None:
+                            reserve_route(repaired,purpose)
+                            route=route[:gesture_index+1]+repaired['input_route']
+                            suffix=route[gesture_index+1:]
+                            result['steps'][-1]['destination_correction']=repaired
+                            emit('route_destination_corrected',remaining_gestures=len(suffix),
+                                predicted_colors=repaired['prediction']['colors'],purpose=purpose)
+                        elif suffix:
+                            # Computing a correction pays real time too. The
+                            # unchanged suffix must still fit its concrete
+                            # input/readback and any pending retry return.
+                            reserve_route(original_remainder,purpose)
+                # If a response residual still leaves a worse forecast than
+                # the intended endpoint, do not mistake that for exhaustion of
+                # the global destination. Run the admitted measured suffix.
+                replay=replay_native_route(cp['pose'],suffix,geometry,settings,
+                    wheel_delta_per_step=1.,sample_policy='all_recorded_points') if suffix else None
+                retain_allowed=not warning or not suffix or predicted_quality(
+                    score_native_pose(session,replay['final_pose'],rules),rules)<=predicted_quality(selected['prediction'],rules)
                 cp,frames,feedback,retained=retain_superior_prefix(cp,frames,feedback,
-                    route[gesture_index+1:],observed_quality(best_observed['checkpoint']['client_hex'],rules),
+                    suffix if retain_allowed else [],observed_quality(best_observed['checkpoint']['client_hex'],rules),
                     'candidate_'+str(number))
                 if (current.get('frames') and feedback['screenshot_verified'] and
                         observed_quality(cp['client_hex'],rules)<observed_quality(best_observed['checkpoint']['client_hex'],rules)):
@@ -1216,6 +1291,7 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                         emit('route_revalidated',remaining_gestures=len(suffix),
                             reference_pose=cp['pose'],predicted_colors=rescored['colors'],purpose=purpose)
                 route_fresh=cp
+                gesture_index+=1
             if result.get('accepted'):break
             if result.get('stop_reason')=='compromise_observed':break
             if purpose=='target':
@@ -1303,7 +1379,8 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
         for attempt in range(120):
             if clock()>=visual_end:raise GoalStop('initial_visual_timeout')
             try:
-                cp,frames=observe('initial' if attempt==0 else 'initial_retry_'+str(attempt),visual_end)
+                cp,frames=observe('initial' if attempt==0 else 'initial_retry_'+str(attempt),visual_end,
+                    planning_reference=True)
                 if clock()>=visual_end:raise GoalStop('initial_visual_timeout')
                 break
             except (VisualNotReady,TimeoutError) as exc:

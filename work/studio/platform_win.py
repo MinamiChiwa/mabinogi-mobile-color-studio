@@ -84,6 +84,11 @@ class Game:
         with input_scope():
             event=Input(type=0,mi=Mouse(dx,dy,data&0xffffffff,flags,0,0))
             if u.SendInput(1,C.byref(event),C.sizeof(Input))!=1:raise RuntimeError('Windows 未接受鼠标输入。请检查游戏与工具是否使用相同权限运行。')
+    def release(self):
+        # Cleanup must also run after focus loss or a rejected SendInput.
+        for flag in (4,16):
+            try:self.send(flag)
+            except (OSError,RuntimeError,Interrupted):pass
     def move_to(self,p):
         with physical_pixel_context():
             x,y,w,h=self.geometry(); vx,vy=u.GetSystemMetrics(76),u.GetSystemMetrics(77)

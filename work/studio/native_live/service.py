@@ -18,7 +18,7 @@ from .controller import run_goal_loop
 from .time_policy import SESSION_MAX_SECONDS
 from dye_regions import session_region_count,bind_region_rules
 from process_access import ProcessReadDenied
-from .build_adapters import require_input_capability,enable_known_validation_input,KR_ADAPTER
+from .build_adapters import require_input_capability,enable_known_validation_input,KR_ADAPTER,JP_ADAPTER
 
 
 def _prepare(pid,folder,check,hwnd=None):
@@ -75,6 +75,7 @@ def _prepare(pid,folder,check,hwnd=None):
 def unavailable_reason(error):
     if isinstance(error,ProcessReadDenied):return 'process_access'
     message=str(error)
+    if '所选服务器与客户端版本不匹配' in message:return 'server_selection'
     if any(s in message for s in ('UnityPlayer module','GameAssembly module','supported game modules')):
         return 'module_resolution'
     if any(s in message for s in ('build','metadata')):return 'game_build'
@@ -100,7 +101,7 @@ def preflight(pid,folder,*,check=lambda:None,hwnd=None):
     return result
 
 
-def run_native_search(owner,rules,*,mode='search',target=None,activate=False,**unused):
+def run_native_search(owner,rules,*,mode='search',target=None,activate=False,server=None,**unused):
     folder=Path(owner.folder);folder.mkdir(parents=True,exist_ok=True);backend=adapter=None
     result=dict(stop_reason='not_started',verified=False,accepted=False,target_exact=False,
         actual_colors=[None]*3,actual_deltas=[None]*3,actual_input_attempts=0,server_confirmation_verified=False)
@@ -119,6 +120,12 @@ def run_native_search(owner,rules,*,mode='search',target=None,activate=False,**u
             'refinement_planning':'refinement','refinement_search_progress':'refinement'}.get(name)
         with (folder/'native-events.jsonl').open('a',encoding='utf-8') as stream:
             stream.write(json.dumps(row,ensure_ascii=False)+'\n')
+        if name=='native_observed':
+            # Small actual-readback updates survive continuous routes, planning
+            # references and full checks; predicted candidate colors stay out.
+            owner.event('native_colors',colors=list(row['colors']),label=row.get('label'),
+                screenshot_verified=row.get('screenshot_verified') is True)
+            return
         if name in ('native_retry_available','native_retry_reset'):
             owner.event(name,**{key:value for key,value in row.items() if key!='event'})
             return
@@ -128,8 +135,10 @@ def run_native_search(owner,rules,*,mode='search',target=None,activate=False,**u
         message={'native_validate':'正在检查当前游戏与取色数据。','search':'正在计算可执行的目标方案。',
             'discovery':'正在准备寻色，暂时不要进入染色界面；等提示就绪后再开始。F9 可停止。',
             'position':'正在调整色板。','verify':'正在核对当前游戏色码。'}.get(stage)
-        if name=='discovery_progress' and row.get('phase')=='waiting':
-            stage='waiting';message='正在等待并检查活动染色板；F9 可停止。'
+        if name=='armed' or name=='discovery_progress' and row.get('phase')=='waiting':
+            stage='waiting';message='寻色已就绪，请进入染色界面；工具正在等待活动色板。F9 可停止。'
+        if name=='discovery_progress' and row.get('discovery',{}).get('eligible_addresses'):
+            stage='binding';message='已检测到活动色板，正在完成本局识别；请保持游戏窗口前台。F9 可停止。'
         if name=='compromise_selected':message='未找到精准方案，正在定位并复核色差较小的妥协方案。'
         if name=='target_approach':message='已找到目标色板位置，正在定位并复核。'
         if name=='action' and row.get('purpose')=='refine':message='正在细化颜色，已预留恢复时间。'
@@ -143,13 +152,23 @@ def run_native_search(owner,rules,*,mode='search',target=None,activate=False,**u
             owner.event('native_progress',stage=stage,message=message,**payload)
     try:
         if mode!='search':raise ValueError('Native strategy only supports user color search')
-        check();selected=resolve_target(target)
+        check();selected=resolve_target(target,server=server)
         owner.event('window_bound',title=selected.title,pid=selected.pid,hwnd=selected.hwnd)
         owner.event('native_progress',stage='native_validate',message='正在检查当前游戏与取色数据。')
+        if activate:
+            from window_target import activate_target_window
+            check()
+            if not activate_target_window(selected):raise InterruptedError('无法激活游戏。请点击游戏后按 F8。')
         backend,prepared=_prepare(selected.pid,folder,check,selected.hwnd)
         result['preflight']=prepared
-        if '--validate-korean-build' in sys.argv:
-            enable_known_validation_input(backend,KR_ADAPTER.adapter_id)
+        if server is not None:
+            from .build_adapters import enable_selected_server_input
+            enable_selected_server_input(backend,server)
+            result['selected_server']=server
+        validation=[a for flag,a in (('--validate-korean-build',KR_ADAPTER),('--validate-japanese-build',JP_ADAPTER)) if flag in sys.argv]
+        if server is None:
+            if len(validation)>1:raise ValueError('Choose one server validation launch')
+            if validation:enable_known_validation_input(backend,validation[0].adapter_id)
         selected_adapter=getattr(backend,'adapter',None)
         if selected_adapter is not None:
             result['build_adapter']=dict(selected_adapter.diagnostic(),
@@ -192,6 +211,10 @@ def run_native_search(owner,rules,*,mode='search',target=None,activate=False,**u
             try:adapter.release()
             except Exception as exc:result['release_error']=str(exc)
         if backend is not None:backend.close()
+    if result['stop_reason']=='interrupted':
+        error=result.get('error','')
+        result['interruption_reason']=('focus_lost' if '游戏失去焦点' in error else
+            'window_changed' if '窗口位置或尺寸' in error else 'activation_failed' if '无法激活游戏' in error else 'user_stop')
     values=[v for v in result['actual_deltas'] if v is not None]
     result.update(maximum=max(values) if values else None,average=sum(values)/len(values) if values else None,
         outcome='matched' if result['accepted'] else 'compromise' if result['stop_reason'] in ('compromise_observed','user_candidate_observed')
@@ -205,7 +228,8 @@ def run_native_search(owner,rules,*,mode='search',target=None,activate=False,**u
         'actual_colors','actual_deltas','best_actual_colors',
         'actual_input_attempts','maximum','average','restored','best_current','screenshot_verified',
         'server_confirmation_verified','enabled_regions','rules','region_count','available_regions',
-        'refinement_stop','unavailable_reason','session_stop_reason',
+        'selected_server',
+        'refinement_stop','unavailable_reason','session_stop_reason','interruption_reason',
         'last_verified_colors','last_verified_deltas','last_verified_captured_monotonic',
         'last_verified_screenshot')})
     return result

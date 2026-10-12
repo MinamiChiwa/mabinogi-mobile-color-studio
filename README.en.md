@@ -2,21 +2,21 @@
 
 By **MinamiChiwa** · [Afdian](https://afdian.com/a/minamichiwa) · [Patreon](https://patreon.com/chiwaminami)
 
-A Windows color search tool for the Hong Kong/Macau/Taiwan service of Mabinogi Mobile. Precise Search reads the current round’s palette, plans translation, zoom and rotation, and verifies game HEX values. Visual Search is a fallback if Precise Search fails.
+A Windows color search tool for supported Taiwan, Korean and Japanese builds of Mabinogi Mobile. Korean and Japanese support is still in testing. Precise Search reads the current round’s palette, plans translation, zoom and rotation, and verifies game HEX values. Screenshot Search replaces the old visual strategy using captured pixels, image registration and actual HEX verification, without reading game memory. See the [server guide](docs/server-adaptation/server-selection.md) for validation status.
 
 Using tools in-game may carry risk; use with care. Donations are optional and do not affect features. Developed with AI assistance.
 
-[简体中文](README.md) · [繁體中文](README.zh-TW.md) · [English](README.en.md)
+[简体中文](README.md) · [繁體中文](README.zh-TW.md) · [English](README.en.md) · [日本語](README.ja.md) · [한국어](README.ko.md)
 
 ## Use
 
 Extract the entire release and run `ColorStudio.exe`. Keep `_internal` beside it. Python and Tesseract do not need separate installation. Exit the old app before upgrading into a new folder; copy its `data` folder to retain settings.
 
-1. Select the game window, or use automatic detection for a single window. No fixed game resolution is required; window sizes and Windows scaling have explicit coordinate mapping.
+1. Select Taiwan, Korea or Japan beside the game-window selector; detection updates for that server. Select its window or use automatic detection. No separate preflight or fixed game resolution is required; window sizes and Windows scaling have explicit coordinate mapping.
 2. Enable the regions to match. Enter HEX codes, choose colors, or use the eyedropper. Alternative colors are also accepted targets.
 3. Choose Exact HEX or Similar per region. Exact requires the identical six-digit code; Similar uses the region’s ΔE tolerance.
-4. Set priorities; 1 is highest. Meeting all enabled targets always comes first. Otherwise, targets are favored in priority order, followed by color differences. Changing a priority swaps it with the other region.
-5. Press **F8** or Start, then open dyeing after the waiting message. Starting after opening the dye screen is also supported. Use Precise Search by default; Visual Search is for failures of Precise Search.
+4. Set priorities; 1 is highest. Meeting all enabled targets always comes first. Otherwise, each region is compared in priority order using its match status and color difference. Differences are grouped in ΔE 0.5 steps so tiny gains in a higher-priority region do not hide substantial improvements elsewhere. Exact matches still require identical HEX codes. Changing a priority swaps it with the other region.
+5. Press **F8** or Start, then open dyeing after the waiting message. Starting after opening the dye screen is also supported. Precise Search remains the default; use Screenshot Search if Precise Search is unavailable.
 6. Keep the game in front. Avoid mouse use or moving/resizing the game window during execution. **F9** stops and releases the mouse. Confirm application manually in the game.
 
 Each palette is bound to its game session. Regions share transformations; mathematical palette candidates still need an executable route and game HEX verification. Predicted colors do not prove a match. If all targets cannot be met, the tool tries to retain the best measured compromise in priority order.
@@ -35,17 +35,15 @@ When leather, wood or another material’s base palette lacks pure black or whit
 - The eyedropper maps physical cursor coordinates directly to a frozen screenshot, including negative virtual-desktop origins. It does not reposition the game window or force game focus.
 - Save preset manages named configurations: save current settings, edit or rename independently, load, and delete. Editing a preset changes the main configuration only when loaded.
 - Results retain the last 50 color combinations and their measured ΔE. Presets and result history are stored separately.
-- Simplified Chinese, Traditional Chinese and English are supported. The resizable window rearranges cards into one, two or three columns. The topmost overlay supports clicks and dragging without taking game focus. It briefly hides while sending a game gesture, then returns.
+- Simplified Chinese, Traditional Chinese, English, Japanese and Korean are supported. The resizable window rearranges cards into one, two or three columns. The topmost overlay supports clicks and dragging without taking game focus. It briefly hides while sending a game gesture, then returns.
 - Data defaults to `data` beside the app. A nonwritable folder falls back to `%LOCALAPPDATA%\MabinogiMobileColorStudio\data`, then to the temporary directory.
 - Diagnostics retain the latest three sessions while protecting active records. Temporary data may be cleared by Windows.
 
 ## Diagnostics
 
-`native-window-check.ps1` performs a passive preflight on an ordinary game screen, with no input or dye item required. The accompanying `WINDOW_CHECK.en.md` provides instructions.
+Select the server and game window in the app; no separate preflight script is required. Several display and scaling configurations have been tested. Stop and restart after moving or resizing the game during a run. Client updates may require a new adapter.
 
-Preflight checks the current build, modules, physical client area and game coordinates. A passing preflight does not prove live dye accuracy. Several display/scaling configurations were tested; universal size, mixed-DPI or game-version support is not claimed. Stop and restart after changing the game window during a run.
-
-If process access is denied, run the tool and game at the same privilege level. When the game runs as administrator, right-click the tool and choose Run as administrator. Retry preflight on an ordinary game screen without starting a new dye round. The tool never elevates itself automatically.
+If process access is denied, run the tool and game at the same privilege level. If the game runs as administrator, right-click the tool and choose Run as administrator. The tool never elevates itself automatically.
 
 Report problems at [GitHub Issues](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/issues) with the session log. Extra dye items are not needed just to report a problem. The game’s current HEX values determine the final result.
 
@@ -73,3 +71,5 @@ Distribute the entire `outputs/release/ColorStudio` directory. Personal profiles
 ## Updates
 
 Bootstrap versions can check GitHub from the main window. You decide when to download and install. File updates keep settings, presets and all data. A full offline update can be imported when GitHub is unreachable. Older releases need one manual bootstrap upgrade. The official 0.4.2 package includes update signature verification. Retry search is labeled Testing only.
+
+For a first installation, download `ColorStudio-v0.4.3-Windows-x64.zip`. `UPDATE-ONLY-ColorStudio-0.4.3-win-x64.zip` is only for Import offline update inside the app; it is not a runnable installation. `UPDATE-ONLY-ColorStudio-from-0.4.2-to-0.4.3-win-x64.zip` requires the official 0.4.2 baseline.

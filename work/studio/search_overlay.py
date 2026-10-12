@@ -451,7 +451,10 @@ class SearchOverlay(ct.CTkToplevel):
         self.results.grid(row=4,column=0,padx=2,pady=(0,10),sticky='ew')
         self._has_results=True;self._collapsed=False;self.copy.grid();self.activity.grid()
         self.collapse.configure(text='收起');self.resize_surface()
-        title,body=single_result_presentation(data)
+        if data.get('backend')=='screenshot':
+            from screenshot_presentation import result_text
+            title,body=result_text(data)
+        else:title,body=single_result_presentation(data)
         self.render(title,body)
         for i,(color,delta) in enumerate(zip(data.get('actual_colors') or [None]*3,
                                            data.get('actual_deltas') or [None]*3)):
@@ -532,13 +535,13 @@ class SearchOverlay(ct.CTkToplevel):
             # topmost surface must release the underlying controls when the
             # worker ends; atlas candidate/result surfaces keep their policy.
             self.dismiss();return
-        if kind in ('atlas_progress','single_progress','native_progress'):
+        if kind in ('atlas_progress','single_progress','native_progress','screenshot_progress'):
             self.phase='waiting' if data.get('stage')=='waiting' else 'computing'
             self.update_activity(data);self.render(*progress_text(data));return
         if kind=='single_action':
             self.phase='computing';self.update_activity({'stage':'restore' if data.get('restoring') else 'position'})
             self.render(*progress_text({'stage':'restore' if data.get('restoring') else 'position'}));return
-        if kind=='single_verified':
+        if kind in ('single_verified','screenshot_result'):
             self.activity.stop();self.activity.set(1);self.show_single_result(data);return
         if kind=='native_result':
             from native_status import result_text,last_verified_display

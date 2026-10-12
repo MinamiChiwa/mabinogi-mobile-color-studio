@@ -7,6 +7,24 @@ from window_target import WindowTarget
 
 
 class NativePreflightTargetTests(unittest.TestCase):
+    def test_japanese_locator_keeps_handle_with_other_servers_running(self):
+        windows=[WindowTarget(30,40,'瑪奇 Mobile','MabinogiMobile.exe'),
+            WindowTarget(50,60,'마비노기 모바일','MabinogiMobile.exe'),WindowTarget(70,80,'マビモバ','MabinogiMobile.exe')]
+        result={'stop_reason':'preflight_complete','build_adapter':{'adapter_id':'jp-20261012-research-candidate'}}
+        with tempfile.TemporaryDirectory() as tmp,patch('window_target.list_windows',return_value=windows), \
+            patch('native_live.service.preflight',return_value=result) as preflight:
+            self.assertEqual(native_preflight.main(['--japanese','--output-dir',tmp]),0)
+        self.assertEqual(preflight.call_args.args,(80,Path(tmp)))
+        self.assertEqual(preflight.call_args.kwargs['hwnd'],70)
+
+    def test_japanese_locator_rejects_other_build_under_japanese_title(self):
+        result={'stop_reason':'preflight_complete','build_adapter':{'adapter_id':'kr-20261012-research-candidate'}}
+        with tempfile.TemporaryDirectory() as tmp,patch('window_target.list_windows',return_value=[WindowTarget(70,80,'マビモバ','MabinogiMobile.exe')]), \
+            patch('native_live.service.preflight',return_value=result):
+            self.assertEqual(native_preflight.main(['--japanese','--output-dir',tmp]),1)
+            import json
+            self.assertEqual(json.loads((Path(tmp)/'native-preflight.json').read_text())['unavailable_reason'],'game_build')
+
     def test_automatic_target_preserves_handle_in_preflight(self):
         with tempfile.TemporaryDirectory() as tmp,patch('window_target.resolve_target',return_value=WindowTarget(30,40,'Game')), \
             patch('native_live.service.preflight',return_value={'stop_reason':'preflight_complete'}) as preflight:

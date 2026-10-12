@@ -4,6 +4,9 @@ if __name__=='__main__':
     _bootstrap_exit=dispatch()
     if _bootstrap_exit is not None:raise SystemExit(_bootstrap_exit)
 import platform_win  # Set physical-pixel awareness before Tk or capture initializes.
+if __name__=='__main__' and '--screenshot-preflight' in sys.argv:
+    from screenshot_preflight import main as screenshot_preflight_main
+    raise SystemExit(screenshot_preflight_main([arg for arg in sys.argv[1:] if arg!='--screenshot-preflight']))
 if __name__=='__main__' and '--native-preflight' in sys.argv:
     from native_preflight import main as native_preflight_main
     raise SystemExit(native_preflight_main([arg for arg in sys.argv[1:] if arg!='--native-preflight']))
@@ -23,8 +26,6 @@ from search_overlay import SearchOverlay
 from hotkeys import run_hotkeys
 from window_picker import WindowPicker
 from window_target import resolve_target,WindowTarget,activate_target_window
-from atlas_service import AtlasService
-from atlas_live_adapter import callbacks as atlas_callbacks
 from result_history import describe_result,read_history,save_result
 from eyedropper import pick_screen
 from concurrent.futures import ThreadPoolExecutor
@@ -139,14 +140,16 @@ def build_preview(target,tolerance):
     pixels=allowed_colors(target,tolerance)
     return pixels,overview(pixels)
 
+SERVER_OPTIONS=(('tw','台服'),('kr','韩服'),('jp','日服'))
+
 def build_runner(emit,folder,strategy='native',entry=None,entry_size=None):
     # Native owns user-goal execution; existing visual strategies remain explicit.
     if strategy=='native':
         from native_live.service import run_native_search
         return Runner(emit,folder,native_runner=run_native_search)
     if strategy not in ('atlas','legacy'):raise ValueError('Unknown search strategy')
-    service=AtlasService(atlas_callbacks(Path(folder)/'atlas_capture',strategy='grid'))
-    return Runner(emit,folder,atlas_runner=service.run)
+    from screenshot_live import run_screenshot_search
+    return Runner(emit,folder,screenshot_runner=run_screenshot_search)
 
 ct.set_appearance_mode('dark'); ct.set_default_color_theme('blue')
 BG='#10151F'; PANEL='#192230'; INK='#EDF3FA'; MUTED='#94A4B8'; ACCENT='#62D7BD'
@@ -157,8 +160,7 @@ DATA=_update_data or resolve_data_directory(
     (Path(sys.executable).resolve().parent if getattr(sys,'frozen',False)
      else Path(__file__).resolve().parent)/'data'
 )
-try:i18n.language=json.loads((DATA/'settings.json').read_text(encoding='utf-8')).get('language','简体中文')
-except (OSError,ValueError):pass
+i18n.language=i18n.normalize_language(read_settings(DATA/'settings.json').get('language'))
 i18n.install_widgets(ct)
 
 class Card(ct.CTkFrame):
@@ -337,8 +339,18 @@ class App(ct.CTk):
         ct.CTkLabel(brand,text=f'瑪奇 Mobile  /  by 南千和  ·  v{APP_VERSION}',font=SMALL_FONT,text_color=MUTED).pack(anchor='w')
         toolbar=ct.CTkFrame(self.page,fg_color='transparent');toolbar.grid(row=1,column=0,padx=BODY_SIDE_PADDING,pady=(0,8),sticky='ew')
         self.toolbar=toolbar;toolbar.grid_columnconfigure(0,weight=1)
-        self.window_button=ct.CTkButton(toolbar,text='游戏窗口 · 自动检测',width=250,height=32,font=BODY_FONT,anchor='w',fg_color='#28364A',command=self.pick_window)
-        self.window_button.grid(row=0,column=0,sticky='w')
+        saved_server=read_settings(DATA/'settings.json').get('server','tw')
+        if '--validate-korean-build' in sys.argv:saved_server='kr'
+        elif '--validate-japanese-build' in sys.argv:saved_server='jp'
+        self.server=tk.StringVar(value=saved_server if saved_server in dict(SERVER_OPTIONS) else 'tw')
+        self.window_controls=ct.CTkFrame(toolbar,fg_color='transparent')
+        self.window_controls.grid(row=0,column=0,sticky='ew');self.window_controls.grid_columnconfigure(0,weight=1)
+        self.window_button=ct.CTkButton(self.window_controls,text='游戏窗口 · 自动检测',width=210,height=32,font=BODY_FONT,anchor='w',fg_color='#28364A',command=self.pick_window)
+        self.window_button.grid(row=0,column=0,sticky='ew')
+        self.server_menu=ct.CTkOptionMenu(self.window_controls,values=[str(tr(label)) for _,label in SERVER_OPTIONS],
+            width=110,height=32,font=BODY_FONT,dynamic_resizing=False,command=self.change_server)
+        self.server_menu.grid(row=0,column=1,padx=(8,0),sticky='e')
+        self.refresh_server_label()
         self.refresh_window_label()
         self.body_scroll=FixedContentScrollableFrame(self.page,width=initial_content_width,height=SCROLL_VIEWPORT_HEIGHT,fg_color=BG,corner_radius=0)
         # The viewport stays fixed within each card breakpoint and is centered
@@ -348,7 +360,7 @@ class App(ct.CTk):
         self.toolbar_buttons=[
             ct.CTkButton(toolbar,text='保存方案',width=100,height=32,font=BODY_FONT,fg_color='#28364A',command=self.save),
             ct.CTkButton(toolbar,text='寻色记录',width=100,height=32,font=BODY_FONT,fg_color='#28364A',command=self.show_history),
-            ct.CTkOptionMenu(toolbar,values=['简体中文','繁體中文','English'],width=115,font=BODY_FONT,command=self.change_language,variable=tk.StringVar(value=i18n.language)),
+            ct.CTkOptionMenu(toolbar,values=list(i18n.LANGUAGES),width=115,font=BODY_FONT,command=self.change_language,variable=tk.StringVar(value=i18n.language)),
         ]
         links=ct.CTkFrame(header,fg_color='transparent');self.links=links;links.grid(row=0,column=1,sticky='e')
         self.tutorial_button=ct.CTkButton(links,text='?',width=36,height=36,fg_color='#62D7BD',hover_color='#80E5CF',text_color='#102A27',font=ICON_FONT,command=self.show_tutorial)
@@ -376,11 +388,11 @@ class App(ct.CTk):
         self.controls=controls;controls.grid_columnconfigure(2,weight=1)
         selected=read_settings(DATA/'settings.json').get('search_strategy','native')
         self.search_strategy=tk.StringVar(value=selected if selected in ('native','atlas') else 'native')
-        self.strategy_menu=ct.CTkOptionMenu(controls,values=[str(tr('精准寻色')),str(tr('图像寻色'))],
+        self.strategy_menu=ct.CTkOptionMenu(controls,values=[str(tr('精准寻色')),str(tr('截图寻色'))],
             width=220,height=30,font=BODY_FONT,command=self.change_search_strategy)
         self.strategy_menu.grid(row=1,column=0,columnspan=2,sticky='w',pady=(4,2))
-        self.strategy_menu.set(str(tr('精准寻色' if self.search_strategy.get()=='native' else '图像寻色')))
-        self.strategy_note=ct.CTkLabel(controls,text='图像寻色：精准寻色故障时使用。',font=SMALL_FONT,
+        self.strategy_menu.set(str(tr('精准寻色' if self.search_strategy.get()=='native' else '截图寻色')))
+        self.strategy_note=ct.CTkLabel(controls,text='截图寻色：精准寻色故障时使用；结果以游戏实测为准。',font=SMALL_FONT,
             text_color=MUTED,anchor='w',justify='left',wraplength=340,height=18)
         self.strategy_note.grid(row=2,column=0,columnspan=3,sticky='w',pady=(2,0))
         self.region_note=ct.CTkLabel(controls,text='',font=SMALL_FONT,text_color=MUTED,
@@ -390,7 +402,7 @@ class App(ct.CTk):
         self.status=ct.CTkLabel(status,text='就绪 · 请先选择游戏窗口和目标颜色',font=BODY_FONT,anchor='w',justify='left',wraplength=720,text_color=INK);self.status.grid(row=0,column=0,padx=18,pady=(12,5),sticky='ew')
         self.detail=ct.CTkLabel(status,text='',font=SMALL_FONT,text_color=MUTED,wraplength=720,anchor='w',justify='left')
         self.detail.grid(row=1,column=0,padx=18,pady=(0,8),sticky='ew');self.detail.grid_remove()
-        label=ct.CTkLabel(intro,text='适用于港澳台服瑪奇Mobile。游戏中使用本工具可能存在风险，建议谨慎使用。',font=SMALL_FONT,text_color=MUTED,wraplength=320,justify='left',anchor='w');label.pack(fill='x',pady=(0,8));self.intro_labels.append(label)
+        label=ct.CTkLabel(intro,text='支持台服、韩服、日服；韩服、日服仍在测试中。多色精准结果以游戏实测为准。',font=SMALL_FONT,text_color=MUTED,wraplength=320,justify='left',anchor='w');label.pack(fill='x',pady=(0,8));self.intro_labels.append(label)
         self.footer=ct.CTkLabel(self.page,text='F9 随时停止并释放鼠标  ·  切换窗口停止寻色  ·  不自动开启下一瓶染色剂',font=SMALL_FONT,text_color=MUTED,wraplength=340,justify='right');self.footer.grid(row=5,column=0,padx=BODY_SIDE_PADDING,pady=(0,8),sticky='e')
         self._layout_columns=None;self._layout_content_width=None;self._layout_width=None;self._pending_layout_width=None;self._resize_layout_job=None;self._topbars_compact=None
         self.apply_card_layout(3);self.apply_topbar_layout(False)
@@ -496,7 +508,7 @@ class App(ct.CTk):
         if compact:
             self.brand.grid_configure(row=0,column=0,columnspan=2,sticky='w')
             self.links.grid_configure(row=1,column=0,columnspan=2,sticky='e',pady=(6,0))
-            self.window_button.grid_configure(row=0,column=0,columnspan=3,sticky='ew')
+            self.window_controls.grid_configure(row=0,column=0,columnspan=3,sticky='ew')
             for column,button in enumerate(self.toolbar_buttons):
                 button.grid_configure(row=1,column=column,padx=(0 if column==0 else 6,0),pady=(6,0),sticky='ew')
                 self.toolbar.grid_columnconfigure(column,weight=1,uniform='toolbar')
@@ -505,7 +517,7 @@ class App(ct.CTk):
         else:
             self.brand.grid_configure(row=0,column=0,columnspan=1,sticky='w')
             self.links.grid_configure(row=0,column=1,columnspan=1,sticky='e',pady=0)
-            self.window_button.grid_configure(row=0,column=0,columnspan=1,sticky='w')
+            self.window_controls.grid_configure(row=0,column=0,columnspan=1,sticky='ew')
             for column,button in enumerate(self.toolbar_buttons,1):
                 button.grid_configure(row=0,column=column,padx=(8,0),pady=0,sticky='ew')
                 self.toolbar.grid_columnconfigure(column,weight=0,uniform='')
@@ -547,17 +559,33 @@ class App(ct.CTk):
         if hasattr(self,'update_ui'):self.update_ui.refresh()
         if hasattr(self,'toolbar_buttons'):self.toolbar_buttons[-1].set(i18n.language)
         self.refresh_window_label()
+        self.refresh_server_label()
         if hasattr(self,'strategy_menu'):
-            self.strategy_menu.configure(values=[str(tr('精准寻色')),str(tr('图像寻色'))])
-            self.strategy_menu.set(str(tr('精准寻色' if self.search_strategy.get()=='native' else '图像寻色')))
+            self.strategy_menu.configure(values=[str(tr('精准寻色')),str(tr('截图寻色'))])
+            self.strategy_menu.set(str(tr('精准寻色' if self.search_strategy.get()=='native' else '截图寻色')))
     def change_search_strategy(self,value):
         if getattr(self,'_update_health_pending',False):return
         if self.busy:
-            self.strategy_menu.set(str(tr('精准寻色' if self.search_strategy.get()=='native' else '图像寻色')))
+            self.strategy_menu.set(str(tr('精准寻色' if self.search_strategy.get()=='native' else '截图寻色')))
             return
         strategy='native' if value==str(tr('精准寻色')) else 'atlas'
         self.search_strategy.set(strategy);save_settings(DATA/'settings.json',search_strategy=strategy)
         self.schedule_autosave()
+    def refresh_server_label(self):
+        self.server_menu.configure(values=[str(tr(label)) for _,label in SERVER_OPTIONS])
+        self.server_menu.set(str(tr(dict(SERVER_OPTIONS)[self.server.get()])))
+    def change_server(self,value):
+        if (self.busy or getattr(self,'_update_health_pending',False) or
+                hasattr(self,'updater') and self.updater.service.state in ('installing','waiting_for_exit')):
+            self.server_menu.set(str(tr(dict(SERVER_OPTIONS)[self.server.get()])));return
+        selected=next((server for server,label in SERVER_OPTIONS if str(tr(label))==value),None)
+        if selected is None:return
+        picker=getattr(self,'_window_picker',None)
+        if picker is not None and picker.winfo_exists():picker.destroy()
+        self.server.set(selected);self.selected_window=None;self._bound_target=None
+        save_settings(DATA/'settings.json',server=selected)
+        self.refresh_window_label()
+        self.status.configure(text='服务器已切换，窗口检测已更新。')
     def show_support(self):self._show_dialog('support',support_dialog)
     def show_tutorial(self):self._show_dialog('tutorial',tutorial_dialog)
     def _show_dialog(self,key,factory):
@@ -568,7 +596,7 @@ class App(ct.CTk):
     def refresh_window_label(self):
         target=self.selected_window
         if target is None:
-            try:title=resolve_target().title
+            try:title=resolve_target(server=self.server.get()).title
             except RuntimeError:title=tr('未检测到唯一窗口')
             text=tr('自动检测')+' · '+title
         else:text=tr('游戏窗口 · ')+target.title
@@ -577,7 +605,11 @@ class App(ct.CTk):
         if hasattr(self,'updater') and self.updater.service.state in ('installing','waiting_for_exit'):return
         if self.busy:
             self.status.configure(text='请先按 F9 停止，再更换游戏窗口。');return
+        old=getattr(self,'_window_picker',None)
+        if old is not None and old.winfo_exists():old.lift();return
+        server=self.server.get()
         def selected(target):
+            if server!=self.server.get():return
             if self.busy:
                 self.status.configure(text='请先按 F9 停止，再更换游戏窗口。');return
             self.selected_window=target
@@ -585,7 +617,8 @@ class App(ct.CTk):
             self.status.configure(text='窗口选择已更新，下次开始时生效。')
         self._window_selecting=True
         if hasattr(self,'updater'):self.updater.set_busy(True)
-        picker=WindowPicker(self,self.selected_window,selected)
+        picker=WindowPicker(self,self.selected_window,selected,server=server)
+        self._window_picker=picker
         picker.bind('<Destroy>',lambda event:setattr(self,'_window_selecting',False) if event.widget is picker else None,add='+')
     def pick_color(self,callback):
         if hasattr(self,'updater'):
@@ -767,15 +800,15 @@ class App(ct.CTk):
         if mode=='search':
             try:
                 if self.overlay is None:self.overlay=SearchOverlay(self,self.stop,self.select_candidate,settings_path=DATA/'settings.json')
-                self.overlay.begin(rules,passive=strategy=='native')
+                self.overlay.begin(rules,passive=strategy in ('native','atlas'))
             except Exception:
                 self.set_detail('浮窗暂不可用，寻色状态请查看主窗口。')
         threading.Thread(target=self.runner.launch,args=(rules,mode,False,activate,target),
-                         kwargs={'strategy':runtime_strategy},daemon=True).start()
+                         kwargs={'strategy':runtime_strategy,'server':self.server.get()},daemon=True).start()
     def select_candidate(self,batch_id,candidate_id):
         if self.runner:self.runner.choose_candidate(batch_id,candidate_id)
     def request_native_retry(self):
-        if (self.runner and self.busy and self.search_strategy.get()=='native'
+        if (self.runner and self.busy and self.search_strategy.get() in ('native','atlas')
                 and getattr(self,'_retry_enabled',False)):
             target=self._bound_target or self.selected_window
             try:
@@ -848,7 +881,7 @@ class App(ct.CTk):
             for c,color in zip(self.cards,d['colors']):
                 c.enabled.set(True);c.target.set(color);c.alt.set('')
             self.flush_autosave()
-        elif k in ('scene','match','restore_action'):
+        elif k in ('scene','match','restore_action','native_colors'):
             for i,(c,color) in enumerate(zip(self.cards,d.get('colors',[]))):
                 inactive=self.active_rules is not None and not self.active_rules[i]['enabled']
                 c.current.configure(text='当前颜色  '+(color or ('未参与匹配' if inactive else '读取失败')))
@@ -857,11 +890,11 @@ class App(ct.CTk):
         elif k=='waiting':
             self.status.configure(text=tr('等待染色界面') if d.get('seconds') is None else tr('等待染色界面 · 剩余 ')+str(d['seconds'])+tr(' 秒'))
             self.set_detail(tr(d['message']))
-        elif k in ('atlas_progress','single_progress','native_progress'):
+        elif k in ('atlas_progress','single_progress','native_progress','screenshot_progress'):
             from ui_progress import progress_text
             title,body=progress_text(d)
             self.status.configure(text=tr(title));self.set_detail(tr(body))
-            if k=='native_progress' and d.get('stage')=='refinement' and d.get('verified') and d.get('screenshot_verified'):
+            if k in ('native_progress','screenshot_progress') and d.get('stage')=='refinement' and d.get('verified') and d.get('screenshot_verified'):
                 for card,color in zip(self.cards,d.get('current_colors') or []):
                     card.current.configure(text=tr('当前颜色  ')+(color or tr('读取失败')))
         elif k=='native_retry_available':
@@ -910,12 +943,15 @@ class App(ct.CTk):
                         d.get('restored'),d.get('best_actual_colors'))
                     self.history=read_history(DATA/'history.json');self.display_best(row)
                 except OSError:self.set_detail(tr('本轮结果未能保存，请检查程序文件夹是否可写。'))
-        elif k=='single_verified':
+        elif k in ('single_verified','screenshot_result'):
             for i,(card,color) in enumerate(zip(self.cards,d.get('actual_colors') or [None]*3)):
                 disabled=self.active_rules is not None and not self.active_rules[i]['enabled']
                 card.current.configure(text='当前颜色  '+(color or ('未参与匹配' if disabled else '读取失败')))
             from ui_progress import single_result_presentation
-            title,detail=single_result_presentation(d)
+            if k=='screenshot_result':
+                from screenshot_presentation import result_text
+                title,detail=result_text(d)
+            else:title,detail=single_result_presentation(d)
             self.status.configure(text=tr(title))
             self.set_detail(tr(detail))
             if d.get('verified') and self.active_rules:
@@ -925,6 +961,8 @@ class App(ct.CTk):
                         d.get('restored'),d.get('best_actual_colors'))
                     self.history=read_history(DATA/'history.json');self.display_best(row)
                 except OSError:self.set_detail(tr('本轮结果未能保存，请检查程序文件夹是否可写。'))
+            if k=='screenshot_result' and d.get('best_current') is False:
+                self.set_detail(tr(detail))
         elif k=='atlas_status':
             self.status.configure(text=tr('自动染色'))
             self.set_detail(tr(d.get('message','')))

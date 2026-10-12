@@ -1,7 +1,7 @@
 """Explicit selection by window identity; titles are display data only."""
 import customtkinter as ct
 from i18n import tr,on_language
-from window_target import list_windows,choose_auto,WindowUnavailable,valid_target
+from window_target import list_windows,choose_auto,WindowUnavailable,valid_target,matching_game_windows
 from ui_typography import TITLE_FONT,BODY_FONT
 from display_geometry import logical_size
 
@@ -11,13 +11,13 @@ def initial_picker_size(window, preferred=(680, 350), margins=(80, 100)):
     return logical_size(window,preferred,margins)
 
 class WindowPicker(ct.CTkToplevel):
-    def __init__(self,parent,current,selected):
+    def __init__(self,parent,current,selected,*,server=None):
         super().__init__(parent);self.title(tr('选择游戏窗口'))
         width,height=initial_picker_size(self);self.minsize(min(520,width),min(350,height));self.geometry(f'{width}x{height}')
-        self.transient(parent);self.selected=selected;self.current=current;self.choices={}
+        self.transient(parent);self.selected=selected;self.current=current;self.choices={};self.server=server
         self.grid_columnconfigure(0,weight=1)
         ct.CTkLabel(self,text='选择游戏窗口',font=TITLE_FONT).grid(row=0,column=0,padx=24,pady=(20,8),sticky='w')
-        ct.CTkLabel(self,text='默认自动识别瑪奇Mobile，也可选择标题不同的游戏窗口。',font=BODY_FONT,wraplength=620,justify='left').grid(row=1,column=0,padx=24,pady=4,sticky='w')
+        ct.CTkLabel(self,text='按所选服务器检测游戏窗口；开始时核对客户端版本。',font=BODY_FONT,wraplength=620,justify='left').grid(row=1,column=0,padx=24,pady=4,sticky='w')
         self.menu=ct.CTkOptionMenu(self,values=[tr('自动检测')],width=420,font=BODY_FONT,dynamic_resizing=False)
         self.menu.grid(row=2,column=0,padx=24,pady=12,sticky='ew')
         self.notice=ct.CTkLabel(self,text='',font=BODY_FONT,wraplength=620,justify='left',anchor='w',height=60)
@@ -39,8 +39,9 @@ class WindowPicker(ct.CTkToplevel):
         auto=tr('自动检测');self.choices={}
         try:
             windows=list_windows()
+            if self.server is not None:windows=matching_game_windows(windows,self.server)
             try:
-                chosen=choose_auto(windows);message=tr('自动检测到：')+chosen.title
+                chosen=choose_auto(windows,server=self.server);message=tr('自动检测到：')+chosen.title
                 auto+=' · '+chosen.title
             except WindowUnavailable as e:
                 message=tr(str(e));auto+=' · '+tr('未检测到唯一窗口')

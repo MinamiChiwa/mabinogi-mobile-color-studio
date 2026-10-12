@@ -37,12 +37,12 @@ class AppAtlasWiringTests(unittest.TestCase):
         window.start.configure.assert_called_once_with(state='normal')
         self.assertIn('已停止',window.status.configure.call_args.kwargs['text'])
 
-    def test_real_atlas_callback_factory_constructs_without_game_input(self):
-        with tempfile.TemporaryDirectory() as folder, \
-             patch('atlas_live_adapter.acquire') as capture:
+    def test_visual_factory_constructs_without_game_input(self):
+        with tempfile.TemporaryDirectory() as folder, patch('screenshot_live.Game') as game:
             runner=app.build_runner(lambda *_:None,folder,'atlas')
-        self.assertIsNotNone(runner.atlas_runner)
-        capture.assert_not_called()
+        self.assertTrue(callable(runner.screenshot_runner))
+        self.assertIsNone(runner.atlas_runner)
+        game.assert_not_called()
 
     def test_build_runner_uses_native_user_rules_by_default(self):
         emit=lambda *_:None
@@ -52,36 +52,16 @@ class AppAtlasWiringTests(unittest.TestCase):
         self.assertTrue(callable(runner.call_args.kwargs['native_runner']))
         self.assertIs(result,runner.return_value)
 
-    def test_atlas_is_opt_in_and_waits_for_manual_entry(self):
-        emit=lambda *_:None;entry=(120,340);size=(1280,960)
-        service=MagicMock()
-        with tempfile.TemporaryDirectory() as folder, \
-             patch.object(app,'AtlasService',return_value=service) as atlas_service, \
-             patch.object(app,'atlas_callbacks',return_value='callbacks') as callbacks, \
-             patch.object(app,'Runner') as runner:
-            result=app.build_runner(emit,folder,'atlas',entry,size)
-        callbacks.assert_called_once_with(Path(folder)/'atlas_capture',strategy='grid')
-        atlas_service.assert_called_once_with('callbacks')
-        runner.assert_called_once_with(emit,folder,atlas_runner=service.run)
-        self.assertIs(result,runner.return_value)
+    def test_old_profile_visual_identifier_selects_new_screenshot_runner(self):
+        from screenshot_live import run_screenshot_search
+        with tempfile.TemporaryDirectory() as folder:
+            runner=app.build_runner(lambda *_:None,folder,'atlas',entry=(120,340),entry_size=(1280,960))
+        self.assertIs(runner.screenshot_runner,run_screenshot_search)
 
-    def test_atlas_does_not_require_an_entry_point(self):
-        emit=lambda *_:None
-        with tempfile.TemporaryDirectory() as folder, patch.object(app,'atlas_callbacks',return_value='callbacks') as callbacks, patch.object(app,'AtlasService'), patch.object(app,'Runner'):
-            app.build_runner(emit,folder,'atlas')
-        callbacks.assert_called_once_with(Path(folder)/'atlas_capture',strategy='grid')
-
-    def test_configured_color_search_uses_atlas_runner(self):
-        emit=lambda *_:None
-        with tempfile.TemporaryDirectory() as folder, \
-             patch.object(app,'atlas_callbacks',return_value='callbacks') as callbacks, \
-             patch.object(app,'AtlasService',return_value=MagicMock()) as service, \
-             patch.object(app,'Runner') as runner:
-            result=app.build_runner(emit,folder,'atlas')
-        callbacks.assert_called_once_with(Path(folder)/'atlas_capture',strategy='grid')
-        service.assert_called_once_with('callbacks')
-        runner.assert_called_once_with(emit,folder,atlas_runner=service.return_value.run)
-        self.assertIs(result,runner.return_value)
+    def test_legacy_diagnostic_factory_keeps_screenshot_search_connection(self):
+        with tempfile.TemporaryDirectory() as folder:
+            runner=app.build_runner(lambda *_:None,folder,'legacy')
+        self.assertTrue(callable(runner.screenshot_runner))
 
 
 if __name__=='__main__':unittest.main()

@@ -82,8 +82,11 @@ class ProjectClosedLoopIO(ProjectProbeIO):
         elif input_backend_binding(record)!=input_backend_binding(self.input_reference):
             raise ValueError('Input backend/calibration changed')
         return record
-    def frames(self,label,deadline):
-        try:return super().frames(label,deadline)
+    def planning_frames(self,label,deadline):
+        """Fresh visible geometry for planning; no independent HEX claim."""
+        return self.frames(label,deadline,read_colors=False)
+    def frames(self,label,deadline,*,read_colors=True):
+        try:return super().frames(label,deadline,read_colors=read_colors)
         except SessionStatusError:raise
         except ValueError as exc:
             retryable=str(exc) in (*INITIAL_LAYOUT_ERRORS,'Screenshot and checkpoint HEX disagree')

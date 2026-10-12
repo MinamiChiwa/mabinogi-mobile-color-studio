@@ -55,6 +55,15 @@ def retry_reason_text(reason):
 
 def result_text(data):
     reason=data.get('stop_reason')
+    if reason=='unavailable' and data.get('unavailable_reason')=='server_selection':
+        return ('服务器与游戏窗口不匹配','请在窗口选项旁选择对应服务器，并重新选择该服务器的游戏窗口。')
+    if reason=='interrupted':
+        if data.get('interruption_reason')=='focus_lost':
+            return ('游戏失去焦点，已停止寻色','请保持游戏窗口在前台，再按 F8 开始。窗口尺寸本身不会触发此提示。')
+        if data.get('interruption_reason')=='window_changed':
+            return ('游戏窗口已移动或调整尺寸','运行期间窗口几何已变化，已停止旧坐标操作。请按 F8 按当前窗口重新识别。')
+        if data.get('interruption_reason')=='activation_failed':
+            return ('请先切回游戏窗口','未能将游戏切到前台，本轮已停止。请点击游戏窗口后按 F8 开始。')
     if reason=='palette_ended':
         return ('染色界面已关闭或结束','已停止自动操作。上次实测记录仅供查看，请以游戏当前颜色为准。')
     if reason=='session_binding_changed':

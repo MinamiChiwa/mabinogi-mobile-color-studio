@@ -14,7 +14,7 @@ class UpdateDesktopTests(unittest.TestCase):
         runtime.service.manifest=Manifest.for_test('0.4.3',())
         runtime.service.mark_ready(UpdatePlan(new_version='0.4.3',download_bytes=1000))
         ui.busy=True
-        for language in ('简体中文','繁體中文','English'):
+        for language in ('简体中文','繁體中文','English','日本語','한국어'):
             app.i18n.set_language(language);updates.open();updates.handle(dict(kind='ready',version='0.4.3'))
             helper.pump(.1)
             self.assertEqual(updates.actions['install'].cget('state'),'disabled')

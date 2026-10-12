@@ -96,8 +96,10 @@ class NativeControllerTests(unittest.TestCase):
         self.io.frames=frames
         result=self.run_goal(engineering_deadline=110.)
         self.assertTrue(result['accepted']);self.assertEqual(result['effective_deadline'],110.)
+        # Global CPU search can finish outside the startup grace. The initial
+        # 21-second read must remain advisory; later frames own their policy.
         self.assertTrue(all(frame.get('timer_policy')=='startup_advisory'
-            for observation in result['observations'] for frame in observation.get('frames') or []))
+            for frame in result['initial']['frames']))
     def test_late_unknown_timer_is_advisory_and_a_real_pair_keeps_three_seconds(self):
         original=self.io.frames;calls=[0]
         # Late reads may shorten the deadline before an old plan is rejected.
@@ -138,7 +140,8 @@ class NativeControllerTests(unittest.TestCase):
     def test_user_mixed_goal_runs_two_independently_referenced_rounds(self):
         result=self.run_goal()
         self.assertEqual(result['stop_reason'],'target_observed');self.assertTrue(result['accepted'])
-        self.assertEqual(len(self.io.actions),2);self.assertEqual(len(result['planning_rounds']),1)
+        self.assertEqual(self.io.actions,result['planning_rounds'][0]['candidate']['input_route'])
+        self.assertEqual(len(result['planning_rounds']),1)
         self.assertEqual(result['actual_colors'],[r['colors'][0] for r in self.io.case['rules']])
         self.assertFalse(result['server_confirmation_verified']);self.assertEqual(self.io.releases,1)
     def test_verified_exact_suffix_finishes_without_switching_global_target(self):
@@ -150,7 +153,8 @@ class NativeControllerTests(unittest.TestCase):
         result=self.run_goal(planner=planner)
         self.assertTrue(result['accepted']);self.assertEqual(len(calls),1)
         self.assertEqual(len(result['planning_rounds']),1)
-        self.assertEqual(len(result['planning_rounds'][0]['candidate']['input_route']),2)
+        self.assertEqual(self.io.actions,result['planning_rounds'][0]['candidate']['input_route'])
+        self.assertGreater(len(self.io.actions),1)
 
     def test_route_intermediates_use_native_readback_and_endpoint_still_uses_screenshots(self):
         from native_live.same_session_dye_planner import plan_from_checkpoint
@@ -161,11 +165,12 @@ class NativeControllerTests(unittest.TestCase):
         self.io.frames=frames
         result=self.run_goal()
         self.assertTrue(result['accepted'])
-        self.assertEqual(len(self.io.actions),2)
+        self.assertEqual(self.io.actions,result['planning_rounds'][0]['candidate']['input_route'])
         self.assertNotIn('candidate_0_after',labels)
-        self.assertIn('candidate_0_step_1_after',labels)
+        self.assertIn('candidate_0_step_'+str(len(self.io.actions)-1)+'_after',labels)
         self.assertFalse(result['steps'][0]['screenshot_verified'])
-        self.assertTrue(result['steps'][1]['screenshot_verified'])
+        self.assertTrue(all(not step['screenshot_verified'] for step in result['steps'][:-1]))
+        self.assertTrue(result['steps'][-1]['screenshot_verified'])
 
     def test_intermediate_native_acceptance_needs_independent_screenshot_confirmation(self):
         original=self.io.frames

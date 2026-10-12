@@ -16,17 +16,23 @@ PROFILES = ('quick', 'release', 'research', 'full')
 
 # Stable current contracts: settings/UI, native IO, DPI geometry and safe return.
 QUICK_MODULES = frozenset('''
+test_screenshot_search test_screenshot_control test_screenshot_live test_screenshot_text test_screenshot_preflight
 test_app_data test_build_info test_core test_dpi_layout test_display_geometry
 test_hotkeys test_input_gestures test_window_target test_platform_dpi
 test_lossless_scoring
 test_screen_mapping
-test_runtime_i18n_coverage test_ui_i18n test_ui_performance
+test_runtime_i18n_coverage test_ui_i18n test_release_localization test_ui_performance
 test_native_ui_completion test_native_ui_hit_testing test_responsive_geometry
 test_resize_surface
 test_resize_surface_faults
 test_native_retry_ui test_native_retry_bridge test_native_session_status_ui
 test_native_retry_continuous
 test_native_retry_retention
+test_native_route_feedback
+test_native_planning_observation
+test_native_hex_conflict
+test_game_font_reader
+test_native_current_colors
 test_overlay_native test_runner_strategy test_native_live_layout
 test_native_live_presentation test_native_live_ui test_native_live_runner
 test_native_live_service test_native_live_timer_policy test_native_live_session_budget
@@ -49,6 +55,8 @@ test_updater_manifest test_updater_plan test_updater_network test_updater_offlin
 test_updater_service test_updater_ui test_updater_bootstrap test_updater_runtime
 test_native_build_adapters
 test_native_server_adaptation
+test_native_japanese_adaptation
+test_server_selection
 test_app_shutdown
 '''.split())
 
@@ -110,6 +118,9 @@ QUICK_TEST_IDS = (
     'test_native_live_compromise.NativeCompromiseTests.test_neighborhood_risk_breaks_an_equal_center_quality_tie',
     'test_native_live_compromise.NativeCompromiseTests.test_center_average_precedes_uncalibrated_neighborhood_risk',
     'test_native_live_compromise.NativeCompromiseTests.test_expired_compromise_never_sends_input',
+    'test_native_prefix_policy.NativePrefixPolicyTests.test_equal_quality_remaining_suffix_is_not_continued',
+    'test_native_periodic_search.PeriodicSearchTests.test_missing_low_priority_target_keeps_joint_high_priority_compromises',
+    'test_native_periodic_search.PeriodicSearchTests.test_one_available_target_is_still_retained_with_full_rule_scoring',
     'test_native_retry.NativeRetryTests.test_retry_zooms_to_verified_minimum_and_keeps_deadline_and_grace',
     'test_native_retry.NativeRetryTests.test_recorded_fifty_second_retry_runs_reset_and_useful_bounded_search',
     'test_native_retry.NativeRetryTests.test_f9_during_reset_stops_before_the_next_wheel_group',
@@ -165,6 +176,8 @@ RELEASE_TEST_IDS = (
 )
 
 DESKTOP_TEST_PREFIXES = (
+    'test_release_localization.ReleaseLocalizationDesktopTests.',
+    'test_server_selection.ServerSelectionDesktopTests.',
     'test_updater_desktop.',
     'test_native_session_status_ui.',
     'test_two_region_ui.',
@@ -177,6 +190,8 @@ DESKTOP_TEST_PREFIXES = (
 )
 
 QUICK_DESKTOP_TEST_IDS = frozenset((
+    'test_release_localization.ReleaseLocalizationDesktopTests.test_five_languages_resize_and_restore_without_changing_targets',
+    'test_server_selection.ServerSelectionDesktopTests.test_real_toolbar_remains_usable_and_server_setting_is_saved',
     'test_resize_surface.ResizeSurfaceTests.test_sizing_surface_restores_live_controls_at_latest_width',
     'test_profile_ui.ProfileUITests.test_current_settings_autosave_including_incomplete_input',
     'test_native_ui_hit_testing.NativeUIHitTestingTests.test_native_finished_releases_main_hit_regions_and_next_run_reopens_overlay',

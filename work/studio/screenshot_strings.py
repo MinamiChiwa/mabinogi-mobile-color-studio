@@ -1,0 +1,35 @@
+"""User-facing translations for screenshot search; traditional uses OpenCC."""
+EN={
+'截图寻色':'Screenshot Search',
+'截图寻色：精准寻色故障时使用；结果以游戏实测为准。':'Screenshot search: use if precise search fails; results are verified in game.',
+'截图寻色已就绪，可进入染色，也可直接识别已打开的色板。F9 可停止。':'Screenshot search is ready. Enter dyeing or use an already open palette. F9 stops.',
+'等待游戏色板显示完整；可以先进入染色，再启动截图寻色。F9 可停止。':'Waiting for the complete palette. Screenshot search also works if dyeing is already open. F9 stops.',
+'正在缩小画板并采集原始颜色，随后会自动寻找目标。':'Zooming out and collecting original colors, then searching for your targets.',
+'复用本局已采集的颜色，正在重新搜索。':'Reusing this round’s captured colors for a new search.',
+'剩余时间用于当前画板搜索，保留回到较好结果的时间。':'Searching the current board while keeping time to restore the better result.',
+'复用本局已采集的颜色，保留回到较好结果的时间。':'Reusing this round’s captured colors while keeping time to restore the better result.',
+'正在覆盖重复色板，保留原始颜色点。':'Scanning the repeating palette while retaining original color samples.',
+'正在放大采集细小颜色点，采集完成后会自动移动。':'Magnifying small color points. The board will move automatically after capture.',
+'未能测得完整重复周期，正在使用当前截图寻找较接近的颜色。':'The repeat period was not found. Searching the current screenshot for closer colors.',
+'正在计算平移、旋转与缩放方案；最终颜色以游戏实际色码为准。':'Calculating translation, rotation and zoom. Final colors are verified from game HEX.',
+'正在微调颜色，并保留已经实测的较好结果。':'Refining colors while retaining the best actual measurements.',
+'当前位置尚未完成图像定位，正在保留游戏实际颜色。':'The current image position is unconfirmed. Retaining actual game colors.',
+'染色界面布局已变化，请重新开始截图寻色。':'The dye layout changed. Restart screenshot search.',
+'染色界面已关闭或结束，已停止自动操作。':'The dye screen closed or ended. Automatic input stopped.',
+'截图寻色已停止':'Screenshot search stopped',
+'自动操作已停止；请以游戏当前颜色为准。':'Automatic input stopped. Refer to the current colors in game.',
+'截图寻色已结束':'Screenshot search finished',
+'截图寻色目标已达标':'Screenshot targets matched',
+'游戏实际色码已复核，请在游戏内手动确认是否套用。':'Actual game HEX verified. Confirm application manually in game.',
+'截图寻色 · 当前妥协结果':'Screenshot search · Current compromise',
+'当前颜色已经复核；此前更好的实测结果未完全恢复，请查看当前色差后再决定是否套用。':'Current colors are verified. A better previous measurement was not fully restored. Review the current differences before applying.',
+'截图寻色 · 妥协结果':'Screenshot search · Compromise',
+'本轮未命中全部目标。下方为游戏实际色码与色差；可重试或在游戏内手动调整。':'Not all targets were matched. Actual game HEX and differences are shown below. Retry or adjust manually in game.',
+'截图寻色说明':'About screenshot search',
+'截图寻色会缩小和放大采集颜色，再计算移动、旋转与缩放。精确目标和相似目标均以游戏实际 HEX 复核；没有命中时展示实测妥协结果，不能保证多个区域精准成功。可按 F7 使用本局已有截图重搜，F9 停止并保留当前游戏画面。':'Screenshot search zooms out and in to collect colors, then calculates translation, rotation and zoom. Exact and Similar targets are verified against actual game HEX. A measured compromise is shown if targets are missed; multiple exact colors are not guaranteed. F7 retries with this round’s screenshots; F9 stops and leaves the current game colors.',
+'按 F8 或点击开始，等待提示后手动进入游戏染色界面。也可在已经进入染色界面后启动工具。使用默认的精准寻色；截图寻色在精准寻色故障时使用，通过原始截图搜索并核对实际色码。':'Press F8 or Start, then enter dyeing after the ready message. You can also start with dyeing already open. Precise search is the default; screenshot search uses original screenshots and actual game HEX when precise search fails.',
+}
+from opencc import OpenCC
+_traditional=OpenCC('s2twp')
+TW={source:_traditional.convert(source) for source in EN}
+TW.update({'截图寻色':'截圖尋色','截图寻色说明':'截圖尋色說明'})

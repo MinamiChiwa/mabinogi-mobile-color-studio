@@ -65,6 +65,35 @@ class GestureGeometryTests(unittest.TestCase):
 
 
 class GestureInputTests(unittest.TestCase):
+    def test_rotation_radial_transition_survives_slow_frame_sampling(self):
+        from input_gestures import grouped_rotation_gesture
+        from native_input_response import InputGeometry,InputSettings,replay_native_route
+        board=(177.5499878,357.9750977,610.4500122,790.8751221)
+        geometry=InputGeometry(board,(624,624),'windows_legacy_mouse_pixels')
+        settings=InputSettings(.5,3.,0.,.1,.01)
+        reference=dict(position=[0.,0.],scale=1.,rotation_degrees=0.)
+        gesture=grouped_rotation_gesture((board[0]+20,board[1]+20,board[2]-20,board[3]-20),90.,(365,639))
+        # Observe the real sender's dwell sequence at 20 FPS and several frame
+        # phases, rather than treating every sent coordinate as a game frame.
+        for phase in (.001,.012,.026,.041):
+            with self.subTest(phase=phase):
+                game=self.game();now=[0.];next_frame=[phase];pressed=[False];samples=[0]
+                def poll_sleep(seconds):
+                    until=now[0]+seconds
+                    while next_frame[0]<=until:
+                        if pressed[0] and game.moves:
+                            slot=max(i for i,p in enumerate(gesture.points) if p==game.moves[-1])
+                            if slot>samples[-1]:samples.append(slot)
+                        next_frame[0]+=.05
+                    now[0]=until
+                def send(flags):pressed[0]=flags==8
+                game.send=send
+                with patch('platform_win.time.sleep',side_effect=poll_sleep):
+                    game.perform_gesture(gesture)
+                replay=replay_native_route(reference,[gesture.record()],geometry,settings,
+                    sample_policy='explicit_indices',sample_indices=[samples])
+                self.assertAlmostEqual(abs(replay['final_pose']['rotation_degrees']),90.,delta=.05)
+
     def test_opt_in_cursor_trace_records_actual_client_coordinates(self):
         game=self.game();game.capture_input_trace=True
         game.geometry=lambda:(-100,50,1280,960)

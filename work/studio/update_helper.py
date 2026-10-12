@@ -125,6 +125,8 @@ def main(argv=None):
                 '简体中文':('更新未完成，已恢复原版本；用户资料已保留。' if recovered else '更新未完成，请保留恢复记录并使用完整官方包修复程序。'),
                 '繁體中文':('更新未完成，已恢復原版本；使用者資料已保留。' if recovered else '更新未完成，請保留恢復紀錄並使用完整官方套件修復程式。'),
                 'English':('Update failed. The previous version was restored and user data was kept.' if recovered else 'Update did not finish. Keep the recovery files and repair the app using the full official package.'),
+                '日本語':('更新に失敗したため、以前のバージョンに戻しました。ユーザーデータは保持されています。' if recovered else '更新が完了しませんでした。復旧用ファイルを残し、公式の完全パッケージで修復してください。'),
+                '한국어':('업데이트에 실패하여 이전 버전으로 복원했습니다. 사용자 데이터는 유지되었습니다.' if recovered else '업데이트를 완료하지 못했습니다. 복구 파일을 보관하고 공식 전체 패키지로 프로그램을 복구해 주세요.'),
             }
             ctypes.windll.user32.MessageBoxW(None,messages.get(record.get('language'),messages['English'])+'\n'+str(a.transaction),'ColorStudio Update',0x10)
         return 1

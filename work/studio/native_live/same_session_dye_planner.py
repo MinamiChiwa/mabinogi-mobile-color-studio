@@ -173,10 +173,33 @@ def _timer_deadline(frames,deadline,reserve):
     return min(limits)
 
 
-def _fresh(now, frames):
+def observation_reference_fingerprint(checkpoint,frames):
+    """Bind post-decoding actual-state evidence to this reference and captures."""
+    fields=('binding','pose','client_hex','board','local_size','pixel_mapping')
+    return hashlib.sha256(_json(dict(checkpoint={k:checkpoint.get(k) for k in fields},
+        captures=[f['captured_monotonic'] for f in frames])).encode()).hexdigest()
+
+
+def _reference_validation_fresh(now,frames,checkpoint):
     when=frames[-1]['captured_monotonic']
-    if type(now) not in (int,float) or not math.isfinite(now) or not 0<=now-when<=5.:
+    validation=frames[-1].get('reference_validation',{})
+    checked=validation.get('checked_monotonic')
+    return (checkpoint is not None and type(checked) in (int,float) and math.isfinite(checked)
+            and when<=checked<=now and now-checked<=5.
+            and all(f.get('reference_validation')==validation for f in frames)
+            and validation.get('checkpoint_fingerprint')==observation_reference_fingerprint(checkpoint,frames))
+
+
+def _fresh(now, frames, checkpoint=None):
+    when=frames[-1]['captured_monotonic']
+    if type(now) not in (int,float) or not math.isfinite(now) or now<when:
         raise ValueError('Fresh checkpoint frames required for planning/revalidation')
+    if now-when<=5.:return
+    # Slow decoding makes the image old, not necessarily the current pose.
+    # Only an actual post-decoding checkpoint that still matches these exact
+    # frames/reference may refresh the planning age; capture times stay intact.
+    if _reference_validation_fresh(now,frames,checkpoint):return
+    raise ValueError('Fresh checkpoint frames required for planning/revalidation')
 
 
 def assess_feedback(context, checkpoint, frames, rules, *, expected_pose=None):
@@ -371,7 +394,7 @@ def plan_from_checkpoint(context, checkpoint, frames, rules, grid, *, now, engin
     started=clock();check();rules=normalize_target_rules(rules)
     if candidate_admission is not None and not callable(candidate_admission):raise ValueError('Invalid candidate admission')
     def admissible(row):return row is not None and (candidate_admission is None or candidate_admission(row))
-    feedback=assess_feedback(context,checkpoint,frames,rules);_fresh(now,frames)
+    feedback=assess_feedback(context,checkpoint,frames,rules);_fresh(now,frames,checkpoint)
     if (not all(math.isfinite(v) for v in (engineering_deadline,time_budget_seconds,reserve_seconds,verification_margin_seconds))
         or time_budget_seconds<=0 or not 0<=reserve_seconds<=GAME_TAIL_SECONDS or not 0<=verification_margin_seconds<=20):
         raise ValueError('Invalid deadline/reserve/search bounds')
@@ -645,7 +668,7 @@ def plan_from_checkpoint(context, checkpoint, frames, rules, grid, *, now, engin
 def validate_plan_reference(context, plan, checkpoint, frames, *, now, rules=None,purpose='target',
         reference_observation_paid=False):
     """Detect stale plans; this check does not grant permission to send input."""
-    pose=_checked_checkpoint(context,checkpoint);_frames(checkpoint,frames);_fresh(now,frames)
+    pose=_checked_checkpoint(context,checkpoint);_frames(checkpoint,frames);_fresh(now,frames,checkpoint)
     if plan.get('plan_fingerprint')!=_plan_fingerprint(plan):
         raise ValueError('Plan contents changed')
     if plan.get('schema',1)>=2:
@@ -653,7 +676,11 @@ def validate_plan_reference(context, plan, checkpoint, frames, *, now, rules=Non
             raise ValueError('Current target differs from bound plan rules')
     if plan.get('context_fingerprint')!=context['fingerprint'] or plan.get('reference_pose')!=pose:
         raise ValueError('Plan reference differs from current session/pose')
-    if now<plan['planned_at'] or now-plan['planned_at']>PLAN_OBSERVATION_MAX_AGE_SECONDS or frames[-1]['captured_monotonic']<plan['reference_frame_monotonic']:
+    # Actual bound state revalidation after slow decoding supersedes a pure
+    # plan-age cap. Future plans and images preceding its reference stay invalid.
+    if (now<plan['planned_at'] or frames[-1]['captured_monotonic']<plan['reference_frame_monotonic']
+            or (now-plan['planned_at']>PLAN_OBSERVATION_MAX_AGE_SECONDS
+                and not _reference_validation_fresh(now,frames,checkpoint))):
         raise ValueError('Plan expired or observations precede the plan reference')
     if purpose not in ('target','compromise','approach'):raise ValueError('Invalid plan validation purpose')
     candidate=plan.get({'target':'candidate','compromise':'compromise_candidate','approach':'approach_candidate'}[purpose])

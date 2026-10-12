@@ -7,6 +7,44 @@ from native_palette_scoring import score_native_pose
 
 
 class PeriodicSearchTests(unittest.TestCase):
+    def test_missing_high_targets_search_joint_near_colors_with_original_rules(self):
+        a = np.full((32,32,3), 40, np.uint8); a[11,25] = 240
+        b = np.full((32,32,3), 180, np.uint8); b[12,5] = 1
+        c = np.zeros((32,32,3), np.uint8)
+        session = self.session(); session['pixels'] = (a,b,c)
+        active = [dict(enabled=True,exact=True,colors=[target],tolerance=0.,priority=i+1)
+                  for i,target in enumerate(('#FFFFFF','#000000','#000000'))]
+        result = self.search(session,active,time_budget_seconds=3.)
+        self.assertEqual(result['target_sites_per_region'][:2], [0,0])
+        self.assertTrue(result['nearest_candidates'])
+        self.assertLess(result['nearest_prediction']['deltas'][0], 10.)
+        self.assertFalse(result['candidates'], 'Near sites must not replace original acceptance targets')
+        for row in result['nearest_candidates']:
+            actual = score_native_pose(session,row['native_pose'],active)
+            self.assertEqual(row['prediction']['colors'], actual['colors'])
+
+    def test_no_exact_target_still_returns_joint_near_color_poses(self):
+        session = self.session()
+        session['pixels'] = tuple(np.full((32,32,3),v,np.uint8) for v in (230,1,2))
+        active = [dict(enabled=True,exact=True,colors=[target],tolerance=0.,priority=i+1)
+                  for i,target in enumerate(('#FFFFFF','#000000','#000000'))]
+        result = self.search(session,active,time_budget_seconds=3.)
+        self.assertEqual(result['target_sites_per_region'], [0,0,0])
+        self.assertTrue(result['nearest_candidates'])
+        self.assertFalse(result['candidates'])
+        self.assertFalse(result['continuous_complete'])
+
+    def test_near_site_pool_expands_beyond_initial_batch_when_time_remains(self):
+        session = self.session()
+        session['pixels'] = tuple(np.full((32,32,3),v,np.uint8) for v in (230,1,2))
+        active = [dict(enabled=i==0,exact=True,colors=['#FFFFFF'],tolerance=0.,priority=i+1)
+                  for i in range(3)]
+        result = self.search(session,active,time_budget_seconds=3.)
+        self.assertGreater(result['near_sites_per_region'][0], 32)
+        self.assertTrue(result['nearest_candidates'])
+        self.assertFalse(result['candidates'])
+        self.assertFalse(result['continuous_complete'])
+
     def session(self):
         a=np.full((32,32,3),180,np.uint8);b=a.copy()
         a[11,25]=0;b[12,5]=0
@@ -76,7 +114,36 @@ class PeriodicSearchTests(unittest.TestCase):
         result=self.search(rules=rules)
         self.assertEqual(result['candidates'],[])
         self.assertFalse(result['continuous_complete'])
-        self.assertEqual(result['stop_reason'],'target_not_present_on_sample_lattice')
+        self.assertIn(result['stop_reason'],('target_not_present_on_sample_lattice','deadline'))
+        self.assertEqual(result['missing_target_regions'],[0,1,2])
+
+    def test_missing_low_priority_target_keeps_joint_high_priority_compromises(self):
+        rules=[dict(enabled=True,exact=True,colors=['#000000'],tolerance=0.,priority=i+1) for i in range(3)]
+        rules[2].update(colors=['#FF0000'],exact=False,tolerance=8.)
+        session=self.session()
+        result=self.search(session,rules,time_budget_seconds=3.)
+        self.assertEqual(result['target_sites_per_region'][2],0)
+        self.assertFalse(result['candidates'],'A partial target cannot be accepted for all regions')
+        nearest=result['nearest_candidates']
+        self.assertTrue(nearest,'Missing third target incorrectly suppressed double-target global search')
+        self.assertEqual(nearest[0]['prediction']['colors'][:2],['#000000']*2)
+        for row in nearest:
+            prediction=score_native_pose(session,row['native_pose'],rules)
+            self.assertEqual(row['prediction']['colors'],prediction['colors'])
+            self.assertFalse(prediction['predicted_accepted'])
+        self.assertGreater(result['pair_proposals'],0)
+        self.assertFalse(result['continuous_complete'])
+
+    def test_one_available_target_is_still_retained_with_full_rule_scoring(self):
+        rules=[dict(enabled=True,exact=True,colors=['#000000' if i==0 else '#FF0000'],tolerance=0.,priority=i+1)
+               for i in range(3)]
+        result=self.search(rules=rules)
+        self.assertEqual(result['target_sites_per_region'][1:],[0,0])
+        self.assertTrue(result['nearest_candidates'])
+        self.assertEqual(result['nearest_prediction']['colors'][0],'#000000')
+        self.assertEqual(len(result['nearest_prediction']['colors']),3)
+        self.assertFalse(result['nearest_prediction']['predicted_accepted'])
+        self.assertFalse(result['candidates'])
 
     def test_deadline_and_cancel_preserve_partial_coverage(self):
         ticks=iter([0.,2.,2.,2.])

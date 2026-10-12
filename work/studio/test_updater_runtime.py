@@ -10,7 +10,7 @@ class RuntimeTests(unittest.TestCase):
         from updater.runtime import UpdateRuntime
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp)/'工具';root.mkdir();(root/'ColorStudio.exe').write_bytes(b'old')
-            old=Path(temp)/'old';build_assets(root,old,'0.4.2','stable',SEED)
+            old=Path(temp)/'old';old_report=build_assets(root,old,'0.4.2','stable',SEED)
             for name in ('update-manifest.json','update-manifest.sig'):(root/name).write_bytes((old/name).read_bytes())
             data=root/'data';data.mkdir();(data/'profile.json').write_bytes(b'private')
             new=Path(temp)/'new';(root/'ColorStudio.exe').write_bytes(b'new')
@@ -29,7 +29,7 @@ class RuntimeTests(unittest.TestCase):
         from updater.runtime import UpdateRuntime
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp)/'app';root.mkdir();(root/'ColorStudio.exe').write_bytes(b'old')
-            old=Path(temp)/'old';build_assets(root,old,'0.4.2','stable',SEED)
+            old=Path(temp)/'old';old_report=build_assets(root,old,'0.4.2','stable',SEED)
             for name in ('update-manifest.json','update-manifest.sig'):(root/name).write_bytes((old/name).read_bytes())
             data=root/'data';data.mkdir();new=Path(temp)/'new'
             (root/'ColorStudio.exe').write_bytes(b'new');good=build_assets(root,new,'0.4.3','stable',SEED,release_sequence=2)
@@ -37,6 +37,7 @@ class RuntimeTests(unittest.TestCase):
             events=[];runtime=UpdateRuntime(root,data,'0.4.2',events.append,keys=KEYS)
             runtime.offline(new/good['offline_name']);self.wait(runtime)
             before=(runtime.cache/'update-manifest.json').read_bytes()
-            runtime.offline(old/'ColorStudio-offline-0.4.2-win-x64.zip');self.wait(runtime)
+            self.assertTrue((old/old_report['offline_name']).is_file())
+            runtime.offline(old/old_report['offline_name']);self.wait(runtime)
             self.assertEqual(runtime.service.state,'ready')
             self.assertEqual((runtime.cache/'update-manifest.json').read_bytes(),before)

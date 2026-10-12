@@ -5,11 +5,15 @@ def format_bytes(value):
         number/=1024
 
 def update_copy(language,version,download_bytes):
+    from locale_ja import UPDATE_AVAILABLE_JA
+    from locale_ko import UPDATE_AVAILABLE_KO
     size=format_bytes(download_bytes)
     texts={
         '简体中文':(f'有新版本 {version}',f'预计下载 {size}，保留当前设置和染色方案。','下载更新','稍后','忽略此版本','导入离线更新'),
         '繁體中文':(f'有新版本 {version}',f'預計下載 {size}，保留目前設定與染色方案。','下載更新','稍後','忽略此版本','匯入離線更新'),
         'English':(f'Update available: {version}',f'Download: {size}. Your settings and dye presets will be kept.','Download update','Later','Ignore this version','Import offline update'),
+        '日本語':tuple(value.format(version=version,size=size) for value in UPDATE_AVAILABLE_JA),
+        '한국어':tuple(value.format(version=version,size=size) for value in UPDATE_AVAILABLE_KO),
     }
     title,detail,*buttons=texts.get(language,texts['简体中文'])
     return {'title':title,'detail':detail,'download':buttons[0],'later':buttons[1],'ignore':buttons[2],'offline':buttons[3]}
@@ -38,7 +42,14 @@ TEXTS={
  'checking_notice':('检查不会下载或安装。更新保留设置、方案和全部 data。','檢查不會下載或安裝。更新保留設定、方案與全部 data。','Checking does not download or install. Settings, presets and all data are kept.'),
 }
 
-def text(key,language):return TEXTS.get(key,TEXTS['verification'])[{'简体中文':0,'繁體中文':1,'English':2}.get(language,0)]
+def text(key,language):
+    if language=='日本語':
+        from locale_ja import UPDATER_JA
+        return UPDATER_JA.get(key,UPDATER_JA['verification'])
+    if language=='한국어':
+        from locale_ko import UPDATER_KO
+        return UPDATER_KO.get(key,UPDATER_KO['verification'])
+    return TEXTS.get(key,TEXTS['verification'])[{'简体中文':0,'繁體中文':1,'English':2}.get(language,0)]
 
 class UpdateUI:
     """All widget mutations occur in App's Tk event loop."""

@@ -215,7 +215,7 @@ class TwoRegionTests(unittest.TestCase):
         self.assertEqual(recovery['prediction']['colors'], INITIAL)
         self.assertFalse(recovery['ready_for_input'])
 
-    def test_closed_loop_restores_two_observed_colors_after_actual_drift(self):
+    def test_closed_loop_preserves_two_observed_colors_after_actual_drift(self):
         from native_input_route_search import _needed
         from native_live.same_session_dye_planner import audit_candidate_endpoint, _plan_fingerprint, _json
         io = SyntheticTwoIO()
@@ -247,9 +247,11 @@ class TwoRegionTests(unittest.TestCase):
         with patch('native_live.controller.find_refinement', return_value=None):
             result = self.call(run_goal_loop, io, io.session, io.settings, rules,
                 engineering_deadline=90., clock=io.clock, planner=compromised_plan)
-        self.assertTrue(result['restored'], result.get('error'))
+        # Measured destination correction can recover these colors before the
+        # older best-observation return is needed. Check the verified outcome.
         self.assertTrue(result['best_current'])
         self.assertEqual(result['actual_colors'], MOVED)
+        self.assertTrue(result['screenshot_verified'])
         self.assertGreaterEqual(len(io.actions), 2)
         self.assertEqual(len(result['actual_deltas']), 2)
         self.assertTrue(all(len(row['checkpoint']['client_hex']) == 2 for row in result['observations']))

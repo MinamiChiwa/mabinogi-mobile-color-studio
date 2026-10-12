@@ -58,7 +58,7 @@ class PrioritySearchPathTests(unittest.TestCase):
         chosen = translation_candidates(TradeoffAtlas(), [[0., 0.]]*3,
                                         rules(), limit=1)[0]
         self.assertEqual(chosen['colors'][:2], ['#000000', '#FFFFFF'])
-        self.assertEqual(chosen['region_priority'][:2], [0, 1])
+        self.assertEqual(chosen['region_priority'][::2], [0, 1])
         self.assertFalse(chosen['accepted'])
 
     def test_translation_without_priority_keeps_balanced_legacy_selection(self):

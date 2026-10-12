@@ -7,6 +7,70 @@ from unittest.mock import MagicMock,patch
 
 
 class NativeLiveServiceTests(unittest.TestCase):
+    def test_start_button_activation_is_used_before_waiting_for_the_board(self):
+        m=self.module();backend=MagicMock();backend.adapter=TW_ADAPTER
+        from window_target import WindowTarget
+        target=WindowTarget(20,123,'Game','MabinogiMobile.exe');order=[]
+        with tempfile.TemporaryDirectory() as tmp:
+            owner=SimpleNamespace(folder=Path(tmp),stop=threading.Event(),event=MagicMock())
+            def activate(selected):order.append('activate');self.assertEqual(selected,target);return True
+            def collect(*a,**k):order.append('collect');return dict(stop_reason='no_active_palette_timeout')
+            with patch.object(m,'resolve_target',return_value=target),patch.object(m,'_prepare',return_value=(backend,{})), \
+                patch('window_target.activate_target_window',side_effect=activate),patch.object(m,'collect_validation_session',side_effect=collect):
+                result=m.run_native_search(owner,[dict(enabled=True,exact=True,colors=['#FFFFFF'],tolerance=8)]*3,activate=True)
+            self.assertEqual(order,['activate','collect'])
+            self.assertEqual(result['actual_input_attempts'],0)
+
+    def test_start_restores_minimized_window_before_measuring_geometry(self):
+        m=self.module();backend=MagicMock();backend.adapter=TW_ADAPTER
+        from window_target import WindowTarget
+        target=WindowTarget(20,123,'Game','MabinogiMobile.exe');visible=[False]
+        def activate(selected):visible[0]=True;return True
+        def prepare(*args):
+            if not visible[0]:raise ValueError('Invalid target-context client bounds')
+            return backend,{}
+        with tempfile.TemporaryDirectory() as tmp:
+            owner=SimpleNamespace(folder=Path(tmp),stop=threading.Event(),event=MagicMock())
+            with patch.object(m,'resolve_target',return_value=target),patch.object(m,'_prepare',side_effect=prepare), \
+                patch('window_target.activate_target_window',side_effect=activate), \
+                patch.object(m,'collect_validation_session',return_value=dict(stop_reason='no_active_palette_timeout')):
+                result=m.run_native_search(owner,[dict(enabled=True,exact=True,colors=['#FFFFFF'],tolerance=0)]*3,activate=True)
+            self.assertEqual(result['stop_reason'],'no_active_palette_timeout',result.get('error'))
+            self.assertEqual(result['actual_input_attempts'],0)
+
+    def test_ready_wait_and_active_binding_have_distinct_progress(self):
+        m=self.module();backend=MagicMock();backend.adapter=TW_ADAPTER
+        from window_target import WindowTarget
+        target=WindowTarget(20,123,'Game','MabinogiMobile.exe');events=[]
+        with tempfile.TemporaryDirectory() as tmp:
+            owner=SimpleNamespace(folder=Path(tmp),stop=threading.Event(),event=lambda kind,**data:events.append((kind,data)))
+            def collect(*a,**k):
+                k['event'](dict(event='armed',existing_active_palette=False))
+                k['event'](dict(event='discovery_progress',phase='waiting',discovery={'eligible_addresses':[]}))
+                k['event'](dict(event='discovery_progress',phase='waiting',discovery={'eligible_addresses':['0x10000']}))
+                return dict(stop_reason='no_active_palette_timeout')
+            with patch.object(m,'resolve_target',return_value=target),patch.object(m,'_prepare',return_value=(backend,{})), \
+                patch.object(m,'collect_validation_session',side_effect=collect):
+                m.run_native_search(owner,[dict(enabled=True,exact=True,colors=['#FFFFFF'],tolerance=8)]*3)
+            progress=[d for kind,d in events if kind=='native_progress']
+            self.assertTrue(all('已就绪' in (d['message'] or '') for d in progress[-3:-1]))
+            self.assertEqual(progress[-1]['stage'],'binding')
+            self.assertIn('前台',progress[-1]['message'])
+
+    def test_focus_stop_reason_reaches_result_presentation(self):
+        m=self.module();backend=MagicMock();backend.adapter=TW_ADAPTER
+        from window_target import WindowTarget
+        target=WindowTarget(20,123,'Game','MabinogiMobile.exe');events=[]
+        with tempfile.TemporaryDirectory() as tmp:
+            owner=SimpleNamespace(folder=Path(tmp),stop=threading.Event(),event=lambda kind,**data:events.append((kind,data)))
+            with patch.object(m,'resolve_target',return_value=target),patch.object(m,'_prepare',return_value=(backend,{})), \
+                patch.object(m,'collect_validation_session',side_effect=InterruptedError('已暂停：游戏失去焦点。返回游戏后按 F8 重新开始。')):
+                result=m.run_native_search(owner,[dict(enabled=True,exact=True,colors=['#FFFFFF'],tolerance=8)]*3)
+            self.assertEqual(result.get('interruption_reason'),'focus_lost')
+            shown=next(d for k,d in events if k=='native_result')
+            from native_status import result_text
+            self.assertIn('焦点',result_text(shown)[0])
+
     def module(self):
         self.assertIsNotNone(importlib.util.find_spec('native_live.service'),'Runner service missing')
         return importlib.import_module('native_live.service')

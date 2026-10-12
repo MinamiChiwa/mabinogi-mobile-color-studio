@@ -2,7 +2,7 @@
 import ctypes as C
 from ctypes import wintypes as W
 from dataclasses import dataclass
-import os,unicodedata
+import os,time,unicodedata
 
 @dataclass(frozen=True)
 class WindowTarget:
@@ -22,10 +22,13 @@ u.IsWindowVisible.argtypes=[W.HWND];u.IsWindowVisible.restype=W.BOOL
 u.IsWindow.argtypes=[W.HWND];u.IsWindow.restype=W.BOOL
 u.GetForegroundWindow.restype=W.HWND
 u.SetForegroundWindow.argtypes=[W.HWND];u.SetForegroundWindow.restype=W.BOOL
+u.BringWindowToTop.argtypes=[W.HWND];u.BringWindowToTop.restype=W.BOOL
+u.AttachThreadInput.argtypes=[W.DWORD,W.DWORD,W.BOOL];u.AttachThreadInput.restype=W.BOOL
 u.ShowWindow.argtypes=[W.HWND,C.c_int];u.ShowWindow.restype=W.BOOL
 k.OpenProcess.argtypes=[W.DWORD,W.BOOL,W.DWORD];k.OpenProcess.restype=W.HANDLE
 k.QueryFullProcessImageNameW.argtypes=[W.HANDLE,W.DWORD,W.LPWSTR,C.POINTER(W.DWORD)];k.QueryFullProcessImageNameW.restype=W.BOOL
 k.CloseHandle.argtypes=[W.HANDLE]
+k.GetCurrentThreadId.restype=W.DWORD
 CALLBACK=C.WINFUNCTYPE(W.BOOL,W.HWND,W.LPARAM)
 u.EnumWindows.argtypes=[CALLBACK,W.LPARAM];u.EnumWindows.restype=W.BOOL
 
@@ -56,9 +59,23 @@ def list_windows():
 def normalized_title(title):
     return ''.join(unicodedata.normalize('NFKC',title).casefold().split())
 
-def choose_auto(windows,foreground=0):
-    aliases={'瑪奇mobile','玛奇mobile','mabinogimobile','마비노기모바일'}
-    candidates=[w for w in windows if normalized_title(w.title) in aliases or w.executable.casefold()=='mabinogimobile.exe']
+SERVER_TITLES={'tw':('瑪奇 Mobile','玛奇 Mobile'),
+               'kr':('마비노기 모바일',), 'jp':('マビモバ','マビノギモバイル')}
+
+def matching_game_windows(windows,server=None):
+    if server is not None and server not in SERVER_TITLES:raise ValueError('Unknown game server')
+    titles={normalized_title(t):s for s,aliases in SERVER_TITLES.items() for t in aliases}
+    candidates=[]
+    for w in windows:
+        title=normalized_title(w.title);known=titles.get(title)
+        if known is not None:
+            if server is None or server==known:candidates.append(w)
+        elif title=='mabinogimobile' or w.executable.casefold()=='mabinogimobile.exe':
+            candidates.append(w)
+    return candidates
+
+def choose_auto(windows,foreground=0,*,server=None):
+    candidates=matching_game_windows(windows,server)
     if len(candidates)==1:return candidates[0]
     active=[w for w in candidates if w.hwnd==foreground]
     if len(active)==1:return active[0]
@@ -81,10 +98,25 @@ def activate_target_window(target):
         return False
     if u.IsIconic(target.hwnd):
         u.ShowWindow(target.hwnd,9)  # SW_RESTORE
-    u.SetForegroundWindow(target.hwnd)
-    return int(u.GetForegroundWindow())==int(target.hwnd)
+    current_thread=int(k.GetCurrentThreadId())
+    foreground=u.GetForegroundWindow()
+    foreground_thread=(int(u.GetWindowThreadProcessId(foreground,None))
+                       if foreground else 0)
+    attached=False
+    if foreground_thread and foreground_thread!=current_thread:
+        attached=bool(u.AttachThreadInput(current_thread,foreground_thread,True))
+    try:
+        u.BringWindowToTop(target.hwnd)
+        u.SetForegroundWindow(target.hwnd)
+        for _ in range(6):
+            foreground=u.GetForegroundWindow()
+            if foreground and int(foreground)==int(target.hwnd):return True
+            time.sleep(.03)
+        return False
+    finally:
+        if attached:u.AttachThreadInput(current_thread,foreground_thread,False)
 
-def resolve_target(target=None):
-    if target is None:return choose_auto(list_windows(),u.GetForegroundWindow())
+def resolve_target(target=None,*,server=None):
+    if target is None:return choose_auto(list_windows(),u.GetForegroundWindow(),server=server)
     if not valid_target(target):raise WindowUnavailable('所选窗口已关闭，请重新选择游戏窗口。')
     return target

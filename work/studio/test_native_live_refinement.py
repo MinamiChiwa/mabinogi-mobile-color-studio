@@ -18,6 +18,68 @@ from test_native_live_controller import FixtureIO
 
 
 class ProtectedRefinementTests(unittest.TestCase):
+    def test_cpu_slices_resume_same_unmoved_family_without_restarting(self):
+        from unittest.mock import patch
+        m = self.module()
+        self.assertIn('search_state', __import__('inspect').signature(m.find_refinement).parameters)
+        state = {}; stats = {}; ticks = [1.]; seen = []; starts = []
+        active = [dict(enabled=True,exact=True,colors=['#FF00FF'],tolerance=0.) for _ in range(3)]
+        def proposals(context, pose, radius, guard):
+            starts.append(True)
+            for n in range(7):
+                guard(); ticks[0] += .2; seen.append(n)
+                yield 'test_unmoved_family', [], copy.deepcopy(pose)
+        with patch.object(m, '_local_proposals', proposals):
+            for _ in range(8):
+                row = m.find_refinement(self.context(), self.io.cp, active, deadline=20.,
+                    clock=lambda:ticks[0],stats=stats,search_state=state,slice_seconds=.3)
+                self.assertIsNone(row)
+                if not stats.get('search_pending'): break
+        self.assertEqual(starts, [True])
+        self.assertEqual(seen, list(range(7)))
+        self.assertEqual(stats['checked_routes'], 7)
+        self.assertTrue(stats['family_exhausted'])
+        self.assertFalse(stats['deadline_reached'])
+
+    def test_changed_pose_discards_pending_cpu_state(self):
+        from unittest.mock import patch
+        m = self.module()
+        self.assertIn('search_state', __import__('inspect').signature(m.find_refinement).parameters)
+        state = {}; stats = {}; ticks = [1.]; starts = []
+        active = [dict(enabled=True,exact=True,colors=['#FF00FF'],tolerance=0.) for _ in range(3)]
+        def proposals(context, pose, radius, guard):
+            starts.append(copy.deepcopy(pose))
+            for n in range(7):
+                guard(); ticks[0] += .2
+                yield 'test_unmoved_family', [], copy.deepcopy(pose)
+        with patch.object(m, '_local_proposals', proposals):
+            m.find_refinement(self.context(),self.io.cp,active,deadline=20.,clock=lambda:ticks[0],
+                stats=stats,search_state=state,slice_seconds=.3)
+            changed = self.checkpoint_at(dict(self.io.cp['pose'],position=[.01,.01]))
+            m.find_refinement(self.context(),changed,active,deadline=20.,clock=lambda:ticks[0],
+                stats=stats,search_state=state,slice_seconds=.3)
+        self.assertEqual(len(starts), 2)
+        self.assertNotEqual(starts[0], starts[1])
+        self.assertEqual(stats['checked_routes'], 2)
+
+    def test_accepted_reference_clears_pending_search_instead_of_looping(self):
+        from unittest.mock import patch
+        m = self.module(); state = {}; stats = {}; ticks = [1.]
+        active = [dict(enabled=True,exact=True,colors=['#FF00FF'],tolerance=0.) for _ in range(3)]
+        def proposals(context,pose,radius,guard):
+            for _ in range(7):
+                guard(); ticks[0] += .2
+                yield 'test_unmoved_family', [], copy.deepcopy(pose)
+        with patch.object(m,'_local_proposals',proposals):
+            m.find_refinement(self.context(),self.io.cp,active,deadline=20.,clock=lambda:ticks[0],
+                stats=stats,search_state=state,slice_seconds=.3)
+            self.assertTrue(stats['search_pending'])
+            accepted=[dict(enabled=True,exact=True,colors=[c],tolerance=0.) for c in self.io.cp['client_hex']]
+            self.assertIsNone(m.find_refinement(self.context(),self.io.cp,accepted,deadline=20.,
+                clock=lambda:ticks[0],stats=stats,search_state=state,slice_seconds=.3))
+        self.assertFalse(stats['search_pending'])
+        self.assertEqual(state,{})
+
     def setUp(self):
         self.io = FixtureIO()
         self.rules = self.io.case['rules']

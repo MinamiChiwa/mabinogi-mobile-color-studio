@@ -61,7 +61,8 @@ class RecoveryTests(unittest.TestCase):
             return original(label,deadline)
         io.frames=frames;result=self.run_fixture(io)
         self.assertTrue(result['accepted'],result.get('error'))
-        self.assertEqual(len(io.actions),2)
+        self.assertEqual(io.actions,result['planning_rounds'][0]['candidate']['input_route'])
+        self.assertTrue(result['screenshot_verified'])
         self.assertEqual(result['observation_retries'],1)
 
     def test_temporary_visual_failure_before_input_recovers(self):
@@ -72,7 +73,8 @@ class RecoveryTests(unittest.TestCase):
             return original(label,deadline)
         io.frames=frames;result=self.run_fixture(io)
         self.assertTrue(result['accepted'],result.get('error'))
-        self.assertEqual(len(io.actions),2)
+        self.assertEqual(io.actions,result['planning_rounds'][0]['candidate']['input_route'])
+        self.assertTrue(result['screenshot_verified'])
 
     def test_changed_preinput_pose_replans_instead_of_submitting_old_route(self):
         io=FixtureIO();original=io.checkpoint;changed=[]
@@ -193,7 +195,9 @@ class ServiceIntegrationTests(unittest.TestCase):
 
     def test_exact_route_reaches_real_runner_event_and_saved_result(self):
         io=FixtureIO();result=self.run_service(io,io.case['rules'])
-        self.assertTrue(result['accepted']);self.assertEqual(len(io.actions),2)
+        self.assertTrue(result['accepted'])
+        self.assertEqual(io.actions,result['planning_rounds'][0]['candidate']['input_route'])
+        self.assertTrue(result['screenshot_verified'])
 
     def test_two_enabled_regions_compromise_reaches_real_runner_event(self):
         from test_native_live_compromise import NativeCompromiseTests

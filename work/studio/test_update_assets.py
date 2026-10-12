@@ -15,19 +15,30 @@ class UpdateAssetTests(unittest.TestCase):
         from updater.manifest import ManifestError,validate_relative_path
         from scripts.verify_update_assets import verify_assets
         from _updater_test_support import KEYS
-        paths=('Korean-preflight.cmd','Korean-validation.cmd','docs/korean-validation.md')
+        paths=('Korean-preflight.cmd','Korean-validation.cmd','docs/korean-validation.md',
+            'docs/server-selection.md','SCREENSHOT_PREVIEW.md')
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp)/'app';root.mkdir();(root/'ColorStudio.exe').write_bytes(b'exe')
             for name in paths:
                 target=root/name;target.parent.mkdir(exist_ok=True);target.write_bytes(b'official validation entry')
             out=Path(temp)/'assets';build_assets(root,out,'0.4.2','stable',self.seed)
-            self.assertEqual(verify_assets(out,root,trusted_keys=KEYS)['files'],4)
+            self.assertEqual(verify_assets(out,root,trusted_keys=KEYS)['files'],6)
             for name in ('User-launcher.cmd','docs/personal.md','data/custom.cmd'):
                 with self.subTest(name=name),self.assertRaises(ManifestError):validate_relative_path(name)
 
     def test_missing_package_cannot_generate_empty_signed_release(self):
         with tempfile.TemporaryDirectory() as temp,self.assertRaises(ValueError):
             build_assets(Path(temp)/'missing',Path(temp)/'out','0.4.3','stable',self.seed)
+
+    def test_offline_asset_names_are_clearly_update_only(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp)/'app';root.mkdir();(root/'ColorStudio.exe').write_bytes(b'exe')
+            old=Path(temp)/'old';build_assets(root,old,'0.4.2','stable',self.seed)
+            out=Path(temp)/'new'
+            report=build_assets(root,out,'0.4.3','stable',self.seed,
+                previous_manifest=old/'update-manifest.json')
+            self.assertEqual(report['offline_name'],'UPDATE-ONLY-ColorStudio-0.4.3-win-x64.zip')
+            self.assertEqual(report['delta_name'],'UPDATE-ONLY-ColorStudio-from-0.4.2-to-0.4.3-win-x64.zip')
 
     def test_delta_rename_with_identical_contents_includes_required_target_blob(self):
         from updater.offline import import_offline
@@ -106,6 +117,23 @@ class UpdateAssetTests(unittest.TestCase):
             verify_assets(out,root,trusted_keys=KEYS)
             (out/'update-manifest.sig').write_bytes(b'x'*64)
             with self.assertRaises(ValueError):verify_assets(out,root,trusted_keys=KEYS)
+
+    def test_asset_verifier_checks_update_only_archive_and_requires_full_package(self):
+        import zipfile
+        from scripts.verify_update_assets import verify_assets
+        from _updater_test_support import KEYS
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp)/'app';root.mkdir();(root/'ColorStudio.exe').write_bytes(b'exe')
+            out=Path(temp)/'assets';report=build_assets(root,out,'0.4.3','stable',self.seed)
+            archive=out/report['offline_name']
+            with zipfile.ZipFile(archive,'w') as broken:
+                for name in ('update-manifest.json','update-manifest.sig'):
+                    broken.write(out/name,name)
+            with self.assertRaisesRegex(ValueError,'incomplete'):
+                verify_assets(out,root,trusted_keys=KEYS)
+            archive.unlink()
+            with self.assertRaisesRegex(ValueError,'offline'):
+                verify_assets(out,root,trusted_keys=KEYS)
 
 
 if __name__=='__main__':unittest.main()

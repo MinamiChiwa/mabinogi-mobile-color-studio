@@ -7,6 +7,11 @@ import i18n
 
 _CJK = re.compile(r'[\u4e00-\u9fff]')
 _RUNTIME_MODULES = (
+    'native_live/build_adapters.py',
+    'native_live/service.py',
+    'screenshot_live.py',
+    'screenshot_control.py',
+    'screenshot_presentation.py',
     'engine.py',
     'atlas_service.py',
     'atlas_runner.py',

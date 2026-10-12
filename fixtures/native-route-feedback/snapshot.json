@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "captured_at_utc": "20261012T121122_491519Z",
+  "source": "redacted_recorded_rc6_regression",
+  "position": [
+    0.0,
+    0.0
+  ],
+  "scale": 1.0,
+  "rotation_degrees": 0.0,
+  "color_preserve_ratio": 0.0,
+  "region_count": 3,
+  "fragments": [
+    {
+      "index": 0,
+      "width": 254,
+      "height": 254,
+      "channels": 3,
+      "normalized_picker_y": 0.4440174102783203,
+      "pixel_file": "fragment_0.png",
+      "raw_sha256": "d2618577e461ba65584c0e89dd60bb3db7b20c92310a6e794b5b30bfb628eeef"
+    },
+    {
+      "index": 1,
+      "width": 254,
+      "height": 254,
+      "channels": 3,
+      "normalized_picker_y": 0.49734121561050415,
+      "pixel_file": "fragment_1.png",
+      "raw_sha256": "b6e432333e8d4efb31c027945e48e200d01765dc7480ed9cf2aa9d5a064dcc24"
+    },
+    {
+      "index": 2,
+      "width": 254,
+      "height": 254,
+      "channels": 3,
+      "normalized_picker_y": 0.5525867938995361,
+      "pixel_file": "fragment_2.png",
+      "raw_sha256": "d2618577e461ba65584c0e89dd60bb3db7b20c92310a6e794b5b30bfb628eeef"
+    }
+  ],
+  "state_stable_during_read": true,
+  "pixel_orientation": "saved top-down RGB PNG; runtime byte array is bottom-up RGB"
+}

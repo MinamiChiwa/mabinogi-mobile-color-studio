@@ -4,6 +4,14 @@ import weakref
 from functools import lru_cache
 from opencc import OpenCC
 language='简体中文'
+LANGUAGES=('简体中文','繁體中文','English','日本語','한국어')
+
+
+def normalize_language(value):
+    """Restore supported persisted languages; tolerate old or invalid settings."""
+    return value if value in LANGUAGES else '简体中文'
+
+
 traditional=OpenCC('s2twp')
 EN={
 '无法读取窗口物理边界。':'Could not read the physical client bounds.',
@@ -285,6 +293,15 @@ EN.update({
     '工具内部错误，已停止':'Tool error; stopped',
     '本轮未继续发送操作，详细异常已写入诊断记录。':'Further input stopped. Details are saved in the diagnostic record.',
 })
+from screenshot_strings import EN as SCREENSHOT_EN
+EN.update(SCREENSHOT_EN)
+EN['支持台服、韩服、日服；韩服、日服仍在测试中。多色精准结果以游戏实测为准。']='Supports Taiwan, Korea and Japan. Korean and Japanese support is in testing. Multi-color exact matches depend on in-game results.'
+TW['支持台服、韩服、日服；韩服、日服仍在测试中。多色精准结果以游戏实测为准。']='支援台服、韓服、日服；韓服與日服仍在測試中。多色精準結果以遊戲實測為準。'
+from locale_ja import JA
+from locale_ko import KO
+_locales={'日本語':JA,'한국어':KO}
+_locale_patterns={name:re.compile('|'.join(re.escape(key) for key in sorted(values,key=len,reverse=True)))
+                  for name,values in _locales.items()}
 _english_parts=sorted(EN,key=len,reverse=True)
 _widgets=weakref.WeakSet()
 _refreshers=weakref.WeakKeyDictionary()
@@ -303,6 +320,11 @@ def _translate(text,language):
     text=ERROR_SOURCE.get(text,text)
     if language=='简体中文':return text
     if language=='繁體中文':return TW.get(text,traditional.convert(text).replace('玛奇','瑪奇'))
+    if language in _locales:
+        values=_locales[language]
+        if text in values:return values[text]
+        # Substitute once: translated Japanese can contain source characters.
+        return _locale_patterns[language].sub(lambda match:values[match.group()],text)
     if text in EN:return EN[text]
     for source in _english_parts:text=text.replace(source,EN[source])
     return text
@@ -320,7 +342,7 @@ def on_language(widget,callback):
 
 def set_language(value):
     global language
-    if value not in ('简体中文','繁體中文','English'):raise ValueError('Unknown language')
+    if value not in LANGUAGES:raise ValueError('Unknown language')
     language=value
     for widget in list(_widgets):
         if not widget.winfo_exists():continue

@@ -32,6 +32,28 @@ class WindowTargetTests(unittest.TestCase):
     def test_recycled_handle_for_other_process_is_rejected(self):
         with patch('window_target.u.IsWindow',return_value=True),patch('window_target.window_pid',return_value=9):
             self.assertFalse(valid_target(WindowTarget(1,2,'Game')))
+
+    def test_activation_with_no_foreground_window_returns_false(self):
+        from window_target import activate_target_window
+        with patch('window_target.valid_target',return_value=True), \
+             patch.object(__import__('window_target').u,'IsIconic',return_value=False), \
+             patch.object(__import__('window_target').u,'SetForegroundWindow',return_value=True), \
+             patch.object(__import__('window_target').u,'GetForegroundWindow',return_value=None):
+            self.assertFalse(activate_target_window(WindowTarget(1,2,'Game')))
+
+    def test_activation_waits_for_foreground_transition(self):
+        from window_target import activate_target_window
+        module=__import__('window_target')
+        with patch('window_target.valid_target',return_value=True), \
+             patch.object(module.u,'IsIconic',return_value=False), \
+             patch.object(module.u,'SetForegroundWindow',return_value=True), \
+             patch.object(module.u,'BringWindowToTop',return_value=True), \
+             patch.object(module.u,'GetForegroundWindow',side_effect=[None,1]), \
+             patch.object(module.k,'GetCurrentThreadId',return_value=10), \
+             patch.object(module.u,'GetWindowThreadProcessId',return_value=20), \
+             patch.object(module.u,'AttachThreadInput',return_value=True), \
+             patch('window_target.time.sleep'):
+            self.assertTrue(activate_target_window(WindowTarget(1,2,'Game')))
     def test_closed_manual_window_never_switches_to_auto(self):
         game=Game.__new__(Game);game.target=WindowTarget(1,2,'Game');game.manual_target=game.target;game.hwnd=1;game.stop=threading.Event()
         with patch('platform_win.valid_target',return_value=False),patch('platform_win.resolve_target') as resolve:

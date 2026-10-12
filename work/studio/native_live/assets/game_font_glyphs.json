@@ -1,0 +1,44 @@
+{
+  "schema": 1,
+  "asset_sha256": "cad0d2dad4753b2777a4d37aba5863565251b7f6fc02213adb1572c3e493a52f",
+  "characters": "#0123456789ABCDEF",
+  "sample_count": 5016,
+  "original_msdf_characters": [
+    "#",
+    "0",
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "F"
+  ],
+  "source_counts": {
+    "archived_text": 1344,
+    "original_msdf": 3672
+  },
+  "font_variation": 5,
+  "timer_font_variation": -1,
+  "scope": "All 17 original TW bold MSDF glyphs, fractional/size rendering variations, plus separately archived screenshot text calibration. KR/JP Latin outlines independently cross-checked.",
+  "source_font_hashes": {
+    "JP-Bold.mmfd": "90d4413c3a4be892341a6a9203c5c981cd8071569d554e94ebea8825eb682f91",
+    "JP-Damage.mmfd": "2449bfccbf1ec15111ea19d8425eca2e35eda29894e07191680eead1be10e0fc",
+    "JP-Regular.mmfd": "999771e8a58ede39ab8880596bdbf5f8232cffc198ce70b647186a00f68af889",
+    "KR-Bold.mmfd": "0c035f2fc35f4ab45738cdc7f27cfeb85736e652b4a010678e46b59eea543e23",
+    "KR-Damage.mmfd": "701778a8cf26162a229b2b632bfb062cd1d8c54908eaaa76ef64fb5bf4bbe627",
+    "KR-Regular.mmfd": "dafc8ba8568b706c94bf368b752cf447c480592206cc69fe512347e5a2e63a78",
+    "Proxima Soft cond Bold.mmfd": "cbc5b226da6a47a39563845a17b134b43e35cd0118fb5022ceb4b8e997e36a90",
+    "TW-Bold.mmfd": "d95e9c0b4447231e0ec890f4b10ff91e17dfb0422c590f8deffb8fab5f30c72c",
+    "TW-Damage.mmfd": "cb9a810f9f4c7b865e12e5247a9793fa1e7c64946b243ce9faf24436b8dd74e6",
+    "TW-Regular.mmfd": "6a1a51c7bf7ef985e51a15a313fd7171b74b9cee939bb7e83c65cea634c616e7"
+  }
+}

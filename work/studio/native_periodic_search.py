@@ -21,6 +21,23 @@ def inverse_periodic_uv(uv):
     return result
 
 
+def _near_site_pool(uv, losses, limit=32):
+    """Keep lowest-error sites and best representatives across the full tile.
+
+    This finite proposal pool is not an exhaustion certificate. Original
+    rules still score every joint pose, including bilinear colors between
+    sites. Half the pool favors color, half prevents a single basin from
+    consuming all proposals.
+    """
+    order = np.argsort(losses, kind='stable')
+    cells = np.minimum((uv * 4).astype(int), 3)
+    cell_ids = cells[:, 1] * 4 + cells[:, 0]
+    _, positions = np.unique(cell_ids[order], return_index=True)
+    diverse = order[np.sort(positions)]
+    selected = list(dict.fromkeys([*order[:limit//2], *diverse, *order[:limit]]))[:limit]
+    return inverse_periodic_uv(uv[selected]) % 1.
+
+
 def search_periodic_targets(session,rules,*,minimum_scale,maximum_scale,
         reference=None,subpixel_fractions=(0.,),top_k=32,time_budget_seconds=5.,
         clock=time.monotonic,check=lambda:None):
@@ -56,7 +73,7 @@ def search_periodic_targets(session,rules,*,minimum_scale,maximum_scale,
     def guard():
         check()
         if clock()>=end:raise Expired()
-    sites={};retained={};evaluated_poses=set();nearest_rows={}
+    sites={};near_sites={};near_samples={};retained={};evaluated_poses=set();nearest_rows={}
     def retained_rank(row):
         if prioritized is None:return (row['model_cost'],)
         prediction=row['prediction']
@@ -102,36 +119,65 @@ def search_periodic_targets(session,rules,*,minimum_scale,maximum_scale,
         enabled=([i for i,r in enumerate(rules) if r['enabled']] if prioritized is None else prioritized)
         for i in enabled:
             guard();pixels=session['pixels'][i];h,w=pixels.shape[:2]
-            yy,xx=np.indices((h,w));matched=[]
+            yy,xx=np.indices((h,w));matched=[];sampled_uv=[];sampled_losses=[]
             for fy,fx in itertools.product(fractions,repeat=2):
                 guard()
                 uv=np.stack(((xx+.5+fx)/w,(h-yy-.5+fy)/h),axis=-1).reshape(-1,2).astype(np.float32)
                 colors=color32(sample_cpu(pixels,uv,session['color_preserve_ratio'])/np.float32(255))
                 mask=np.zeros(len(colors),bool);rule=rules[i]
+                color_lab=lab(colors);losses=np.full(len(colors),np.inf)
                 for target in rule['colors']:
                     guard();target_rgb=np.asarray(rgb(target))
+                    delta=np.linalg.norm(color_lab-lab([target_rgb])[0],axis=1)
+                    losses=np.minimum(losses,delta)
                     if rule['exact']:mask|=np.all(colors==target_rgb,axis=1)
-                    else:mask|=np.linalg.norm(lab(colors)-lab([target_rgb])[0],axis=1)<=rule['tolerance']
+                    else:mask|=delta<=rule['tolerance']
                 matched.append(inverse_periodic_uv(uv[mask])%1.)
+                sampled_uv.append(uv);sampled_losses.append(losses)
             guard();sites[i]=np.unique(np.concatenate(matched),axis=0)
             result['target_sites_per_region'][i]=len(sites[i])
+            if not len(sites[i]):
+                near_samples[i]=(np.concatenate(sampled_uv),np.concatenate(sampled_losses))
+                near_sites[i]=_near_site_pool(*near_samples[i])
         result['site_scan_complete']=True
+        missing=[i for i in enabled if not len(sites[i])]
+        result['missing_target_regions']=missing
+        result['near_sites_per_region']=[len(near_sites.get(i,())) for i in range(count)]
+        # Missing material targets participate through near sites; none of
+        # these sites changes an acceptance target or becomes an exact hit.
+        for i in missing:sites[i]=near_sites[i]
+        available=[i for i in enabled if len(sites[i])]
+        result['near_expansion_tiers']=[32] if missing else []
+        def expand_near(limit):
+            guard();changed=False
+            for i in missing:
+                uv,losses=near_samples[i]
+                proposed=_near_site_pool(uv,losses,min(limit,len(uv)))
+                merged=np.unique(np.concatenate((sites[i],proposed)),axis=0)
+                changed|=len(merged)>len(sites[i]);sites[i]=merged
+                result['near_sites_per_region'][i]=len(merged)
+            if changed:result['near_expansion_tiers'].append(limit)
+            return changed
         initial=score_native_pose(session,reference,rules,check=guard)
         if initial['predicted_accepted']:
             retained[tuple((*reference['position'],reference['scale'],reference['rotation_degrees']))]=dict(
                 native_pose=reference,prediction=initial,model_cost=0.,source='current_periodic_reference',
                 execution_verified=False,input_reachability='unverified')
             result['stop_reason']='current_target_accepted'
-        elif any(not len(sites[i]) for i in enabled):
+        elif not available:
             result['stop_reason']='target_not_present_on_sample_lattice'
-        elif len(enabled)==1:
-            i=enabled[0]
+        elif len(available)==1:
+            i=available[0]
             ref=picker_view_uv(i,count,session['picker_uv'][i][1],**reference)
-            distances=np.linalg.norm((sites[i]-ref+.5)%1.-.5,axis=1)
-            for z in sites[i][np.argsort(distances)]:
-                offer(i,z,reference['scale'],reference['rotation_degrees'])
-                if len(retained)>=top_k:break
-            result['stop_reason']='solutions_found' if retained else 'site_lattice_exhausted'
+            tiers=(32,128,512,len(near_samples[i][0])) if i in missing else (32,)
+            for tier in dict.fromkeys(tiers):
+                if tier!=32 and not expand_near(tier):continue
+                distances=np.linalg.norm((sites[i]-ref+.5)%1.-.5,axis=1)
+                for z in sites[i][np.argsort(distances)]:
+                    offer(i,z,reference['scale'],reference['rotation_degrees'])
+                    if len(retained)>=top_k:break
+            result['stop_reason']=('target_not_present_on_sample_lattice' if missing else
+                'solutions_found' if retained else 'site_lattice_exhausted')
         else:
             pair_pool_complete=[]
             def scan_pair(a,b):
@@ -229,7 +275,7 @@ def search_periodic_targets(session,rules,*,minimum_scale,maximum_scale,
                                         all_colors[region]=vals
                                         all_losses[region]=np.min(np.linalg.norm(lab(vals)[:,None,:]-lab(targets)[None,:,:],axis=2),axis=1)
                                     priority=vector_priority_components(all_colors,all_losses,rules)
-                                    accepted=np.all(priority[:,:len(enabled)]==0,axis=1)
+                                    accepted=np.all(priority[:,::2]==0,axis=1)
                                     maximum=np.maximum.reduce([all_losses[i] for i in enabled])
                                     average=np.mean([all_losses[i] for i in enabled],axis=0)
                                     quality=np.column_stack((~accepted,priority,maximum,average,costs))
@@ -254,14 +300,21 @@ def search_periodic_targets(session,rules,*,minimum_scale,maximum_scale,
                 for _,_,qa,scale,angle in sorted(near_proposals,key=heap_quality):offer(a,qa,scale,angle)
                 pair_pool_complete.append(result['cpu_pool_complete'])
             result['pair_lattice_complete']=False
-            pairs=list(itertools.combinations(sorted(enabled,key=lambda i:len(sites[i]))
-                                             if prioritized is None else enabled,2))
-            for a,b in pairs:
-                guard();scan_pair(a,b)
-                result['pairs_completed']=result.get('pairs_completed',0)+1
+            # An absent target on one material cannot suppress joint poses for
+            # the others. Score every pose with all original rules: partial hits
+            # remain ranked compromises, never accepted full-target candidates.
+            pairs=list(itertools.combinations(sorted(available,key=lambda i:len(sites[i]))
+                                             if prioritized is None else available,2))
+            tiers=(32,128,512,max(len(near_samples[i][0]) for i in missing)) if missing else (32,)
+            for tier in dict.fromkeys(tiers):
+                if tier!=32 and not expand_near(tier):continue
+                for a,b in pairs:
+                    guard();scan_pair(a,b)
+                    result['pairs_completed']=result.get('pairs_completed',0)+1
             result['pair_lattice_complete']=True
             result['cpu_pool_complete']=all(pair_pool_complete)
-            result['stop_reason']='solutions_found' if retained else 'no_verified_solution_in_retained_pool'
+            result['stop_reason']=('target_not_present_on_sample_lattice' if missing else
+                'solutions_found' if retained else 'no_verified_solution_in_retained_pool')
     except Expired:result['stop_reason']='deadline'
     check()
     result['candidates']=sorted(retained.values(),key=retained_rank)[:top_k]

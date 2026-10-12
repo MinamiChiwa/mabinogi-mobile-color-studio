@@ -157,11 +157,19 @@ def _grouped_rotation(original):
     for index in range(1,count+1):
         if index in boundaries:current=original.points[original.arc_start+index]
         points.append(current)
+    # The radial-to-arc transition must be observed before the radius changes
+    # and the first angular step arrive together. The native radial gate can
+    # otherwise suppress that entire angular step at low FPS. Keep 90ms at
+    # the transition through explicit repeated points; timing, replay and
+    # input budgets all see the same descriptor. Dense historical paths stay
+    # available unchanged for recorded comparisons.
+    transition=original.arc_start
+    points[transition+1:transition+1]=[points[transition]]*4
     return replace(original,points=tuple(points))
 
 
 def grouped_rotation_gesture(board, angle, anchor=None):
-    """Group arc updates; preserve pivot, endpoint, radial path and all waits.
+    """Group arc updates; preserve the path and hold its radial transition.
 
     Only the sampled 701-pixel board conditions have live comparison evidence.
     Other conditions still require measured feedback. In particular an integer

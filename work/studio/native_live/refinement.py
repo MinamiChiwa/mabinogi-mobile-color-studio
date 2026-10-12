@@ -338,18 +338,24 @@ def _local_routes(context, radius_pixels, guard):
 
 def find_refinement(context, checkpoint, rules, *, deadline, clock=time.monotonic,
                     check=lambda: None, excluded=(), radius_pixels=5,
-                    stats=None, progress=None):
-    """Return one strict improvement with a complete return for every prefix."""
+                    stats=None, progress=None, search_state=None, slice_seconds=None):
+    """Return an audited improvement or resume an unchanged CPU-only family.
+
+    A slice yields between proposals, not by raising inside the generator.
+    Real deadlines/F9 still interrupt preparation and every endpoint audit.
+    A found audited improvement survives a slice and is returned promptly.
+    """
     from .same_session_dye_planner import _checked_checkpoint, normalize_target_rules
     guard = _guard(deadline, clock, check)
     stats = stats if isinstance(stats, dict) else {}
-    stats.update(checked_routes=0, predicted_improvements=0, audited_candidates=0,
-                 return_checked=0, deadline_reached=False, family_exhausted=False,
-                 protected_candidate_found=False, stage='initial',
-                 candidate_polish_seconds=.75, finite_candidate_upper_bound=32768)
     progress = progress if callable(progress) else (lambda update: None)
     if type(radius_pixels) is not int or not 1 <= radius_pixels <= 8:
         raise ValueError('Integer local radius must be one to eight pixels')
+    if slice_seconds is not None and (type(slice_seconds) not in (int,float) or
+            not math.isfinite(slice_seconds) or slice_seconds <= 0 or not isinstance(search_state,dict)):
+        raise ValueError('CPU slices require positive duration and caller-owned search state')
+    state = search_state if isinstance(search_state,dict) else {}
+    slice_end = math.inf if slice_seconds is None else clock()+slice_seconds
     best = None
     best_key = None
     polish_until = None
@@ -360,12 +366,37 @@ def find_refinement(context, checkpoint, rules, *, deadline, clock=time.monotoni
         context = dict(context, _refinement_rules=rules)
         baseline = observed_quality(checkpoint['client_hex'], rules)
         if not baseline[0]:
+            state.clear()
+            stats.update(search_pending=False,protected_candidate_found=False,
+                family_exhausted=False,deadline_reached=False)
             return None
         blocked = {item if isinstance(item, str) else json.dumps(item, sort_keys=True)
                    for item in excluded}
+        signature = json.dumps((context['fingerprint'],checkpoint['binding'],checkpoint['pose'],
+            checkpoint['client_hex'],rules,radius_pixels,sorted(blocked),deadline),sort_keys=True)
+        if state.get('signature') != signature:
+            state.clear()
+            stats.clear()
+            stats.update(checked_routes=0,predicted_improvements=0,audited_candidates=0,
+                return_checked=0,deadline_reached=False,family_exhausted=False,
+                protected_candidate_found=False,stage='initial',candidate_polish_seconds=.75,
+                finite_candidate_upper_bound=32768)
+            state.update(signature=signature,iterator=iter(_local_proposals(
+                context,checkpoint['pose'],radius_pixels,guard)),stats=stats)
+        elif state['stats'] is not stats:
+            stats.update(state['stats']);state['stats']=stats
+        stats['search_pending']=False
         exhausted = True
-        for index, (stage, route, endpoint) in enumerate(
-                _local_proposals(context, checkpoint['pose'], radius_pixels, guard)):
+        processed = 0
+        while True:
+            guard()
+            if clock() >= slice_end and processed:
+                exhausted = False
+                stats['search_pending'] = best is None
+                break
+            try:stage,route,endpoint = next(state['iterator'])
+            except StopIteration:break
+            processed += 1
             if (polish_until is not None and clock() >= polish_until and
                     stage != 'directed_rotation_pairs'):
                 exhausted = False
@@ -408,13 +439,24 @@ def find_refinement(context, checkpoint, rules, *, deadline, clock=time.monotoni
                 polish_until = min(deadline, clock()+.75)
         stats['family_exhausted'] = exhausted
     except _Expired:
+        stats.setdefault('checked_routes',0)
+        stats.setdefault('audited_candidates',0)
+        stats.setdefault('return_checked',0)
+        stats.setdefault('family_exhausted',False)
         stats['deadline_reached'] = True
-    stats['stage'] = 'complete' if best is not None or stats['family_exhausted'] else 'deadline'
+        stats['search_pending'] = False
+    except Exception:
+        state.clear();stats['search_pending']=False
+        raise
+    if not stats.get('search_pending'):state.clear()
+    stats['stage'] = ('slice' if stats.get('search_pending') else
+        'complete' if best is not None or stats['family_exhausted'] else 'deadline')
     progress(dict(stage=stats['stage'], checked_routes=stats['checked_routes'],
                   audited_candidates=stats['audited_candidates'],
                   return_checked=stats['return_checked'],
                   deadline_reached=stats['deadline_reached'],
                   family_exhausted=stats['family_exhausted'],
+                  search_pending=stats.get('search_pending',False),
                   protected_candidate_found=best is not None))
     return best
 

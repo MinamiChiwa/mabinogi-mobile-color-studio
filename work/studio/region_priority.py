@@ -4,6 +4,8 @@ import numpy as np
 from vision import error, normalize_hex, rgb
 from dye_regions import rule_region_count
 
+PRIORITY_DELTA_E_BIN = .5
+
 
 def priority_indices(rules):
     rule_region_count(rules)
@@ -17,42 +19,44 @@ def priority_indices(rules):
 
 
 def priority_components(codes, rules, deltas=None):
-    """Satisfaction bits first, then Delta-E in the same region order.
+    """Interleave satisfaction and half-Delta-E bins in user region order.
 
-    Acceptance of all regions remains the outermost tier in each caller.
-    Improving a lower-priority region never removes a higher-priority hit.
+    All-region acceptance remains outside this tuple. A satisfied Similar
+    region releases its error priority to later regions. Bins rank only;
+    they never relax exact HEX or Similar tolerance acceptance.
     """
     order = priority_indices(rules)
     if order is None:
         return None
-    violations, errors = [], []
+    components = []
     for i in order:
         rule = rules[i]; color = codes[i]
         valid = color is not None
         delta = error(color, rule['colors'], False) if valid and deltas is None else (deltas[i] if valid else math.inf)
         delta = float(delta) if delta is not None and math.isfinite(delta) and delta >= 0 else math.inf
+        valid = valid and math.isfinite(delta)
         hit = (normalize_hex(color) in [normalize_hex(c) for c in rule['colors']] if valid and rule['exact']
                else valid and delta <= float(rule['tolerance']))
-        violations.append(int(not hit)); errors.append(delta)
-    return tuple(violations + errors)
+        bucket = 0 if hit else math.floor(delta / PRIORITY_DELTA_E_BIN) if math.isfinite(delta) else math.inf
+        components.extend((int(not hit), bucket))
+    return tuple(components)
 
 
 def vector_priority_components(colors, distances, rules):
     order = priority_indices(rules)
     if order is None:
         return None
-    violations, errors = [], []
+    components = []
     for i in order:
         raw = np.asarray(distances[i], float)
         values = np.where(np.isfinite(raw) & (raw >= 0), raw, np.inf)
         if rules[i]['exact']:
             targets = np.asarray([rgb(c) for c in rules[i]['colors']])
-            hit = np.any(np.all(np.asarray(colors[i])[:, None, :] == targets, axis=-1), axis=1)
+            hit = np.isfinite(values) & np.any(np.all(np.asarray(colors[i])[:, None, :] == targets, axis=-1), axis=1)
         else:
             hit = values <= float(rules[i]['tolerance'])
-        violations.append(~hit)
-        errors.append(np.where(np.isfinite(values) & (values >= 0), values, np.inf))
-    return np.stack(violations + errors, axis=1)
+        components.extend((~hit, np.where(hit, 0., np.floor(values / PRIORITY_DELTA_E_BIN))))
+    return np.stack(components, axis=1)
 
 
 def priority_fields(codes, deltas, rules):

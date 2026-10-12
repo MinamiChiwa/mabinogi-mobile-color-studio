@@ -38,6 +38,44 @@ def merge_native_hex(decoded, native_hex):
                 screenshot_hex_verified=all(v is not None for v in decoded['hex']))
 
 
+def reread_conflicting_hex(image,decoded,native_hex,*,deadline,check=lambda:None,card_cache=None):
+    """Resolve only conflicting cards with independently agreeing visible text.
+
+    Expected HEX identifies a conflict but never enters the screenshot reader.
+    A missing or still-conflicting read cannot supply a successful color proof.
+    """
+    from screenshot_text import read_visible
+    decoded['hex']=list(decoded['hex'])
+    diagnostics=decoded.setdefault('hex_conflict_reads',[])
+    for index,(observed,expected) in enumerate(zip(decoded['hex'],native_hex)):
+        if observed is None or observed==expected:continue
+        check();card=decoded['cards'][index];x,y,w,h=card
+        pixels=image[y:y+h,x:x+w];key=(pixels.shape,hashlib.sha256(pixels.tobytes()).hexdigest())
+        if card_cache is not None:card_cache.pop(key,None)
+        audit=dict(card_index=index,original_hex=observed,expected_hex=expected,
+            method='independent_multithreshold_text',screenshot_hex_verified=False)
+        diagnostics.append(audit)
+        try:values,reads=read_visible(image,[card],deadline=deadline,check=check)
+        except Exception as exc:
+            audit['read_error']=type(exc).__name__+': '+str(exc)
+            raise
+        check();audit['text_reads']=reads
+        value=values[0]
+        cx=x+round(w*.50);cy=y+round(h*.43);rad=max(2,round(w*.04))
+        sample=np.median(image[cy-rad:cy+rad+1,cx-rad:cx+rad+1].reshape(-1,3),axis=0)
+        distance=_swatch_distance(value,sample) if isinstance(value,str) and re.fullmatch('#[0-9A-F]{6}',value) else None
+        audit.update(reread_hex=value,swatch_distance=distance,swatch_accepted=distance is not None and distance<=3)
+        if audit['swatch_accepted']:
+            decoded['hex'][index]=value
+            if 'hex_recognition_sources' in decoded:decoded['hex_recognition_sources'][index]='independent_multithreshold_text'
+            if 'hex_cache_hits' in decoded:decoded['hex_cache_hits'][index]=False
+            audit['screenshot_hex_verified']=value==expected
+            if value==expected and card_cache is not None:
+                card_cache[key]=value
+                while len(card_cache)>96:card_cache.pop(next(iter(card_cache)))
+    return decoded
+
+
 def probe_layout_scale(width,height):
     """Validate physical image extent; the reference scale is not a UI mapping."""
     if any(type(v) is not int or not 1<=v<=16384 for v in (width,height)):
@@ -74,7 +112,7 @@ def _recognize_native_layout(image,board,region_count=3):
 
 
 def read_probe_frame(image,*,deadline,check=lambda:None,clock=time.monotonic,previous_timer=None,captured_at=None,hex_fallback=None,
-        timer_mode='required',card_cache=None,native_board=None,region_count=3):
+        timer_mode='required',card_cache=None,native_board=None,region_count=3,read_colors=True):
     def guard():
         check()
         if deadline is not None and clock()>=deadline:raise TimeoutError('Frame read deadline expired')
@@ -91,6 +129,14 @@ def read_probe_frame(image,*,deadline,check=lambda:None,clock=time.monotonic,pre
                 for hit,code in zip(cache_hits,codes)],
             timer_layout_assumption='measured_anchor_with_top_left_HUD_prior',
             cards=scene.cards,markers=scene.markers,visual_board=scene.board,**extra)
+    if not read_colors:
+        # Planning needs a visible, correctly bound board and picker layout.
+        # Do not spend final-result OCR time decoding unrelated initial colors.
+        # Empty screenshot HEX remains explicitly unverified when native data
+        # is merged by the caller; it never enters the screenshot-card cache.
+        guard()
+        return frame_record(remaining_seconds=None,timer_confidence='not_read_for_planning',
+            observation_scope='planning_layout')
     def read_unresolved(text_fallback=None):
         # Commit each independent card result before another card can use up
         # the local OCR allowance; keep the full scene and swatch validation.
@@ -337,7 +383,7 @@ class ProjectProbeIO:
         if mapping is not None:checkpoint['pixel_mapping']=mapping
         return checkpoint
 
-    def frames(self,label,deadline):
+    def frames(self,label,deadline,*,read_colors=True):
         self.session_status_label=label
         frames=[]
         for index in range(2):
@@ -351,12 +397,29 @@ class ProjectProbeIO:
                 decoded=read_probe_frame(image,deadline=min(deadline,time.monotonic()+5),check=self._input_guard,
                     previous_timer=self.previous_timer,captured_at=captured,hex_fallback=getattr(self,'hex_fallback',None),
                     timer_mode='advisory',card_cache=self.card_cache,
-                    native_board=board,region_count=region_count)
+                    native_board=board,region_count=region_count,read_colors=read_colors)
             except FrameReadTimeout as exc:
                 self._input_guard()
                 decoded=exc.partial_frame
                 if self.last_client_hex is None and any(code is None for code in decoded['hex']):raise
             if self.last_client_hex is not None:
+                if any(code is not None and code!=native for code,native in zip(decoded['hex'],self.last_client_hex)):
+                    # Repeating a capture with the same single-pass OCR can
+                    # repeat A/8 or B/8 indefinitely. Use another pixel/text
+                    # path only for the conflict, and save evidence even when
+                    # it remains unresolved or the read is interrupted.
+                    try:
+                        decoded=reread_conflicting_hex(image,decoded,self.last_client_hex,
+                            deadline=min(deadline,time.monotonic()+5.),check=self._input_guard,card_cache=self.card_cache)
+                    finally:
+                        try:
+                            path.with_suffix('.decoded.json').write_text(json.dumps(dict(decoded,
+                                captured_monotonic=captured,file=str(path),checkpoint_hex=self.last_client_hex,
+                                screenshot_hex_verified=False),indent=2),encoding='utf-8')
+                        except OSError as exc:
+                            # Optional conflict diagnostics must not replace
+                            # F9 or the real session-deadline exception.
+                            decoded['diagnostic_write_error']=type(exc).__name__+': '+str(exc)
                 decoded=merge_native_hex(decoded,self.last_client_hex)
             if decoded['remaining_seconds'] is not None:self.previous_timer=(decoded['remaining_seconds'],captured)
             # Visually observed card centers should follow the actual native

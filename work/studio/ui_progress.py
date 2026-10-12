@@ -3,6 +3,7 @@ STAGES={
     'native_validate':'检查当前色板',
     'discovery':'准备寻色',
     'waiting':'等待染色界面','zoom':'识别与缩放','capture':'采集颜色板',
+    'binding':'识别本局色板',
     'align':'对齐采集画面','period':'测量色板周期','stitch':'拼接全局颜色板',
     'export':'保存颜色板','validate':'检查拼图质量','search':'搜索目标颜色',
     'similarity':'计算旋转与缩放','ready':'准备候选方案','position':'移动到目标位置','verify':'复核游戏色码',

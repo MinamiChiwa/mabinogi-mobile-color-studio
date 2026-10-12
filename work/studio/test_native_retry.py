@@ -156,14 +156,16 @@ class NativeRetryTests(unittest.TestCase):
         self.assertNotIn('retry_wait_closed',io.labels,'The verified endpoint already owns the closing read')
         self.assertGreater(io.t-result['current']['frames'][-1]['captured_monotonic'],.25)
         self.assertTrue(result['closing_pose_check']['unchanged'])
-    def test_fast_close_cannot_certify_frames_older_than_standard_freshness(self):
+    def test_fast_close_keeps_slow_decoded_frames_after_actual_state_revalidation(self):
         io=RetryIO();frames=io.frames
         def capture_then_slow_decode(label,deadline):
             rows=frames(label,deadline);io.t+=6.;return rows
         io.frames=capture_then_slow_decode
         result=self.run_loop(io,lambda:False,lambda row:None,deadline=10.)
-        self.assertFalse(result['accepted']);self.assertFalse(result['verified'])
-        self.assertIsNone(result['current']);self.assertIn('last_verified_retry',result)
+        self.assertTrue(result['accepted'],result.get('error'));self.assertTrue(result['verified'])
+        self.assertTrue(result['screenshot_verified'])
+        self.assertTrue(result['closing_pose_check']['unchanged'])
+        self.assertNotIn('retry_wait_closed',io.labels,'A revalidated endpoint needs no duplicate OCR')
     def test_late_forward_route_retains_better_prefix_before_worse_suffix(self):
         from native_input_compile import native_drag_gesture
         from native_live.same_session_dye_planner import _json

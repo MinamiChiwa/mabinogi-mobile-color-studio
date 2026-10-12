@@ -27,6 +27,7 @@ class NativeCompromiseTests(unittest.TestCase):
     def module(self):
         self.assertIsNotNone(importlib.util.find_spec('native_live.compromise'),'Compromise policy missing')
         return importlib.import_module('native_live.compromise')
+
     def context(self):
         c=self.io
         return bind_planning_context(c.session,c.cp,c.geometry,c.settings,wheel_delta_per_step=1.,
@@ -148,7 +149,25 @@ class NativeCompromiseTests(unittest.TestCase):
         self.module();c=self.io
         self.rules=[dict(enabled=True,exact=True,colors=['#FF00FF'],tolerance=0.) for _ in range(3)]
         from native_live.controller import run_goal_loop
-        result=run_goal_loop(c,c.session,c.settings,self.rules,engineering_deadline=90.,clock=c.clock,max_actions=1)
+        from native_live.same_session_dye_planner import _plan_fingerprint,_json
+        import hashlib
+        def forced(context,cp,frames,rules,grid,**kw):
+            # Own this gate independently of global search finding a valid
+            # zero-input current compromise under its candidate admission.
+            route=self.row(5,0)['input_route']*2
+            pose=replay_native_route(cp['pose'],route,c.geometry,c.settings,
+                wheel_delta_per_step=1.,sample_policy='all_recorded_points')['final_pose']
+            row=dict(input_route=route,final_pose=pose,prediction=score_native_pose(c.session,pose,rules),
+                needed=_needed(route,3.,.5),source='forced_two_action_compromise')
+            plan=dict(schema=4,context_fingerprint=context['fingerprint'],reference_pose=cp['pose'],
+                reference_frame_monotonic=frames[-1]['captured_monotonic'],planned_at=c.clock(),
+                effective_deadline=kw['engineering_deadline'],reserve_seconds=3.,verification_margin_seconds=3.,
+                normalized_rules=rules,rules_fingerprint=hashlib.sha256(_json(rules).encode()).hexdigest(),
+                candidate=None,compromise_candidate=row,approach_candidate=None,
+                result_classification='not_found_in_budget',nearest_diagnostic=row,reachability_conclusion='not_established')
+            plan['plan_fingerprint']=_plan_fingerprint(plan);return plan
+        result=run_goal_loop(c,c.session,c.settings,self.rules,engineering_deadline=90.,clock=c.clock,
+            max_actions=1,planner=forced)
         self.assertEqual(c.actions,[])
         self.assertEqual(result['stop_reason'],'insufficient_compromise_actions')
         self.assertNotEqual(result['outcome'],'compromise')

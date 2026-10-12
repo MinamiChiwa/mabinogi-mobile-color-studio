@@ -43,7 +43,12 @@ class NativeLivePackageTests(unittest.TestCase):
         plan=planner.plan_from_checkpoint(context,cp,frames,data['rules'],PoseGrid((0,0),(0,0),1,1,(1.,),(0.,)),
             now=1.2,engineering_deadline=61.2,time_budget_seconds=6.)
         self.assertEqual(plan['result_classification'],'predicted_exact')
-        self.assertEqual({g['kind'] for g in plan['candidate']['input_route']},{'drag','wheel'})
+        kinds={g['kind'] for g in plan['candidate']['input_route']}
+        self.assertTrue({'drag','wheel'}.issubset(kinds))
+        self.assertTrue(kinds.issubset({'drag','wheel','rotate'}))
+        audited=planner.audit_candidate_endpoint(context,cp,data['rules'],plan['candidate'])
+        self.assertTrue(audited['prediction']['predicted_accepted'])
+        self.assertEqual(audited['prediction']['colors'],[r['colors'][0] for r in data['rules']])
         self.assertFalse(plan['ready_for_input'])
 
     def test_plan_reference_allows_slow_but_fresh_revalidation(self):

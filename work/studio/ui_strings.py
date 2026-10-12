@@ -407,3 +407,68 @@ TW.update({
 '这一阶段可能持续数十秒；若未找到更优方案，将保留当前配色。':'這個階段可能持續數十秒；若未找到更好的方案，將保留目前配色。',
 '满意当前效果可按 F9 停止搜索，再到游戏内确认染色。':'滿意目前效果可按 F9 停止搜尋，再到遊戲內確認染色。',
 })
+from screenshot_strings import EN as SCREENSHOT_EN, TW as SCREENSHOT_TW
+EN.update(SCREENSHOT_EN);TW.update(SCREENSHOT_TW)
+
+EN.update({
+'台服':'Taiwan','韩服':'Korea','日服':'Japan',
+'按所选服务器检测游戏窗口；开始时核对客户端版本。':'Detect windows for the selected server; verify the client version when starting.',
+'支持台服、韩服及日服已登记的客户端版本。多色精准结果以游戏实测为准。':'Supports registered Taiwan, Korean and Japanese clients. Multiple exact matches depend on the measured game results.',
+'服务器已切换，窗口检测已更新。':'Server changed; window detection updated.',
+'所选服务器与客户端版本不匹配':'The selected server does not match the client version',
+'所选服务器与客户端版本不匹配，请检查服务器和游戏窗口。':'The selected server does not match the client version. Check the server and game window.',
+'服务器与游戏窗口不匹配':'Server and game window do not match',
+'请在窗口选项旁选择对应服务器，并重新选择该服务器的游戏窗口。':'Select the matching server beside the window selector, then select its game window again.',
+'1. 选择服务器与游戏窗口':'1. Select the server and game window',
+'在左上角选择台服、韩服或日服，再选择游戏窗口；窗口检测与服务器联动，无需固定分辨率或额外预检。':'Select Taiwan, Korea or Japan at the top left, then choose the game window. Detection follows the selected server. No fixed resolution or separate preflight is needed.',
+})
+TW.update({
+'台服':'台服','韩服':'韓服','日服':'日服',
+'按所选服务器检测游戏窗口；开始时核对客户端版本。':'依選取的伺服器偵測遊戲視窗；開始時核對客戶端版本。',
+'支持台服、韩服及日服已登记的客户端版本。多色精准结果以游戏实测为准。':'支援台服、韓服及日服已登記的客戶端版本。多色精準結果以遊戲實測為準。',
+'服务器已切换，窗口检测已更新。':'伺服器已切換，視窗偵測已更新。',
+'所选服务器与客户端版本不匹配':'選取的伺服器與客戶端版本不符',
+'所选服务器与客户端版本不匹配，请检查服务器和游戏窗口。':'選取的伺服器與客戶端版本不符，請檢查伺服器和遊戲視窗。',
+'服务器与游戏窗口不匹配':'伺服器與遊戲視窗不符',
+'请在窗口选项旁选择对应服务器，并重新选择该服务器的游戏窗口。':'請在視窗選項旁選取對應伺服器，並重新選取該伺服器的遊戲視窗。',
+'1. 选择服务器与游戏窗口':'1. 選擇伺服器與遊戲視窗',
+'在左上角选择台服、韩服或日服，再选择游戏窗口；窗口检测与服务器联动，无需固定分辨率或额外预检。':'在左上角選取台服、韓服或日服，再選取遊戲視窗；視窗偵測與伺服器連動，無需固定解析度或額外預檢。',
+})
+
+EN.update({
+'游戏失去焦点':'Game lost focus',
+'窗口位置或尺寸':'Window position or size',
+'无法激活游戏':'Could not activate the game',
+'文字识别组件':'Text recognition component',
+'识别本局色板':'Identifying this round’s palette',
+'寻色已就绪，请进入染色界面；工具正在等待活动色板。F9 可停止。':'Search is ready. Enter dyeing; the tool is waiting for the active palette. F9 stops.',
+'已检测到活动色板，正在完成本局识别；请保持游戏窗口前台。F9 可停止。':'An active palette was found. Completing identification; keep the game in the foreground. F9 stops.',
+'游戏失去焦点，已停止寻色':'The game lost focus; search stopped',
+'请保持游戏窗口在前台，再按 F8 开始。窗口尺寸本身不会触发此提示。':'Keep the game in the foreground, then press F8. Window size alone does not cause this message.',
+'游戏窗口已移动或调整尺寸':'The game window moved or resized',
+'运行期间窗口几何已变化，已停止旧坐标操作。请按 F8 按当前窗口重新识别。':'The window changed during search, so input using the old coordinates stopped. Press F8 to identify the current window.',
+'请先切回游戏窗口':'Switch back to the game first',
+'未能将游戏切到前台，本轮已停止。请点击游戏窗口后按 F8 开始。':'The game could not be activated. This run stopped. Click the game window, then press F8.',
+})
+TW.update({
+'游戏失去焦点':'遊戲失去焦點',
+'窗口位置或尺寸':'視窗位置或尺寸',
+'无法激活游戏':'無法啟用遊戲',
+'文字识别组件':'文字辨識元件',
+'识别本局色板':'識別本局色板',
+'寻色已就绪，请进入染色界面；工具正在等待活动色板。F9 可停止。':'尋色已就緒，請進入染色介面；工具正在等待使用中的色板。F9 可停止。',
+'已检测到活动色板，正在完成本局识别；请保持游戏窗口前台。F9 可停止。':'已偵測到使用中的色板，正在完成本局識別；請保持遊戲視窗在前景。F9 可停止。',
+'游戏失去焦点，已停止寻色':'遊戲失去焦點，已停止尋色',
+'请保持游戏窗口在前台，再按 F8 开始。窗口尺寸本身不会触发此提示。':'請保持遊戲視窗在前景，再按 F8 開始。視窗尺寸本身不會觸發此提示。',
+'游戏窗口已移动或调整尺寸':'遊戲視窗已移動或調整尺寸',
+'运行期间窗口几何已变化，已停止旧坐标操作。请按 F8 按当前窗口重新识别。':'執行期間視窗幾何已變化，已停止舊座標操作。請按 F8 依目前視窗重新識別。',
+'请先切回游戏窗口':'請先切回遊戲視窗',
+'未能将游戏切到前台，本轮已停止。请点击游戏窗口后按 F8 开始。':'未能將遊戲切到前景，本輪已停止。請點擊遊戲視窗後按 F8 開始。',
+})
+
+EN.update({
+'1 为最高优先级，全部区域达标始终优先。需要妥协时，按优先级依次比较是否达标和色差；低优先级的精准命中不会压过高优先级的大幅改善。相似模式中，区域进入设定容差后优先改善后续区域。调整一个区域会自动交换另一区域的优先级。':'Priority 1 is highest, and meeting all enabled targets always comes first. Compromises compare each region’s acceptance and color difference in priority order. A lower-priority exact hit does not outweigh a large improvement in a higher-priority region. In Similar mode, once a region is within tolerance, later regions take priority. Changing a priority swaps it with the other region.',
+})
+TW.update({
+'1 为最高优先级，全部区域达标始终优先。需要妥协时，按优先级依次比较是否达标和色差；低优先级的精准命中不会压过高优先级的大幅改善。相似模式中，区域进入设定容差后优先改善后续区域。调整一个区域会自动交换另一区域的优先级。':'1 為最高優先級，全部區域達標始終優先。需要妥協時，依優先級依序比較是否達標與色差；低優先級的精準命中不會壓過高優先級的大幅改善。相似模式中，區域進入設定容差後優先改善後續區域。調整一個區域會自動交換另一區域的優先級。',
+})

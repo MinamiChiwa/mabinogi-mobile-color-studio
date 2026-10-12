@@ -1,4 +1,4 @@
-"""Research-only screenshot text templates, never a color-to-HEX decoder.
+"""Game-font primary text reader with an archived screenshot-template fallback.
 
 Templates are prior successful screenshot OCR glyphs, excluding current failed
 session. Two threshold reads must agree and every character must be confident.
@@ -47,12 +47,18 @@ def prepare_hex_assets(path=None,metadata_path=None,*,validate_only=False):
     actual=hashlib.sha256(path.read_bytes()).hexdigest()
     if actual!=metadata.get('asset_sha256'):raise ValueError('HEX template checksum mismatch')
     if metadata.get('schema')!=1 or metadata.get('thresholds')!=list(THRESHOLDS):raise ValueError('Unsupported template metadata')
-    if path==ASSET and not validate_only:_load()
+    if path==ASSET and not validate_only:
+        _load()
+        from .game_font_reader import prepare_game_font_assets
+        prepare_game_font_assets()
     return dict(path=str(path.resolve()),asset_sha256=actual,preloaded=path==ASSET and not validate_only,
-        scope='Prior screenshot text glyphs, fixed theme and canonical 80/81px cards; larger cards normalize source text pixels, not arbitrary DPI guarantee')
+        scope='Original game-font rendering variations plus archived text calibration; actual pixels and swatch agreement required')
 
 
 def read_card_glyphs(image,card,*,deadline,check=lambda:None,clock=time.monotonic):
+    from .game_font_reader import read_hex
+    primary=read_hex(image,card,deadline=deadline,check=check,clock=clock)
+    if primary['hex'] is not None:return primary
     def guard():
         check()
         if not math.isfinite(deadline) or clock()>=deadline:raise TimeoutError('HEX glyph deadline')
@@ -92,6 +98,6 @@ def read_card_glyphs(image,card,*,deadline,check=lambda:None,clock=time.monotoni
         # never enters either text path, and callers still validate the swatch.
         if normalized is not None and all(r['text'] in (None,normalized) for r in reads):code=normalized
     guard()
-    return dict(hex=code,method='two_threshold_reference_glyphs',threshold_reads=reads,
+    return dict(hex=code,method='two_threshold_reference_glyphs',threshold_reads=reads,game_font_reads=primary,
         normalized_threshold_reads=normalized_reads,
         glyphs_unambiguous=code is not None,ready_for_input=False)

@@ -9,6 +9,8 @@ TW_BUILD='1675c2131534d0ab2fc053af8a2e394d326ba7d22eff0019734be96b1808678f'
 TW_METADATA='3f6827a41d26ab50ef0051b881cb2c6dcab0c12aab5e95cc7da0071fae63a847'
 KR_BUILD='bd9d827b7cd342c677c1e93a752f61c2e75a913d08ac9879ce285c852986ca08'
 KR_METADATA='cdeed3914cc11325e9771047bdbe4bb0acf1733f16f01783418f753c2a6fde8a'
+JP_BUILD='214a60312b572a5ca55514f8a4ed51459559c97d2527028afb596aadf7b428a4'
+JP_METADATA='ff5bd8ef32c53d05322e2f961b3e05667c7350bcbf7bd7a466d83468123666bb'
 UNITY_BUILD='e969642866c2195f16a0bd0e52ff8ffe87cad5b213fda9a62ca1564970e2fa26'
 
 @dataclass(frozen=True)
@@ -51,7 +53,13 @@ KR_ADAPTER=BuildAdapter('kr-20261012-research-candidate',KR_BUILD,KR_METADATA,0x
     palette_uninitialized_marker=0x20036bfb,input_class_rva=0x10d7e580,input_class_uninitialized_marker=0x20043315,
     mouse_getter_cache_rva=0x11694ce8,capability='diagnostic_only',
     managed_layout_evidence_sha256='ae9f8974b2b3a54c9cf49832cea394824fe43408905bc71f81a66744138fd90a')
-KNOWN=(TW_ADAPTER,KR_ADAPTER)
+JP_ADAPTER=BuildAdapter('jp-20261012-research-candidate',JP_BUILD,JP_METADATA,0x10909e58,'legacy-mouse-v1',
+    palette_uninitialized_marker=0x20035ba5,input_class_rva=0x10959120,input_class_uninitialized_marker=0x20042105,
+    mouse_getter_cache_rva=0x11308df8,capability='diagnostic_only',
+    managed_layout_evidence_sha256='c149e7844a9be83eebf3038f342f5905d180ea344cb6a60689b2100816d2a2cd')
+KNOWN=(TW_ADAPTER,KR_ADAPTER,JP_ADAPTER)
+VALIDATION_ADAPTERS=(KR_ADAPTER,JP_ADAPTER)
+SERVER_ADAPTERS=dict(tw=TW_ADAPTER,kr=KR_ADAPTER,jp=JP_ADAPTER)
 
 class BuildUnsupported(ValueError):
     def __init__(self,hashes):
@@ -67,7 +75,7 @@ def select_adapter(hashes):
 def input_is_allowed(backend):
     adapter=getattr(backend,'adapter',None)
     return adapter is None or adapter.input_verified or (
-        adapter==KR_ADAPTER and getattr(backend,'validation_input_enabled',False) is True)
+        adapter in VALIDATION_ADAPTERS and getattr(backend,'validation_input_enabled',False) is True)
 
 
 def require_input_capability(backend):
@@ -77,6 +85,15 @@ def require_input_capability(backend):
 
 def enable_known_validation_input(backend,adapter_id):
     """Explicit test launch only; discoveries/config JSON never authorize input."""
-    if adapter_id!=KR_ADAPTER.adapter_id or getattr(backend,'adapter',None)!=KR_ADAPTER:
-        raise ValueError('Validation input requires the exact Korean game build')
+    expected=next((a for a in VALIDATION_ADAPTERS if a.adapter_id==adapter_id),None)
+    if expected is None or getattr(backend,'adapter',None)!=expected:
+        raise ValueError('Validation input requires the exact registered game build')
     backend.validation_input_enabled=True
+
+
+def enable_selected_server_input(backend,server):
+    """Use the selected server's exact registered build with shared input logic."""
+    expected=SERVER_ADAPTERS.get(server)
+    if expected is None or getattr(backend,'adapter',None)!=expected:
+        raise ValueError('所选服务器与客户端版本不匹配，请检查服务器和游戏窗口。')
+    if not expected.input_verified:enable_known_validation_input(backend,expected.adapter_id)

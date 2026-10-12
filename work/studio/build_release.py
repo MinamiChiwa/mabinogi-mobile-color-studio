@@ -63,7 +63,7 @@ packaged_data=out/'ColorStudio/data'
 if packaged_data.exists():shutil.rmtree(packaged_data)
 licenses=out/'ColorStudio/THIRD_PARTY';licenses.mkdir(exist_ok=True)
 import importlib.metadata
-for package_name in ('cryptography','packaging','httpx','httpcore','anyio','certifi','cffi'):
+for package_name in ('cryptography','packaging','httpx','httpcore','anyio','certifi','cffi','scipy'):
     distribution=importlib.metadata.distribution(package_name)
     for file in distribution.files or ():
         if 'license' in str(file).casefold() or str(file).casefold().endswith('copying'):
@@ -71,27 +71,8 @@ for package_name in ('cryptography','packaging','httpx','httpcore','anyio','cert
             if src.is_file():
                 destination=licenses/package_name/Path(file).name;destination.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(src,destination)
 if (source/'doc').exists():shutil.copytree(source/'doc',licenses/'tesseract',dirs_exist_ok=True)
-for name in ('README.md','README.zh-TW.md','README.en.md','TESTING.md'):
- p=workspace/name
- if p.exists():shutil.copy2(p,out/'ColorStudio'/name)
-update_document=workspace/'docs/automatic-updates.md'
-if update_document.is_file():
-    (out/'ColorStudio/docs').mkdir(exist_ok=True);shutil.copy2(update_document,out/'ColorStudio/docs/automatic-updates.md')
-verification=out/'ColorStudio/work/studio/VERIFICATION.md'
-verification.parent.mkdir(parents=True,exist_ok=True)
-shutil.copy2(root/'VERIFICATION.md',verification)
-shutil.copy2(root/'native-window-check.ps1',out/'ColorStudio/native-window-check.ps1')
-shutil.copy2(root/'Korean-validation.cmd',out/'ColorStudio/Korean-validation.cmd')
-shutil.copy2(root/'Korean-preflight.cmd',out/'ColorStudio/Korean-preflight.cmd')
-kr_validation=workspace/'docs/server-adaptation/korean-validation.md'
-if kr_validation.is_file():
-    (out/'ColorStudio/docs').mkdir(exist_ok=True)
-    shutil.copy2(kr_validation,out/'ColorStudio/docs/korean-validation.md')
-shutil.copy2(root/'WINDOW_CHECK.zh-CN.md',out/'ColorStudio/WINDOW_CHECK.zh-CN.md')
-for name in ('WINDOW_CHECK.zh-TW.md','WINDOW_CHECK.en.md'):
-    shutil.copy2(root/name,out/'ColorStudio'/name)
-notes=workspace/('docs/release-notes-'+APP_VERSION.split('rc')[0]+'.md')
-if notes.exists():shutil.copy2(notes,out/'ColorStudio/RELEASE_NOTES.md')
+from release_documents import package_documents
+package_documents(workspace,out/'ColorStudio')
 # Development validation reports remain in the workspace. Distributions
 # contain current user documentation and one current verification summary.
 print('RELEASE',out/'ColorStudio/ColorStudio.exe')

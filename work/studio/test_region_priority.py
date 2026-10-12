@@ -11,6 +11,39 @@ def rules(order=(1, 2, 3), exact=True):
 
 
 class RegionPriorityTests(unittest.TestCase):
+    def test_high_priority_color_improvement_beats_low_priority_exact_hit(self):
+        r = rules(); r[0]['colors'] = ['#FFFFFF']
+        old = ['#B59170', '#56522E', '#000000']
+        improved = ['#E8D9D2', '#4A4323', '#040404']
+        self.assertLess(observed_quality(improved, r), observed_quality(old, r))
+        self.assertLess(score_codes(improved, r)['rank'], score_codes(old, r)['rank'])
+
+    def test_same_half_delta_e_bin_yields_to_the_next_region(self):
+        r = rules()
+        a = priority_components(['#101010'] * 3, r, [5.10, 20., 10.])
+        b = priority_components(['#101010'] * 3, r, [5.35, 2., 10.])
+        self.assertLess(b, a)
+        self.assertLess(priority_components(['#101010'] * 3, r, [4.95, 50., 50.]), b)
+        # Ranking bins must never certify a dark nonzero HEX as exact black.
+        self.assertFalse(score_codes(['#010101'] * 3, r)['accepted'])
+
+    def test_similar_high_region_inside_tolerance_releases_its_error_priority(self):
+        r = rules(exact=False)
+        a = ['#101010', '#404040', '#000000']
+        b = ['#000000', '#808080', '#000000']
+        self.assertLess(observed_quality(a, r), observed_quality(b, r))
+        self.assertLess(priority_components(a, r), priority_components(b, r))
+
+    def test_tied_priority_bins_use_delta_e_in_every_actual_and_prediction_path(self):
+        from best_result import ranking
+        r = rules()
+        a = ['#0C0203', '#090604', '#0F1009']
+        b = ['#050A08', '#080706', '#12070D']
+        self.assertEqual(priority_components(a,r), priority_components(b,r))
+        self.assertLess(observed_quality(b,r), observed_quality(a,r))
+        self.assertLess(ranking(b,r), ranking(a,r))
+        self.assertLess(score_codes(b,r)['rank'], score_codes(a,r)['rank'])
+
     def test_priority_swap_changes_compromise_but_never_full_acceptance(self):
         a = ['#000000', '#FFFFFF', '#FFFFFF']
         b = ['#FFFFFF', '#000000', '#000000']

@@ -1,0 +1,561 @@
+{
+  "source": "20261012-201059-c3e0e8a5 (rc6)",
+  "checkpoint": {
+    "checkpoint_valid": true,
+    "cpu_matches": true,
+    "pose": {
+      "position": [
+        0.0,
+        0.0
+      ],
+      "scale": 1.0,
+      "rotation_degrees": 0.0
+    },
+    "client_hex": [
+      "#7D6241",
+      "#717B61",
+      "#9CC38F"
+    ],
+    "board": [
+      177.54998779296875,
+      357.97509765625,
+      610.4500122070312,
+      790.8751220703125
+    ],
+    "local_size": [
+      624.0,
+      624.0
+    ],
+    "binding": "[[\"recorded-session\"], [\"file-only-process\"], {}, {\"minimum_scale\": 0.5, \"maximum_scale\": 3.0, \"move_threshold\": 0.0, \"move_tolerance\": 0.10000000149011612, \"scroll_zoom_ratio\": 0.009999999776482582}, {}]"
+  },
+  "settings": {
+    "minimum_scale": 0.5,
+    "maximum_scale": 3.0,
+    "move_threshold": 0.0,
+    "move_tolerance": 0.10000000149011612,
+    "scroll_zoom_ratio": 0.009999999776482582
+  },
+  "rules": [
+    {
+      "enabled": true,
+      "exact": true,
+      "colors": [
+        "#FFFFFF"
+      ],
+      "tolerance": 0.0,
+      "priority": 1
+    },
+    {
+      "enabled": true,
+      "exact": true,
+      "colors": [
+        "#FFFFFF"
+      ],
+      "tolerance": 0.0,
+      "priority": 2
+    },
+    {
+      "enabled": true,
+      "exact": true,
+      "colors": [
+        "#FFFFFF"
+      ],
+      "tolerance": 0.0,
+      "priority": 3
+    }
+  ],
+  "candidate": {
+    "input_route": [
+      {
+        "kind": "rotate",
+        "points": [
+          [
+            365,
+            639
+          ],
+          [
+            349,
+            612
+          ],
+          [
+            333,
+            584
+          ],
+          [
+            317,
+            557
+          ],
+          [
+            302,
+            529
+          ],
+          [
+            286,
+            502
+          ],
+          [
+            270,
+            474
+          ],
+          [
+            254,
+            447
+          ],
+          [
+            238,
+            420
+          ],
+          [
+            253,
+            412
+          ],
+          [
+            268,
+            405
+          ],
+          [
+            284,
+            399
+          ],
+          [
+            299,
+            394
+          ],
+          [
+            316,
+            390
+          ],
+          [
+            332,
+            388
+          ],
+          [
+            348,
+            386
+          ],
+          [
+            365,
+            386
+          ],
+          [
+            382,
+            386
+          ],
+          [
+            398,
+            388
+          ],
+          [
+            414,
+            390
+          ],
+          [
+            431,
+            394
+          ],
+          [
+            446,
+            399
+          ],
+          [
+            462,
+            405
+          ],
+          [
+            477,
+            412
+          ],
+          [
+            492,
+            420
+          ],
+          [
+            506,
+            428
+          ],
+          [
+            519,
+            438
+          ],
+          [
+            532,
+            448
+          ],
+          [
+            544,
+            460
+          ],
+          [
+            556,
+            472
+          ],
+          [
+            566,
+            485
+          ],
+          [
+            576,
+            498
+          ],
+          [
+            584,
+            512
+          ]
+        ],
+        "right": true,
+        "absolute": true,
+        "wheel_steps": 0,
+        "requested_angle": 90.0,
+        "arc_start": 8,
+        "timing": {
+          "before_down": 0.08,
+          "after_down": 0.1,
+          "point_interval": 0.018,
+          "before_up": 0.08,
+          "after_wheel": 0.1
+        },
+        "schema": 1,
+        "coordinate_space": "physical_client_pixels",
+        "input_seconds": 0.836,
+        "has_effect": true,
+        "cursor_arc_degrees": 90.00000000000001,
+        "response_model": "unverified_cursor_geometry"
+      },
+      {
+        "kind": "rotate",
+        "points": [
+          [
+            365,
+            638
+          ],
+          [
+            374,
+            606
+          ],
+          [
+            382,
+            574
+          ],
+          [
+            391,
+            543
+          ],
+          [
+            399,
+            511
+          ],
+          [
+            408,
+            479
+          ],
+          [
+            416,
+            447
+          ],
+          [
+            425,
+            416
+          ],
+          [
+            433,
+            384
+          ],
+          [
+            440,
+            386
+          ],
+          [
+            448,
+            388
+          ],
+          [
+            455,
+            391
+          ],
+          [
+            462,
+            393
+          ],
+          [
+            469,
+            396
+          ],
+          [
+            476,
+            399
+          ],
+          [
+            483,
+            403
+          ],
+          [
+            489,
+            406
+          ],
+          [
+            496,
+            410
+          ],
+          [
+            502,
+            414
+          ],
+          [
+            509,
+            418
+          ],
+          [
+            515,
+            422
+          ],
+          [
+            521,
+            426
+          ],
+          [
+            527,
+            431
+          ],
+          [
+            533,
+            436
+          ],
+          [
+            539,
+            441
+          ],
+          [
+            544,
+            446
+          ],
+          [
+            550,
+            451
+          ],
+          [
+            555,
+            456
+          ],
+          [
+            560,
+            462
+          ],
+          [
+            565,
+            468
+          ],
+          [
+            570,
+            473
+          ],
+          [
+            575,
+            479
+          ],
+          [
+            579,
+            486
+          ]
+        ],
+        "right": true,
+        "absolute": true,
+        "wheel_steps": 0,
+        "requested_angle": 39.57510375976562,
+        "arc_start": 8,
+        "timing": {
+          "before_down": 0.08,
+          "after_down": 0.1,
+          "point_interval": 0.018,
+          "before_up": 0.08,
+          "after_wheel": 0.1
+        },
+        "schema": 1,
+        "coordinate_space": "physical_client_pixels",
+        "input_seconds": 0.836,
+        "has_effect": true,
+        "cursor_arc_degrees": 39.62700729984414,
+        "response_model": "unverified_cursor_geometry"
+      },
+      {
+        "kind": "wheel",
+        "points": [
+          [
+            365,
+            637
+          ]
+        ],
+        "right": false,
+        "absolute": true,
+        "wheel_steps": -32,
+        "requested_angle": 0.0,
+        "arc_start": 0,
+        "timing": {
+          "before_down": 0.08,
+          "after_down": 0.1,
+          "point_interval": 0.018,
+          "before_up": 0.08,
+          "after_wheel": 0.1
+        },
+        "schema": 1,
+        "coordinate_space": "physical_client_pixels",
+        "input_seconds": 0.6759999999999999,
+        "has_effect": true
+      },
+      {
+        "kind": "wheel",
+        "points": [
+          [
+            365,
+            636
+          ]
+        ],
+        "right": false,
+        "absolute": true,
+        "wheel_steps": -26,
+        "requested_angle": 0.0,
+        "arc_start": 0,
+        "timing": {
+          "before_down": 0.08,
+          "after_down": 0.1,
+          "point_interval": 0.018,
+          "before_up": 0.08,
+          "after_wheel": 0.1
+        },
+        "schema": 1,
+        "coordinate_space": "physical_client_pixels",
+        "input_seconds": 0.568,
+        "has_effect": true
+      },
+      {
+        "kind": "wheel",
+        "points": [
+          [
+            250,
+            599
+          ]
+        ],
+        "right": false,
+        "absolute": true,
+        "wheel_steps": 1,
+        "requested_angle": 0.0,
+        "arc_start": 0,
+        "timing": {
+          "before_down": 0.08,
+          "after_down": 0.1,
+          "point_interval": 0.018,
+          "before_up": 0.08,
+          "after_wheel": 0.1
+        },
+        "schema": 1,
+        "coordinate_space": "physical_client_pixels",
+        "input_seconds": 0.11800000000000001,
+        "has_effect": true
+      },
+      {
+        "kind": "wheel",
+        "points": [
+          [
+            250,
+            591
+          ]
+        ],
+        "right": false,
+        "absolute": true,
+        "wheel_steps": -1,
+        "requested_angle": 0.0,
+        "arc_start": 0,
+        "timing": {
+          "before_down": 0.08,
+          "after_down": 0.1,
+          "point_interval": 0.018,
+          "before_up": 0.08,
+          "after_wheel": 0.1
+        },
+        "schema": 1,
+        "coordinate_space": "physical_client_pixels",
+        "input_seconds": 0.11800000000000001,
+        "has_effect": true
+      }
+    ],
+    "final_pose": {
+      "position": [
+        -0.026561111211776733,
+        -0.23114648461341858
+      ],
+      "scale": 0.5582106709480286,
+      "rotation_degrees": -129.6262664794922
+    },
+    "prediction": {
+      "colors": [
+        "#FFFFFF",
+        "#FFFFFF",
+        "#E1E6E2"
+      ],
+      "deltas": [
+        0.0,
+        0.0,
+        9.707650184631348
+      ],
+      "target_exact": false,
+      "rank": [
+        true,
+        0,
+        0,
+        1,
+        0.0,
+        0.0,
+        9.707650184631348,
+        30.0,
+        1,
+        10.0
+      ],
+      "predicted_accepted": false,
+      "predicted": true,
+      "verified": false,
+      "execution_verified": false,
+      "predicted_pick_rgb": [
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          0.9995450973510742,
+          0.9995450973510742,
+          0.9995450973510742
+        ],
+        [
+          0.8828966617584229,
+          0.900834858417511,
+          0.8851485848426819
+        ]
+      ],
+      "native_pose": {
+        "position": [
+          -0.026561111211776733,
+          -0.23114648461341858
+        ],
+        "scale": 0.5582106709480286,
+        "rotation_degrees": -129.6262664794922
+      },
+      "coordinate_space": "native_normalized_bottom_up_uv",
+      "capture_id": "20261012T121122_491519Z",
+      "input_reachability": "unverified"
+    },
+    "needed": 7.9,
+    "source": "macro_endpoint"
+  },
+  "measured_first_response": {
+    "position": [
+      0.08864246308803558,
+      -0.20815107226371765
+    ],
+    "scale": 1.0,
+    "rotation_degrees": -86.15184020996094
+  },
+  "measured_first_colors": [
+    "#A8ACA3",
+    "#9C9DA1",
+    "#E3C465"
+  ]
+}
