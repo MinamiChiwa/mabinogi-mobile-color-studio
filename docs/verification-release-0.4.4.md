@@ -55,3 +55,13 @@
 发布集合858项初次运行：850通过、3项历史素材缺失跳过、5项错误。5项来自运行中加载了终审修复的中间版本，最终单区/控制/流程42项已全部通过；原错误报告保留，另存最终聚焦回归。3项历史素材缺失仍为前述两份相似模式原图和一份OCR档案，未扩大跳过范围，也不声明全历史验收完成。
 
 最终源码聚焦189项通过，0跳过、失败和错误，用时67.53秒，覆盖全部5项原错误及新增遮罩取色点复现。报告为 `focused-publish-final.json`，终审确认单区范围无剩余重要问题。发布前仍核对提交对应的正式包、生产签名、完整/差异离线包、冻结健康检查和真实更新事务；原始玩家会话与截图只留本地，不进入Git或发布包。
+
+## 正式发布核验
+
+2026-10-13 已发布 [v0.4.4](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/releases/tag/v0.4.4)，为正式 Latest，非草稿、非预发布。源码与标签提交为 `27cc7e159cf376fa9892a6b50c1b32ecbb64034d`；正式包位于 `project/outputs/release-0.4.4-official/ColorStudio`。154个冻结生产模块与源码一致，源码摘要 `03da85f969b5c8f1531e445347fc34d6a16fcd507048c07cb07801e4db756ab7`。生产签名序号3，清单覆盖1283个程序文件，无玩家配置、会话或截图。
+
+完整包及完整/差异离线更新包已逐文件核验；183个GitHub资产的服务器SHA-256全部与本地一致。下载回来的清单和签名与本地一致且通过生产公钥验签。首次安装包 SHA-256：`d989eaf3a892de3525f3845fa1ca8eb9ebaa84ef05934ecd6538556df8028c1d`。发布说明采用五语并以0.4.3为起点，不包含方案默认切换说明。
+
+正式EXE签名健康检查、冻结截图预检通过。隔离官方0.4.3真实差异升级用时17.06秒，提交成功进入0.4.4；约26.10MB变更文件，颜色、优先级、语言、保存方案、历史及未知用户文件保留，1283个程序文件逐项一致。实际旧版发现更新逻辑在已有GitHub CLI授权访问下返回0.4.4和183资产；本机匿名GitHub API当时返回限流，原始失败结果保留，不把授权复验宣称为匿名网络成功。
+
+发布证据：`publication-assets-evidence/remote-verification.json`、`official-production-health/health.json`、`official-frozen-upgrade/report.json`、`frozen-official/screenshot-preflight.json`、`published-update-discovery.json`、`published-update-discovery-authorized.json`，均在本地 `project/outputs/release-0.4.4-evidence`。本轮实机只消耗1枚染色剂，未套用结果。3项缺失历史素材的检查仍保留限制，不因发布而转为通过。
