@@ -65,3 +65,15 @@
 正式EXE签名健康检查、冻结截图预检通过。隔离官方0.4.3真实差异升级用时17.06秒，提交成功进入0.4.4；约26.10MB变更文件，颜色、优先级、语言、保存方案、历史及未知用户文件保留，1283个程序文件逐项一致。实际旧版发现更新逻辑在已有GitHub CLI授权访问下返回0.4.4和183资产；本机匿名GitHub API当时返回限流，原始失败结果保留，不把授权复验宣称为匿名网络成功。
 
 发布证据：`publication-assets-evidence/remote-verification.json`、`official-production-health/health.json`、`official-frozen-upgrade/report.json`、`frozen-official/screenshot-preflight.json`、`published-update-discovery.json`、`published-update-discovery-authorized.json`，均在本地 `project/outputs/release-0.4.4-evidence`。本轮实机只消耗1枚染色剂，未套用结果。3项缺失历史素材的检查仍保留限制，不因发布而转为通过。
+
+## 2026-10-13 更新器补修
+
+桌面0.4.3两次升级因旧安装器误判已退出进程而超时。根因与真实子进程复现见 [更新退出检测报告](research/2026-10-13-updater-parent-exit.md)。以进程对象的完成状态检查存活，再比较创建时间；真实活进程与PID复用保护保留。21项更新安装、事务、恢复引导和UI回归全部通过，用时32.01秒。
+
+补修源码提交 `6de12e143eff91247db4a5808a659d6732c5de9c`；正式包为 `project/outputs/release-0.4.4-updater-fix/ColorStudio`。154个冻结生产模块及资产与当前源码一致，源码摘要 `8e2bf6d87b65b3c82c95409f88c96ddc438ecdbf5a5c784390d03d19f6c25d18`，1283个程序文件不含玩家数据。签名序号增至4，生产签名健康检查通过。新冻结安装器使用真实已退出父进程及保留句柄的场景，约23.66秒完成隔离官方0.4.3升级；公开独立修复包入口约25.72秒完成续装，颜色、优先级、设置、保存方案、历史与未知用户文件均保留。
+
+现有0.4.4发布页已替换完整包、完整离线包和0.4.3差异离线包，新增 `ColorStudio-Update-Recovery-v0.4.4.zip` 及摘要，五种语言均为7条变更和2条更新指引。185个当前必需资产全部核验服务器SHA-256，下载回来的签名清单与本地一致并通过验签；保留5个早期内容哈希blob，供仍持有原签名清单的用户完成下载。远端共190资产，Latest和初始v0.4.4标签保留，补修源码提交在发布页单独链接。
+
+版本号仍为0.4.4，因此早期0.4.4不会收到同版本更新提示；需关闭工具后用补修完整包覆盖程序文件并保留 `data`。0.4.3及早期0.4.4的首跳仍启动旧安装器，不能保证自动消除误判；已下载且处于暂存阶段可用独立修复包续装，否则保留 `data` 使用完整包。修复包不是首次安装包。此限制在全部五语说明中列明。
+
+补修证据位于本地 `project/outputs/updater-parent-exit-20261013`，包括 `regression-before-publish.log`、`package-public.json`、`public-production-health/health.json`、`frozen-public-retained-parent/report.json`、`frozen-public-recovery-package/report.json`、`publication-assets-evidence/remote-verification.json`。原桌面玩家资料和失败事务只做本地备份，未上传。
