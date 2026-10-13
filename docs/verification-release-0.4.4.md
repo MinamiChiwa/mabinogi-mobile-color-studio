@@ -77,3 +77,17 @@
 版本号仍为0.4.4，因此早期0.4.4不会收到同版本更新提示；需关闭工具后用补修完整包覆盖程序文件并保留 `data`。0.4.3及早期0.4.4的首跳仍启动旧安装器，不能保证自动消除误判；已下载且处于暂存阶段可用独立修复包续装，否则保留 `data` 使用完整包。修复包不是首次安装包。此限制在全部五语说明中列明。
 
 补修证据位于本地 `project/outputs/updater-parent-exit-20261013`，包括 `regression-before-publish.log`、`package-public.json`、`public-production-health/health.json`、`frozen-public-retained-parent/report.json`、`frozen-public-recovery-package/report.json`、`publication-assets-evidence/remote-verification.json`。原桌面玩家资料和失败事务只做本地备份，未上传。
+
+## 2026-10-13 发布包文档精简
+
+发布包移除根目录 `docs`、`work`、`TESTING.md`、`RELEASE_NOTES.md` 及 `_internal/docs`。仅附带旧更新器兼容的三个根目录 README；日语、韩语说明和其他资料通过仓库链接查看，五语 UI 完整保留。随包 README 不再包含源码开发和测试命令。第三方许可证、OCR 和程序依赖不变；仓库内开发文档继续保留。
+
+打包清理旧输出，冻结包校验、更新资产生成和签名资产校验均检查文档布局。空的开发文档目录也会被拒绝。24项聚焦回归全部通过，用时1.85秒，包括复用输出目录清理、相对链接、运行资源保留、旧所有权兼容及有效签名也不能绕过发布文档政策；没有重复全量研究或消耗游戏道具。
+
+构建源码提交 `156581e52cc2e9d7d853fde13a81a12523753d11`，源码摘要 `27db084e8e977a717c2586cd01f88dcff075363f0dd09fce8beff7209550b1be`。正式便携目录为 `project/outputs/release-0.4.4-clean/ColorStudio`，154个冻结生产模块与源码一致，1276个受管理程序文件，签名序号增至5；完整包另有两个清单/签名文件。完整 ZIP、完整/差异离线包逐文件核验，不包含开发资料或玩家数据，旧0.4.2更新校验代码可接受新清单。
+
+冻结正式 EXE 的签名文件哈希、依赖、OCR、隐藏 Tk 健康检查通过。隔离官方0.4.3副本使用修正版安装器和真实已退出父进程完成更新，用时18.78秒；七份旧官方文档文件全部删除，1276个新程序文件逐项一致，颜色、优先级、设置、方案、历史及未知个人文件保留。这里只按旧签名清单删除文件，不递归删除用户文档；旧安装目录可能留下空目录。旧安装器首次升级的恢复限制沿用上一节。
+
+本地证据位于 `project/outputs/release-package-cleanup-20261013`：`archive-layout.json`、`production-health/health.json`、`frozen-upgrade/report.json` 和 `publication-assets-evidence`。版本号仍为0.4.4，现有同版本用户需重新下载完整包；正式发布标签保持原提交，不强制移动。
+
+线上完整包、完整/差异离线包、摘要及签名清单已替换，发布说明五种语言均使用分条格式。185个当前必需资产与10个兼容旧缓存的内容哈希blob全部核验服务器SHA-256，远端共195资产；重新下载的清单与本地一致且通过生产公钥验签，序号5。旧缓存blob和独立更新修复包继续保留。最终线上核验见 `publication-assets-evidence/remote-verification.json`。
