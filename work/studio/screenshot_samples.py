@@ -55,10 +55,15 @@ class RawSamples:
         if np.asarray(masks).shape!=(len(self.rules),*image.shape[:2]):raise ValueError('Actual region masks required')
         width=image.shape[1];flat_image=image.reshape(-1,3)
         phase_width=int(np.ceil(self.period*4))
+        target_masks={}
         for index,(mask,rule) in enumerate(zip(masks,self.rules)):
             if not rule['enabled']:continue
-            target_pixels=np.zeros(image.shape[:2],bool)
-            for target in rule['colors']:target_pixels|=np.all(image==rgb(target),axis=2)
+            targets=tuple(rule['colors'])
+            if targets not in target_masks:
+                target_pixels=np.zeros(image.shape[:2],bool)
+                for target in targets:target_pixels|=np.all(image==rgb(target),axis=2)
+                target_masks[targets]=target_pixels
+            target_pixels=target_masks[targets]
             # A higher interior margin survives subpixel placement better.
             # It changes traversal only, never RGB or acceptance rules.
             interior=cv2.distanceTransform(np.uint8(target_pixels & mask),cv2.DIST_L2,5)
@@ -89,7 +94,9 @@ class RawSamples:
             # the older observation, with no channel mixing or point thinning.
             merged=np.concatenate((self.rows[index],fresh))
             check()
-            order=np.lexsort((-merged['margin'],merged['score'],merged['key']))
+            from screenshot_compute import cooperative_compute
+            order=cooperative_compute(lambda merged=merged:np.lexsort(
+                (-merged['margin'],merged['score'],merged['key'])),check)
             merged=merged[order]
             selected=np.r_[True,merged['key'][1:]!=merged['key'][:-1]]
             check()
@@ -97,13 +104,17 @@ class RawSamples:
         self.color_field.add(image,masks,pose,check)
         self.frames+=1
 
-    def sites(self,index):
+    def sites(self,index,check=None):
         rows=self.rows[index]
-        order=np.lexsort((-rows['margin'],rows['score']));rows=rows[order]
-        return rows['point'].copy(),rows['rgb'].copy(),rows['score'].copy()
+        def export():
+            ordered=rows[np.lexsort((-rows['margin'],rows['score']))]
+            return ordered['point'].copy(),ordered['rgb'].copy(),ordered['score'].copy()
+        if check is None:return export()
+        from screenshot_compute import cooperative_compute
+        return cooperative_compute(export,check)
 
-    def arrays(self):
-        rows=[self.sites(i) for i in range(len(self.rules))]
+    def arrays(self,check=None):
+        rows=[self.sites(i,check) for i in range(len(self.rules))]
         return [v[0] for v in rows],[v[1] for v in rows]
 
     def save(self,path):
@@ -111,3 +122,14 @@ class RawSamples:
         np.savez_compressed(path,period=self.period,
             **{f'points_{i}':row[0] for i,row in enumerate(rows)},
             **{f'rgb_{i}':row[1] for i,row in enumerate(rows)})
+
+    def save_background(self,path,writer):
+        # Current row arrays are owned snapshots, replaced by later additions.
+        # Sort/compress diagnostics on the writer, outside the game deadline.
+        rows=tuple(self.rows);period=self.period
+        def save():
+            ordered=[row[np.lexsort((-row['margin'],row['score']))] for row in rows]
+            np.savez_compressed(path,period=period,
+                **{f'points_{i}':row['point'] for i,row in enumerate(ordered)},
+                **{f'rgb_{i}':row['rgb'] for i,row in enumerate(ordered)})
+        writer.submit_task(save)

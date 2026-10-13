@@ -4,6 +4,38 @@ from types import SimpleNamespace
 import cv2,numpy as np
 
 class ScreenshotEndpointTests(unittest.TestCase):
+    def test_processing_error_is_reported_as_failure_instead_of_normal_compromise(self):
+        from screenshot_presentation import result_text
+        for verified,best in ((False,False),(True,False),(True,True)):
+            with self.subTest(verified=verified,best=best):
+                title,detail=result_text(dict(stop_reason='processing_error',verified=verified,
+                    accepted=False,best_current=best))
+                self.assertIn('异常',title)
+                self.assertNotIn('妥协',title)
+                if verified and best:self.assertIn('恢复',detail)
+
+    def test_dense_large_board_period_keeps_every_sample_for_two_and_three_regions(self):
+        from screenshot_registration import period_from_image
+        rng=np.random.default_rng(33445)
+        tile=cv2.GaussianBlur(rng.integers(0,256,(350,350,3),dtype=np.uint8),(0,0),1.)
+        tile=np.clip((tile.astype(float)-128)*4+128,0,255).astype(np.uint8)
+        image=cv2.resize(np.tile(tile,(2,2,1)),(1422,1422),interpolation=cv2.INTER_LINEAR)
+        for count in (2,3):
+            scene=SimpleNamespace(board=(0,0,1422,1422),
+                markers=[((i+.5)*1422/count,800+i*90) for i in range(count)],cards=[])
+            with self.subTest(regions=count):
+                period,_=period_from_image(image,scene)
+                self.assertIsNotNone(period)
+                self.assertAlmostEqual(period,711.,delta=.5)
+
+    def test_period_check_respects_f9_before_sift_and_during_sample_batches(self):
+        import inspect
+        from screenshot_registration import period_from_image
+        self.assertIn('check',inspect.signature(period_from_image).parameters)
+        def cancelled():raise InterruptedError('F9')
+        with self.assertRaisesRegex(InterruptedError,'F9'):
+            period_from_image(np.zeros((50,50,3),np.uint8),None,check=cancelled)
+
     def test_unknown_endpoints_cannot_displace_a_known_compromise(self):
         from screenshot_search import solve
         from screenshot_prediction import VisibleColorField
@@ -27,7 +59,11 @@ class ScreenshotEndpointTests(unittest.TestCase):
         points=[np.column_stack((np.arange(1,1801),np.full(1800,5))),np.empty((0,2))]
         rgb=[np.zeros((1800,3),np.uint8),np.empty((0,3),np.uint8)]
         rules=[dict(enabled=i==0,exact=True,colors=['#000000'],tolerance=8.,priority=i+1) for i in range(2)]
-        result=solve(points,rgb,10000,np.array([[0.,5.],[10.,5.]]),rules,np.eye(3),time_budget=1,sample_at=field)
+        # This asserts endpoint ranking, not CPU speed. A competing PNG/index
+        # worker must not turn a one-second wall-clock race into a quality test.
+        from unittest.mock import patch
+        with patch('screenshot_search.time.monotonic',return_value=100.):
+            result=solve(points,rgb,10000,np.array([[0.,5.],[10.,5.]]),rules,np.eye(3),time_budget=1,sample_at=field)
         self.assertEqual(result['candidates'][0]['observed_rgb'],[[0,0,0]])
         self.assertEqual(result['candidates'][0]['proposal_rank'][0],0)
 

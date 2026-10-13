@@ -17,7 +17,7 @@ from vision import read_codes
 _REMAP_POINT_CHUNK = 16_384
 
 
-def _remap_points(source, px, py, chunk_size=_REMAP_POINT_CHUNK):
+def _remap_points(source, px, py, chunk_size=_REMAP_POINT_CHUNK,*,check=lambda:None):
     """Bilinearly sample arbitrary points without hitting OpenCV's size limit."""
     px = np.asarray(px, dtype=np.float32).reshape(-1)
     py = np.asarray(py, dtype=np.float32).reshape(-1)
@@ -29,10 +29,12 @@ def _remap_points(source, px, py, chunk_size=_REMAP_POINT_CHUNK):
         return np.empty((0, source.shape[2]), dtype=np.float32)
     parts = []
     for start in range(0, len(px), chunk_size):
+        check()
         stop = start + chunk_size
         values = cv2.remap(source, px[start:stop, None], py[start:stop, None],
                            cv2.INTER_LINEAR)
         parts.append(values.reshape(-1, source.shape[2]))
+    check()
     return np.concatenate(parts, axis=0)
 
 

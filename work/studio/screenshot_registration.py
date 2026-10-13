@@ -1,7 +1,9 @@
 """Measured screenshot similarity and repeated-texture period. No process data."""
 import cv2
 import numpy as np
-from atlas_masks import board_texture_mask,material_masks
+from functools import lru_cache
+from atlas_masks import board_texture_mask,material_masks,_geometry_key
+from atlas_runtime import _remap_points
 
 
 def _bilinear(image,points):
@@ -12,22 +14,34 @@ def _bilinear(image,points):
            ((1-fx)*fy)[:,None]*image[iy+1,ix]+(fx*fy)[:,None]*image[iy+1,ix+1]
 
 
-def refine_similarity(before,after,scene,seed,check=lambda:None):
+@lru_cache(maxsize=4)
+def _alignment_masks(key):
+    scene=dict(zip(('board','markers','cards'),key))
+    masks=tuple(cv2.erode(np.uint8(mask),np.ones((9,9),np.uint8)).astype(bool)
+                for mask in material_masks(scene))
+    for mask in masks:mask.setflags(write=False)
+    texture=board_texture_mask(scene).astype(np.uint8)*255;texture.setflags(write=False)
+    return texture,masks
+
+
+def refine_similarity(before,after,scene,seed,check=lambda:None,*,smoothed=None):
     """Refine an established match on same-material texture; never find a pose."""
     from scipy.optimize import least_squares
     l,t,r,b=scene.board;first=before[t:b,l:r];second=after[t:b,l:r]
     seed=np.asarray(seed,float)
-    masks=material_masks(scene)
+    _,masks=_alignment_masks(_geometry_key(scene))
     # Smooth just for alignment. Source RGB samples and game HEX stay original.
-    first=cv2.GaussianBlur(first.astype(np.float32),(0,0),.6)
-    second=cv2.GaussianBlur(second.astype(np.float32),(0,0),.6)
+    if smoothed is None:
+        first=cv2.GaussianBlur(first.astype(np.float32),(0,0),.6)
+        second=cv2.GaussianBlur(second.astype(np.float32),(0,0),.6)
+    else:first,second=smoothed
     gray=cv2.cvtColor(second,cv2.COLOR_RGB2GRAY)
     gx=cv2.Sobel(gray,cv2.CV_32F,1,0,ksize=3);gy=cv2.Sobel(gray,cv2.CV_32F,0,1,ksize=3)
     gradient=np.hypot(gx,gy)
     coords=[]
     for mask in masks:
         check()
-        interior=cv2.erode(np.uint8(mask),np.ones((9,9),np.uint8)).astype(bool)
+        interior=mask
         y,x=np.where(interior & (gradient>8))
         if not len(x):continue
         points=np.column_stack((x,y)).astype(float)
@@ -80,20 +94,22 @@ def refine_similarity(before,after,scene,seed,check=lambda:None):
 def register(before,after,scene,*,cache=None,check=lambda:None):
     check()
     l,t,r,b=scene.board
-    mask=board_texture_mask(scene).astype(np.uint8)*255
+    mask,_=_alignment_masks(_geometry_key(scene))
     sift=cv2.SIFT_create(nfeatures=3600,contrastThreshold=.02)
     def features(image):
         # Controller frames are immutable. Retaining the image reference also
         # prevents an array id from being reused for a different screenshot.
         if cache is not None:
-            for saved,saved_scene,keys,desc in cache:
-                if saved is image and saved_scene is scene:return keys,desc
-        keys,desc=sift.detectAndCompute(cv2.cvtColor(image[t:b,l:r],cv2.COLOR_RGB2GRAY),mask)
+            for entry in cache:
+                if entry[0] is image and entry[1]==_geometry_key(scene):return entry[2:]
+        crop=image[t:b,l:r];gray=cv2.cvtColor(crop,cv2.COLOR_RGB2GRAY)
+        keys,desc=sift.detectAndCompute(gray,mask)
+        smooth=cv2.GaussianBlur(crop.astype(np.float32),(0,0),.6)
         if cache is not None:
-            cache.append((image,scene,keys,desc));del cache[:-3]
-        return keys,desc
-    ka,da=features(before)
-    kb,db=features(after)
+            cache.append((image,_geometry_key(scene),keys,desc,smooth));del cache[:-3]
+        return keys,desc,smooth
+    ka,da,smooth_a=features(before)
+    kb,db,smooth_b=features(after)
     diag=dict(features=[len(ka),len(kb)])
     if da is None or db is None:return None,dict(diag,reason='missing_features')
     pairs=cv2.BFMatcher().knnMatch(da,db,k=2)
@@ -112,20 +128,26 @@ def register(before,after,scene,*,cache=None,check=lambda:None):
         median_inlier_pixels=float(np.median(residual[good])),
         scale=float(np.hypot(matrix[0,0],matrix[1,0])),
         angle=float(np.degrees(np.arctan2(matrix[1,0],matrix[0,0]))))
-    result,precise=refine_similarity(before,after,scene,result,check)
+    result,precise=refine_similarity(before,after,scene,result,check,smoothed=(smooth_a,smooth_b))
     diag['subpixel']=precise
     diag.update(scale=float(np.hypot(result[0,0],result[1,0])),
                 angle=float(np.degrees(np.arctan2(result[1,0],result[0,0]))),matrix=result[:2].tolist())
     return result,diag
 
-def period_from_image(image,scene):
+def period_from_image(image,scene,*,check=lambda:None):
+    check()
     l,t,r,b=scene.board;crop=image[t:b,l:r];votes=[]
     sift=cv2.SIFT_create(nfeatures=6000,contrastThreshold=.012)
+    gray=cv2.cvtColor(crop,cv2.COLOR_RGB2GRAY)
+    source=crop.astype(np.float32);aligned=cv2.GaussianBlur(source,(0,0),1.)
     for mask in material_masks(scene):
-        keys,desc=sift.detectAndCompute(cv2.cvtColor(crop,cv2.COLOR_RGB2GRAY),mask.astype(np.uint8)*255)
+        check()
+        keys,desc=sift.detectAndCompute(gray,mask.astype(np.uint8)*255)
+        check()
         if desc is None or len(desc)<2:continue
         vectors=[]
         for i,matches in enumerate(cv2.BFMatcher().knnMatch(desc,desc,k=min(10,len(desc)))):
+            if i%128==0:check()
             for match in matches[1:]:
                 vector=np.asarray(keys[match.trainIdx].pt)-keys[i].pt
                 if match.distance>85 or abs(vector[0])>3 or abs(vector[1])<30:continue
@@ -133,27 +155,27 @@ def period_from_image(image,scene):
         if not vectors:continue
         vectors=np.asarray(vectors);bins=np.rint(vectors/3).astype(int)
         ids,counts=np.unique(bins,return_counts=True)
-        source=crop.astype(np.float32)
         # Compact windows resample the same tile at fractional screen pixels.
         # Raw pixel RMSE then penalizes genuine repetition. Smooth alignment
         # evidence only; color samples and game HEX remain untouched.
-        aligned=cv2.GaussianBlur(source,(0,0),1.)
         y,x=np.where(mask);x=x[::4];y=y[::4]
         for index in np.argsort(counts)[::-1][:8]:
+            check()
             near=np.abs(vectors-ids[index]*3)<4
             if near.sum()<20:continue
             period=float(np.median(vectors[near]));py=y+period;iy=np.floor(py).astype(int)
             valid=iy<crop.shape[0]-1;valid&=mask[np.clip(iy,0,crop.shape[0]-1),x]
             if valid.sum()<80:continue
-            actual=cv2.remap(source,x[valid,None].astype(np.float32),py[valid,None].astype(np.float32),cv2.INTER_LINEAR).reshape(-1,3)
+            actual=_remap_points(source,x[valid],py[valid],check=check)
             rmse=float(np.sqrt(np.mean((actual-source[y[valid],x[valid]])**2)))
-            aligned_actual=cv2.remap(aligned,x[valid,None].astype(np.float32),py[valid,None].astype(np.float32),cv2.INTER_LINEAR).reshape(-1,3)
+            aligned_actual=_remap_points(aligned,x[valid],py[valid],check=check)
             aligned_source=aligned[y[valid],x[valid]]
             aligned_rmse=float(np.sqrt(np.mean((aligned_actual-aligned_source)**2)))
             correlation=float(np.corrcoef(aligned_actual.ravel(),aligned_source.ravel())[0,1])
             if rmse<14 or (aligned_rmse<14 and correlation>.96):
                 votes.append(dict(period=period,votes=int(near.sum()),rmse=rmse,
                     alignment_rmse=aligned_rmse,alignment_correlation=correlation))
+    check()
     if not votes:return None,dict(reason='period_not_observed')
     # The shortest strongly repeating distance is the base period; a twofold
     # repetition is not a different palette. Use its agreeing nominations.

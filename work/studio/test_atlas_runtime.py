@@ -11,6 +11,25 @@ from atlas_runtime import motion, Adapter
 
 
 class RuntimeMotionTests(unittest.TestCase):
+    def test_point_chunks_preserve_interpolated_values_and_abort_on_cancellation(self):
+        import inspect
+        self.assertIn('check',inspect.signature(atlas_runtime._remap_points).parameters)
+        source=np.arange(12*13*3,dtype=np.float32).reshape(12,13,3)
+        px=np.resize(np.linspace(.25,11.5,12,dtype=np.float32),40001)
+        py=np.resize(np.linspace(.75,10.5,12,dtype=np.float32),40001)
+        # Independent legal OpenCV layout, without the tall output used by the
+        # production helper. Check every value and preserve point order.
+        padded_x=np.resize(px,40100).reshape(401,100)
+        padded_y=np.resize(py,40100).reshape(401,100)
+        expected=cv2.remap(source,padded_x,padded_y,cv2.INTER_LINEAR).reshape(-1,3)[:len(px)]
+        np.testing.assert_array_equal(atlas_runtime._remap_points(source,px,py),expected)
+        calls=[]
+        def check():
+            calls.append(True)
+            if len(calls)==2:raise InterruptedError('F9')
+        with self.assertRaisesRegex(InterruptedError,'F9'):
+            atlas_runtime._remap_points(source,px,py,check=check)
+
     def test_large_point_cloud_is_remapped_in_bounded_chunks(self):
         source=np.arange(12*13*3,dtype=np.float32).reshape(12,13,3)
         px=np.resize(np.linspace(0.25,11.5,12,dtype=np.float32),40001)

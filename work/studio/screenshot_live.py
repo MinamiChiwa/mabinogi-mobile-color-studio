@@ -17,7 +17,7 @@ from screenshot_text import read_timer,timer_bar_signal
 def _sampling_check(c):
     c.check()
     if c.owner.consume_retry_request():raise RetryRequested()
-    if c.budget.remaining()<=3:raise TimeEnded()
+    if c.budget.work_remaining()<=3+c.return_cost():raise TimeEnded()
 
 def _wait_board(owner,game_factory,target,activate,*,server=None):
     owner.event('screenshot_progress',stage='waiting',
@@ -83,14 +83,16 @@ def _collect(c,samples=None):
             if np.hypot(response[0,0],response[1,0])>.998:break
         elif not c.relocalize():break
     if samples is None:
-        period,diagnostics=period_from_image(c.frame,c.scene)
+        started=time.monotonic()
+        period,diagnostics=period_from_image(c.frame,c.scene,check=lambda:_sampling_check(c))
+        c.budget.record_cost('period',time.monotonic()-started)
         c.write('period.json',dict(period=period,diagnostics=diagnostics))
         if period is None:
             # One more horizontal view can expose texture nominations hidden
             # by connector masks. A missing period does not claim no target.
             if not c.budget.can_input(c.return_cost()+2.5):return None
             c.drag([(c.scene.board[2]-c.scene.board[0])*.13,0],'period-view')
-            period,diagnostics=period_from_image(c.frame,c.scene)
+            period,diagnostics=period_from_image(c.frame,c.scene,check=lambda:_sampling_check(c))
         if period is None:return None
         old=c.pose.copy();old_known=c.pose_known
         c.reference=c.frame.copy();c.pose=np.eye(3);c.pose_known=True;c.period=period
@@ -101,9 +103,12 @@ def _collect(c,samples=None):
     l,t,r,b=c.scene.board;masks=material_masks(c.scene)
     def add():
         if c.pose_known:
-            samples.add(c.frame[t:b,l:r],masks,c.pose,check=lambda:_sampling_check(c))
-            if hasattr(samples,'visible_field'):
-                samples.visible_field.add_frame(c.frame[t:b,l:r],masks,c.pose,check=lambda:_sampling_check(c))
+            started=time.monotonic()
+            try:
+                samples.add(c.frame[t:b,l:r],masks,c.pose,check=lambda:_sampling_check(c))
+                if hasattr(samples,'visible_field'):
+                    samples.visible_field.add_frame(c.frame[t:b,l:r],masks,c.pose,check=lambda:_sampling_check(c))
+            finally:c.budget.record_cost('assembly',time.monotonic()-started)
     add()
     if samples.frames>5:
         # Retry uses the same canonical samples; new transform measurements
@@ -112,25 +117,27 @@ def _collect(c,samples=None):
         return samples
     spacing=np.asarray(c.scene.markers)[1,0]-np.asarray(c.scene.markers)[0,0]
     for i in range(4):
-        if c.budget.remaining()<c.return_cost()+18:break
+        if c.budget.work_remaining()<c.return_cost()+max(8,c.collection_cost(samples)+7):break
         c.drag([spacing*.38,0],f'scan-min-{i}');add()
         c.progress('capture',current=i+1,total=4,message='正在覆盖重复色板，保留原始颜色点。')
     # Reserve actual positioning time rather than spend a short late entry on
     # a complete high-magnification sweep.
-    if c.budget.remaining()>c.return_cost()+38:
+    if c.budget.work_remaining()>c.return_cost()+max(18,c.collection_cost(samples)+7):
         for i in range(5):
+            if c.budget.work_remaining()<c.return_cost()+c.collection_cost(samples)+8:break
             c.wheel(20,f'magnify-{i}');add()
         for row in range(2):
             for i in range(7):
-                if c.budget.remaining()<c.return_cost()+23:break
+                if c.budget.work_remaining()<c.return_cost()+c.collection_cost(samples)+8:break
                 c.drag([(r-l)*.2*(1 if row==0 else -1),0],f'scan-high-{row}-{i}');add()
                 c.progress('capture',current=row*7+i+1,total=14,
                     message='正在放大采集细小颜色点，采集完成后会自动移动。')
-            if row==0 and c.budget.remaining()>c.return_cost()+25:
+            if row==0 and c.budget.work_remaining()>c.return_cost()+c.collection_cost(samples)+9:
                 c.drag([0,(b-t)*.5],'scan-next-row');add()
     c.write('samples.json',dict(period=samples.period,frames=samples.frames,
-        counts=[len(v) for v in samples.arrays()[0]],scope='observed whole RGB; not actual game HEX'))
-    try:samples.save(c.folder/'raw-sites.npz')
+        counts=[len(v) for v in samples.rows],scope='observed whole RGB; not actual game HEX'))
+    try:
+        if getattr(c,'evidence_writer',None) is not None:samples.save_background(c.folder/'raw-sites.npz',c.evidence_writer)
     except OSError:pass
     return samples
 
@@ -232,14 +239,20 @@ def _search(c,samples):
             c.best['matrix']=np.asarray(c.best['matrix'])@np.linalg.inv(old) if old_known else None
         c.period=None
     c.progress('search','正在计算平移、旋转与缩放方案；最终颜色以游戏实际色码为准。')
-    sites,colors=samples.arrays();markers=np.asarray(c.scene.markers)-c.scene.board[:2]
-    remaining=c.budget.remaining();search_time=min(7,max(.05,(remaining-c.return_cost()-6)*.16))
+    started=time.monotonic()
+    try:sites,colors=samples.arrays(check=lambda:_sampling_check(c))
+    finally:c.budget.record_cost('export',time.monotonic()-started)
+    markers=np.asarray(c.scene.markers)-c.scene.board[:2]
     def check():
-        c.check()
-        if c.owner.consume_retry_request():raise RetryRequested()
+        _sampling_check(c)
     if sample_at is None and hasattr(samples,'color_field'):
         sample_at=getattr(samples,'visible_field',samples.color_field)
-        if hasattr(sample_at,'prepare'):sample_at.prepare(lambda:_sampling_check(c))
+        if hasattr(sample_at,'prepare'):
+            if c.budget.work_remaining()<=c.return_cost()+c.tree_cost(samples)+3:return samples
+            started=time.monotonic()
+            try:sample_at.prepare(lambda:_sampling_check(c))
+            finally:c.budget.record_cost('tree',time.monotonic()-started)
+    remaining=c.budget.work_remaining();search_time=min(7,max(.05,(remaining-c.return_cost()-6)*.16))
     found=solve(sites,colors,samples.period,markers,c.rules,c.pose,search_time,check,sample_at=sample_at)
     c.samples=samples
     c.write('proposals.json',found)
@@ -270,6 +283,10 @@ def _publish(c,reason=None):
         except (PaletteEnded,Interrupted) as exc:
             c.current=None
             reason=reason or ('palette_ended' if isinstance(exc,PaletteEnded) else 'stopped')
+            recovery=c.safe_restore(reason,interruption=exc)
+            if recovery['verified'] and c.current and c.current.get('accepted'):
+                try:c.observe('recovered-final-confirmation')
+                except (PaletteEnded,Interrupted,TimeEnded):c.current=None
         except Exception as exc:
             c.write('final-confirmation-error.json',dict(error=str(exc),traceback=traceback.format_exc()))
             c.current=None;reason=reason or 'verification_error'
@@ -345,26 +362,47 @@ def run_screenshot_search(owner,rules,mode='search',auto=False,activate=False,ta
                     owner.event('native_retry_reset',status='rejected',reason='insufficient_retry_time',backend='screenshot')
                     owner.event('native_retry_available',enabled=False,waiting_for_retry=True,backend='screenshot')
                 if owner.stop.wait(.15):c.check()
-                try:recognize(game.capture(),with_ocr=False,read_colors=False,previous=scene)
-                except ValueError:raise PaletteEnded('染色界面已关闭或结束，已停止自动操作。')
+                previous_frame=c.frame;c.capture('waiting-retry',save=False)
+                # Passive readiness polling must not silently advance the
+                # unregistered pose reference. The next action measures it.
+                c.frame=previous_frame
             else:return result
     except PaletteEnded as exc:
         if c:
-            c.current=None;return _publish(c,'palette_ended')
+            c.current=None;c.safe_restore('palette_ended',interruption=exc)
+            return _publish(c,'palette_ended')
         raise
-    except Interrupted:
+    except Interrupted as exc:
         if c:
-            c.current=None;_publish(c,'interrupted')
+            c.current=None
+            recovery=c.safe_restore('interrupted',interruption=exc)
+            result=_publish(c,'interrupted')
+            if recovery['verified']:return result
         raise
     except Exception as exc:
         if c:
             c.write('error.json',dict(error=str(exc),traceback=traceback.format_exc()))
-            # Ordinary processing errors do not erase a freshly readable game
-            # result. Final result distinguishes it from an old best frame.
-            try:c.observe('error-current-actual')
-            except (Interrupted,PaletteEnded):c.current=None
-            except Exception:c.current=None
-            return _publish(c,'processing_error')
+            reason='processing_error';recovery=dict(attempted=False)
+            try:
+                c.check()
+                # Processing failure after completed capture/registration can
+                # leave a worse zoomed position. Use the measured best return;
+                # a failed gesture with unknown completion cannot authorize it.
+                if not c.input_in_progress and c.best:
+                    recovery['attempted']=True;c.restore()
+                if c.current is None:c.observe('error-current-actual')
+            except (Interrupted,PaletteEnded) as stopped:
+                c.current=None;reason='interrupted' if isinstance(stopped,Interrupted) else 'palette_ended'
+            except Exception as restore_error:
+                recovery['error']=type(restore_error).__name__+': '+str(restore_error)
+                try:c.observe('error-current-actual')
+                except (Interrupted,PaletteEnded) as stopped:
+                    c.current=None;reason='interrupted' if isinstance(stopped,Interrupted) else 'palette_ended'
+                except Exception:c.current=None
+            recovery['verified']=bool(c.current and c.current['verified'])
+            c.write('error-recovery.json',recovery)
+            return _publish(c,reason)
         raise
     finally:
         if game is not None:game.release()
+        if c is not None:c.close()

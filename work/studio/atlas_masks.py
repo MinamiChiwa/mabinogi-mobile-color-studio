@@ -6,6 +6,7 @@ formal atlas path uses geometry-based exclusion with the same conservative
 width for accumulation, validation and registration.
 """
 from pathlib import Path
+from functools import lru_cache
 
 import numpy as np
 from PIL import Image, ImageDraw
@@ -27,7 +28,29 @@ def board_markers(scene):
     return markers, spacing, (right - left, bottom - top)
 
 
-def board_texture_mask(scene, *, stem_half_width=None, ring_radius=None,
+def _geometry_key(scene):
+    return (tuple(_field(scene,'board')),
+            tuple(tuple(p) for p in _field(scene,'markers')),
+            tuple(tuple(p) for p in (scene.get('cards',[]) if isinstance(scene,dict) else getattr(scene,'cards',[]))))
+
+
+@lru_cache(maxsize=4)
+def _cached_mask(kind,key,options):
+    scene=dict(zip(('board','markers','cards'),key))
+    result=(_make_texture_mask if kind=='texture' else _make_material_masks)(scene,**dict(options))
+    result.setflags(write=False)
+    return result
+
+
+def board_texture_mask(scene, **options):
+    return _cached_mask('texture',_geometry_key(scene),tuple(sorted(options.items())))
+
+
+def material_masks(scene, **options):
+    return _cached_mask('material',_geometry_key(scene),tuple(sorted(options.items())))
+
+
+def _make_texture_mask(scene, *, stem_half_width=None, ring_radius=None,
                        edge_margin=None, seam_half_width=None):
     """Return valid texture pixels in board-local coordinates.
 
@@ -38,7 +61,7 @@ def board_texture_mask(scene, *, stem_half_width=None, ring_radius=None,
     All dimensions are geometry-only, independent of sampled colours.
     """
     markers, spacing, (w, h) = board_markers(scene)
-    y, x = np.mgrid[:h, :w]
+    y, x = np.ogrid[:h, :w]
     # A two-region board has wider columns at the same window scale. Its
     # connector/ring size still follows the whole board, not that extra gap.
     unit = spacing * len(markers) / (3 * 166.)
@@ -48,7 +71,7 @@ def board_texture_mask(scene, *, stem_half_width=None, ring_radius=None,
     seam_half_width = max(1, round(8 * unit)) if seam_half_width is None else int(seam_half_width)
     if half < 1 or radius < 1 or edge_margin < 0 or seam_half_width < 0:
         raise ValueError("Mask dimensions must be positive")
-    mask = (x >= edge_margin) & (x < w - edge_margin)
+    mask = np.broadcast_to((x >= edge_margin) & (x < w - edge_margin),(h,w)).copy()
     mask &= (y >= edge_margin) & (y < h - edge_margin)
     for mx, my in markers:
         # The connector can appear at any vertical position in a later frame.
@@ -70,7 +93,7 @@ def board_texture_mask(scene, *, stem_half_width=None, ring_radius=None,
     return mask
 
 
-def material_masks(scene, *, stem_half_width=None, ring_radius=None,
+def _make_material_masks(scene, *, stem_half_width=None, ring_radius=None,
                    edge_margin=None, seam_half_width=None, side_margin=None):
     """Return one same-material mask per actual colour-pick marker."""
     markers, spacing, _ = board_markers(scene)
@@ -79,7 +102,7 @@ def material_masks(scene, *, stem_half_width=None, ring_radius=None,
                                ring_radius=ring_radius, edge_margin=edge_margin,
                                seam_half_width=seam_half_width)
     _, _, (w, h) = board_markers(scene)
-    y, x = np.mgrid[:h, :w]
+    x = np.arange(w)[None,:]
     masks=[]
     for mx, my in markers:
         masks.append(clean & (x > mx - spacing / 2 + side_margin)
