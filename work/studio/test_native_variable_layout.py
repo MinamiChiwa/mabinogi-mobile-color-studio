@@ -1,5 +1,7 @@
+from contextlib import ExitStack
 """Physical layout regression; synthetic pixel fixtures never send game input."""
 import inspect
+import json
 import math
 import tempfile
 import unittest
@@ -11,21 +13,21 @@ import numpy as np
 from native_live import project_probe_io as io
 
 
-def palette_frame(extent=(1280,960),scale=1.,origin=(700,420)):
+def palette_frame(extent=(1280,960),scale=1.,origin=(700,420),*,region_count=3,stem_width=2,colors=None):
     """Draw cards/stems/rings at a measured board, independently of client size."""
     w,h=extent;l,t=origin;side=round(500*scale)
     image=np.full((h,w,3),60,np.uint8)
     board=[l,t,l+side,t+side]
     image[t:t+side,l:l+side]=(40,50,60)
-    colors=['#112233','#445566','#778899'];centers=[];markers=[]
+    colors=(['#112233','#445566','#778899'] if colors is None else colors)[:region_count];centers=[];markers=[]
     for index,color in enumerate(colors):
-        cx=round(l+(index+.5)*side/3);cw=round(81*scale);cy=round(t-105*scale)
+        cx=round(l+(index+.5)*side/region_count);cw=round(81*scale);cy=round(t-105*scale)
         x=cx-cw//2;card=(x,cy,cw,cw)
         image[cy:cy+cw,x:x+cw]=255
         sample=tuple(int(color[i:i+2],16) for i in (1,3,5))
         image[cy+round(cw*.17):cy+round(cw*.68),x+round(cw*.17):x+round(cw*.83)]=sample
         my=round(t+(120,260,350)[index]*scale)
-        cv2.line(image,(cx,cy+cw),(cx,my), (255,255,255),max(1,round(2*scale)))
+        cv2.line(image,(cx,cy+cw),(cx,my), (255,255,255),max(1,round(stem_width*scale)))
         cv2.circle(image,(cx,my),max(3,round(8*scale)),(255,255,255),-1)
         cv2.circle(image,(cx,my),max(1,round(5*scale)),sample,-1)
         centers.append(cx);markers.append((cx,my))
@@ -33,6 +35,28 @@ def palette_frame(extent=(1280,960),scale=1.,origin=(700,420)):
 
 
 class NativeVariableLayoutTests(unittest.TestCase):
+    def test_connected_stems_are_separated_at_actual_ui_scale_for_two_and_three_cards(self):
+        for scale in (.55,.75,1.,1.4,2.,3.):
+            for count in (2,3):
+                with self.subTest(scale=scale,count=count):
+                    image,board,_,centers,markers=palette_frame((3840,2160),scale,(1800,500),
+                        region_count=count,stem_width=3)
+                    try:scene=io._recognize_native_layout(image,board,count)
+                    except ValueError as exc:self.fail('Connected card/stem rejected: '+str(exc))
+                    self.assertEqual(len(scene.cards),count)
+                    for card,cx,marker,want in zip(scene.cards,centers,scene.markers,markers):
+                        self.assertAlmostEqual(card[0]+card[2]/2,cx,delta=max(2,scale))
+                        self.assertAlmostEqual(marker[1],want[1],delta=max(2,scale))
+
+    def test_bright_swatches_do_not_remove_white_cards_or_invent_an_occluded_third_card(self):
+        image,board,_,_,_=palette_frame((1920,1080),1.4,(1120,300),stem_width=3,
+            colors=['#FFFFFF','#FDFDFD','#000000'])
+        try:scene=io._recognize_native_layout(image,board,3)
+        except ValueError as exc:self.fail('Bright cards rejected: '+str(exc))
+        self.assertEqual(len(scene.cards),3)
+        x,y,w,h=scene.cards[1];image[y-3:y+h+4,x-3:x+w+4]=0
+        with self.assertRaises(ValueError):io._recognize_native_layout(image,board,3)
+
     def read(self,image,board,**kwargs):
         options=dict(deadline=100.,clock=lambda:1.,timer_mode='skip')
         # Before implementation, fail on the physical behavior instead of a
@@ -88,7 +112,23 @@ class NativeVariableLayoutTests(unittest.TestCase):
         with self.assertRaises(ValueError):self.read(image,[100,500,600,1000])
 
     def test_blank_frame_cannot_be_filled_from_native_geometry(self):
-        with self.assertRaises(ValueError):self.read(np.zeros((2160,3840,3),np.uint8),[3200,1500,3700,2000])
+        from native_live.dye_visual_readiness import NativeLayoutNotReady
+        from native_live.project_closed_loop_io import ProjectClosedLoopIO
+        # Exercise the diagnostic writer with the real failed segmentation;
+        # replace only the process/capture boundary, without game input.
+        image=np.zeros((2160,3840,3),np.uint8);board=[3200,1500,3700,2000]
+        with tempfile.TemporaryDirectory() as tmp:
+            adapter=ProjectClosedLoopIO.__new__(ProjectClosedLoopIO)
+            adapter.folder=__import__('pathlib').Path(tmp);adapter.input_attempts=0
+            with patch.object(io.ProjectProbeIO,'frames',side_effect=lambda *args,**kwargs:self.read(image,board)):
+                with self.assertRaises(NativeLayoutNotReady) as caught:adapter.frames('initial',100.)
+            diagnostic=caught.exception.layout_diagnostic
+            saved=json.loads((adapter.folder/'initial.visual_failure.json').read_text(encoding='utf-8'))
+            self.assertTrue(saved['retryable_observation']);self.assertEqual(saved['inputs_sent'],0)
+            self.assertEqual(saved['layout_diagnostic'],diagnostic)
+            self.assertEqual(diagnostic['native_board'],board)
+            self.assertEqual(len(diagnostic['attempts']),3)
+            self.assertTrue(all('error' in row for row in diagnostic['attempts']))
 
     def test_native_board_must_be_finite_square_and_inside_frame(self):
         image,board,_,_,_=palette_frame()
@@ -118,10 +158,10 @@ class NativeVariableLayoutTests(unittest.TestCase):
             motion=dict(binding={},settings={}),window_context=dict(window=dict(client_size_physical=[3840,2160])),
             window_mapping_candidate=dict(client_board_candidate=board))
         game=SimpleNamespace(check=lambda:None,capture=lambda:image.copy())
-        with tempfile.TemporaryDirectory() as folder:
+        with tempfile.TemporaryDirectory() as folder,ExitStack() as cleanup:
             adapter=io.ProjectProbeIO(None,dict(session_deadline_monotonic=float('inf'),baseline=observation),
                 folder,game=game,f9_pressed=lambda:False)
-            adapter.check=lambda deadline:None;adapter._input_guard=lambda:None
+            adapter.check=lambda deadline:None;adapter._input_guard=lambda:None;cleanup.callback(adapter.release)
             adapter.last_client_hex=codes;adapter.timer_grace_until=float('inf')
             with patch.object(io,'read_codes',return_value=[None]*3):
                 try:frames=adapter.frames('layout',float('inf'))
@@ -137,10 +177,10 @@ class NativeVariableLayoutTests(unittest.TestCase):
             window_context=dict(window=dict(client_size_physical=[3840,2160])),
             window_mapping_candidate=dict(client_board_candidate=board))
         game=SimpleNamespace(check=lambda:None,capture=lambda:image)
-        with tempfile.TemporaryDirectory() as folder:
+        with tempfile.TemporaryDirectory() as folder,ExitStack() as cleanup:
             adapter=io.ProjectProbeIO(None,dict(session_deadline_monotonic=float('inf'),baseline=observation),
                 folder,game=game,f9_pressed=lambda:False)
-            adapter.check=lambda deadline:None;adapter._input_guard=lambda:None
+            adapter.check=lambda deadline:None;adapter._input_guard=lambda:None;cleanup.callback(adapter.release)
             with self.assertRaisesRegex(ValueError,'physical client extent mismatch'):adapter.frames('layout',float('inf'))
 
 

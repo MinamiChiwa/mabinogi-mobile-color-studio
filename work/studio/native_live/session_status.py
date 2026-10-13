@@ -2,9 +2,15 @@
 import copy,json
 
 
+class ObservationInterrupted(InterruptedError):
+    """A capture transport failed while F9/focus/session guards still pass."""
+    recoverable=True
+
+
 class SessionStatusError(ValueError):
     stop_reason='session_observation_unstable'
     classification='retryable_observation'
+    recoverable=True
     def __init__(self,message,diagnostic):
         super().__init__(message)
         self.diagnostic=diagnostic
@@ -13,11 +19,13 @@ class SessionStatusError(ValueError):
 class PaletteEnded(SessionStatusError):
     stop_reason='palette_ended'
     classification='normal_stop'
+    recoverable=False
 
 
 class SessionBindingChanged(SessionStatusError):
     stop_reason='session_binding_changed'
     classification='binding_changed'
+    recoverable=False
 
 
 class SessionProbeUnstable(SessionStatusError):

@@ -1,3 +1,4 @@
+from contextlib import ExitStack
 """Exact screenshot-card reuse keeps fresh frames and native color checks."""
 import inspect
 import tempfile
@@ -110,9 +111,9 @@ class ProbeCardCacheTests(unittest.TestCase):
         captures=[]
         def capture():captures.append(True);return self.image.copy()
         game=SimpleNamespace(check=lambda:None,capture=capture)
-        with tempfile.TemporaryDirectory() as folder:
+        with tempfile.TemporaryDirectory() as folder,ExitStack() as cleanup:
             project=io.ProjectProbeIO(None,baseline,folder,game=game,f9_pressed=lambda:False)
-            project.check=lambda deadline:None;project._input_guard=lambda:None
+            project.check=lambda deadline:None;project._input_guard=lambda:None;cleanup.callback(project.release)
             project.last_client_hex=list(self.codes);project.hex_fallback=self.glyphs;project.timer_grace_until=float('inf')
             with patch.object(io,'_recognize_native_layout',return_value=self.scene):
                 initial=project.frames('initial',float('inf'))

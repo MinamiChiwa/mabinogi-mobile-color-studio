@@ -1,4 +1,5 @@
 """Color conflicts need independent screenshot text, never expected-digit repair."""
+from contextlib import ExitStack
 import copy
 import hashlib
 import json
@@ -16,7 +17,7 @@ import test_native_probe_card_cache as cache_fixture
 
 
 class NativeHexConflictTests(unittest.TestCase):
-    def project(self,folder):
+    def project(self,folder,cleanup):
         fixture=cache_fixture.ProbeCardCacheTests();fixture.setUp()
         # The last glyph differs by only two in RGB, so both plausible OCR
         # codes pass the old swatch gate; the pixels must decide the character.
@@ -28,14 +29,15 @@ class NativeHexConflictTests(unittest.TestCase):
         io=probe.ProjectProbeIO(None,dict(session_deadline_monotonic=float('inf'),baseline=observation),folder,
             game=SimpleNamespace(check=lambda:None,capture=lambda:fixture.image.copy()),f9_pressed=lambda:False)
         io.check=lambda deadline:None;io._input_guard=lambda:None;io.last_client_hex=fixture.codes
+        cleanup.callback(io.release)
         io.timer_grace_until=float('inf')
         decoded=dict(hex=['#112233','#445566','#725148'],cards=fixture.cards,markers=fixture.scene.markers,
             visual_board=fixture.scene.board,remaining_seconds=None,hex_cache_hits=[False]*3)
         return io,fixture,decoded
 
     def test_different_threshold_text_resolves_a_plausible_low_nibble_misread(self):
-        with tempfile.TemporaryDirectory() as folder:
-            io,fixture,decoded=self.project(folder);calls=[]
+        with tempfile.TemporaryDirectory() as folder,ExitStack() as cleanup:
+            io,fixture,decoded=self.project(folder,cleanup);calls=[]
             def text(image,cards,**kwargs):
                 self.assertEqual(cards,[fixture.cards[2]])
                 self.assertFalse(any('native' in key or 'expected' in key for key in kwargs))
@@ -50,8 +52,8 @@ class NativeHexConflictTests(unittest.TestCase):
 
     def test_failed_adjudication_does_not_fill_expected_digits_and_saves_evidence(self):
         for result in (None,'#725148'):
-            with self.subTest(result=result),tempfile.TemporaryDirectory() as folder:
-                io,fixture,decoded=self.project(folder)
+            with self.subTest(result=result),tempfile.TemporaryDirectory() as folder,ExitStack() as cleanup:
+                io,fixture,decoded=self.project(folder,cleanup)
                 with patch.object(probe,'read_probe_frame',side_effect=lambda *a,**kw:copy.deepcopy(decoded)), \
                      patch('screenshot_text.read_visible',return_value=([result],[dict(reads=[])])):
                     with self.assertRaisesRegex(ValueError,'Screenshot and checkpoint HEX disagree'):
@@ -64,8 +66,8 @@ class NativeHexConflictTests(unittest.TestCase):
 
     def test_disproved_card_cache_is_evicted_and_only_confirmed_text_is_stored(self):
         for confirmed in (None,'#72514A'):
-            with self.subTest(confirmed=confirmed),tempfile.TemporaryDirectory() as folder:
-                io,fixture,decoded=self.project(folder)
+            with self.subTest(confirmed=confirmed),tempfile.TemporaryDirectory() as folder,ExitStack() as cleanup:
+                io,fixture,decoded=self.project(folder,cleanup)
                 card=fixture.cards[2];x,y,w,h=card;pixels=fixture.image[y:y+h,x:x+w]
                 key=(pixels.shape,hashlib.sha256(pixels.tobytes()).hexdigest())
                 io.card_cache[key]='#725148'
@@ -79,24 +81,24 @@ class NativeHexConflictTests(unittest.TestCase):
 
     def test_stop_or_deadline_during_conflict_read_is_not_suppressed(self):
         for error in (InterruptedError('F9'),TimeoutError('actual deadline')):
-            with self.subTest(error=type(error).__name__),tempfile.TemporaryDirectory() as folder:
-                io,fixture,decoded=self.project(folder)
+            with self.subTest(error=type(error).__name__),tempfile.TemporaryDirectory() as folder,ExitStack() as cleanup:
+                io,fixture,decoded=self.project(folder,cleanup)
                 with patch.object(probe,'read_probe_frame',side_effect=lambda *a,**kw:copy.deepcopy(decoded)), \
                      patch('screenshot_text.read_visible',side_effect=error):
                     with self.assertRaises(type(error)):io.frames('stopped',float('inf'))
 
     def test_diagnostic_write_failure_does_not_replace_stop_or_deadline(self):
         for error in (InterruptedError('F9'),TimeoutError('actual deadline')):
-            with self.subTest(error=type(error).__name__),tempfile.TemporaryDirectory() as folder:
-                io,fixture,decoded=self.project(folder)
+            with self.subTest(error=type(error).__name__),tempfile.TemporaryDirectory() as folder,ExitStack() as cleanup:
+                io,fixture,decoded=self.project(folder,cleanup)
                 with patch.object(probe,'read_probe_frame',side_effect=lambda *a,**kw:copy.deepcopy(decoded)), \
                      patch('screenshot_text.read_visible',side_effect=error), \
                      patch.object(Path,'write_text',side_effect=OSError('disk full')):
                     with self.assertRaises(type(error)):io.frames('stopped',float('inf'))
 
     def test_confirmed_text_outside_original_swatch_tolerance_is_not_accepted(self):
-        with tempfile.TemporaryDirectory() as folder:
-            io,fixture,decoded=self.project(folder)
+        with tempfile.TemporaryDirectory() as folder,ExitStack() as cleanup:
+            io,fixture,decoded=self.project(folder,cleanup)
             fixture.image[100:180,500:580]=(120,81,73)
             with patch.object(probe,'read_probe_frame',side_effect=lambda *a,**kw:copy.deepcopy(decoded)), \
                  patch('screenshot_text.read_visible',return_value=(['#72514A'],[dict(reads=[])])):
@@ -105,8 +107,8 @@ class NativeHexConflictTests(unittest.TestCase):
             self.assertEqual(io.card_cache,{})
 
     def test_matching_frames_keep_fast_path_without_second_text_reader(self):
-        with tempfile.TemporaryDirectory() as folder:
-            io,fixture,decoded=self.project(folder);decoded['hex']=fixture.codes
+        with tempfile.TemporaryDirectory() as folder,ExitStack() as cleanup:
+            io,fixture,decoded=self.project(folder,cleanup);decoded['hex']=fixture.codes
             with patch.object(probe,'read_probe_frame',side_effect=lambda *a,**kw:copy.deepcopy(decoded)), \
                  patch('screenshot_text.read_visible',side_effect=AssertionError('No conflict needs rereading')):
                 frames=io.frames('matching',float('inf'))

@@ -1,3 +1,4 @@
+from contextlib import ExitStack
 """Two physical regions use real screenshot glyphs and never invent a third."""
 import inspect
 import tempfile
@@ -135,11 +136,11 @@ class NativeTwoRegionVisualTests(unittest.TestCase):
             motion=dict(binding={},settings={}),window_context=dict(window=dict(client_size_physical=[1600,1300])),
             window_mapping_candidate=dict(client_board_candidate=board))
         for explicit_count in (False,True):
-            with self.subTest(explicit_count=explicit_count),tempfile.TemporaryDirectory() as folder:
+            with self.subTest(explicit_count=explicit_count),tempfile.TemporaryDirectory() as folder,ExitStack() as cleanup:
                 if explicit_count:observation['region_count']=2
                 io=probe.ProjectProbeIO(None,dict(session_deadline_monotonic=float('inf'),baseline=observation),
                     folder,game=SimpleNamespace(check=lambda:None,capture=lambda:image),f9_pressed=lambda:False)
-                io.check=lambda deadline:None;io._input_guard=lambda:None
+                io.check=lambda deadline:None;io._input_guard=lambda:None;cleanup.callback(io.release)
                 io.last_client_hex=codes;io.hex_fallback=read_card_glyphs;io.timer_grace_until=float('inf')
                 frames=io.frames('initial',float('inf'))
                 self.assertEqual([frame['hex'] for frame in frames],[codes,codes])

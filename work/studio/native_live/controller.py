@@ -285,6 +285,61 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
             input_before=before,input_after=after,screenshot_verified=False))
         emit('native_observed',colors=cp['client_hex'],label=label,screenshot_verified=False)
         guard(phase_deadline);costs['native'].append(max(0.,clock()-began));return cp
+
+    def recover_best_failure(reason):
+        """A local phase failure yields to a fresh measured return, never F9."""
+        nonlocal cp,frames,current,retry_suppressed,best_observed
+        recovery=dict(reason=reason,attempted=False,verified=False)
+        result['failure_recovery']=recovery
+        if context is None or best_observed is None:return False
+        saved_retry=retry_suppressed;retry_suppressed=True
+        try:
+            # Release does not establish a pose. IO then checks the original
+            # active session, process/window binding and real deadline again.
+            io.release();guard()
+            if getattr(io,'_performing_input',False):return False
+            recovery['attempted']=True
+            anchor=best_observed['checkpoint']
+            for attempt in range(2):
+                guard();fresh=observe_native('failure_return_'+str(attempt)+'_reference',end)
+                if observed_quality(fresh['client_hex'],rules)<=observed_quality(anchor['client_hex'],rules):
+                    cp,frames=observe_resilient('failure_return_current',end)
+                else:
+                    native,visual,preparation=phase_allowances(costs)
+                    available=end-clock()-visual-preparation-3.
+                    if available<=0:break
+                    row=prepare_retry_recovery(context,fresh,anchor,rules,
+                        deadline=min(end-visual-preparation-3.,clock()+min(4.,available*.35)),
+                        clock=clock,check=planning_guard)
+                    if row is None:break
+                    reserve_route(row,'restore_best',include_revalidation=False)
+                    reference=fresh;route=row['input_route']
+                    for index,gesture in enumerate(route):
+                        cp,frames,_=submit(gesture,'failure_return_'+str(attempt)+'_step_'+str(index),
+                            reference,'restore_best',visual_required=index==len(route)-1,phase_deadline=end)
+                        reference=cp
+                    if not route:cp,frames=observe_resilient('failure_return_current',end)
+                if (complete_screenshot(cp,frames) and observed_quality(cp['client_hex'],rules)<=
+                        observed_quality(anchor['client_hex'],rules)):
+                    if observed_quality(cp['client_hex'],rules)<observed_quality(anchor['client_hex'],rules):
+                        best_observed=copy.deepcopy(current)
+                    recovery.update(verified=True,actual_colors=list(cp['client_hex']))
+                    return True
+            recovery['status']='unconfirmed';return False
+        except SessionStatusError as exc:
+            recovery.update(blocked=exc.stop_reason,diagnostic=copy.deepcopy(exc.diagnostic));invalidate_current()
+            result.update(stop_reason=exc.stop_reason,session_stop_reason=exc.stop_reason,
+                session_stop_classification=exc.classification,session_diagnostic=copy.deepcopy(exc.diagnostic),
+                error=type(exc).__name__+': '+str(exc))
+        except InterruptedError as exc:
+            recovery['blocked']='InterruptedError: '+str(exc);invalidate_current()
+            result.update(stop_reason='interrupted',error=str(exc))
+        except (TimeoutError,GoalStop) as exc:
+            recovery['blocked']=type(exc).__name__+': '+str(exc);invalidate_current()
+        except Exception as exc:
+            recovery['error']=type(exc).__name__+': '+str(exc);invalidate_current()
+        finally:retry_suppressed=saved_retry
+        return False
     def submit(gesture,label,fresh,purpose,*,visual_required=True,phase_deadline=None,retry_route=None):
         nonlocal current
         if retry_route is None:validate_research_gesture(gesture,geometry.board)
@@ -1387,7 +1442,9 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                 guard()
                 if clock()>=visual_end:raise GoalStop('initial_visual_timeout')
                 result['initial_visual_retries']+=1
-                emit('initial_visual_wait',attempt=attempt+1,error=str(exc),waiting_deadline=visual_end)
+                result['initial_layout_diagnostic']=getattr(exc,'layout_diagnostic',None)
+                emit('initial_visual_wait',attempt=attempt+1,error=str(exc),waiting_deadline=visual_end,
+                    layout_diagnostic=result['initial_layout_diagnostic'])
                 pause(min(.25,max(0.,visual_end-clock())))
         else:raise GoalStop('initial_visual_timeout')
         geometry=InputGeometry(cp['board'],cp['local_size'],'windows_legacy_mouse_pixels',cp.get('pixel_mapping'))
@@ -1430,6 +1487,7 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
         emit('session_status',stop_reason=exc.stop_reason,classification=exc.classification,
             changed_fields=exc.diagnostic.get('changed_fields',[]),
             diagnostic_file=exc.diagnostic.get('diagnostic_file'))
+        if getattr(exc,'recoverable',False):recover_best_failure(exc.stop_reason)
     except GoalStop as exc:
         reason=str(exc);result['stop_reason']=reason
         # Budget and quota stops do not themselves invalidate a completed read.
@@ -1438,13 +1496,22 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                 'insufficient_route_actions','insufficient_compromise_actions')
                 or current is None or not complete_screenshot(current['checkpoint'],current.get('frames'))):
             invalidate_current()
+        # An incomplete gesture or unconfirmed button release is terminal.
+        # Re-reading a pose must not authorize another gesture after that fault.
+        if reason in ('insufficient_time','not_found_in_budget','round_limit','insufficient_route_actions'):
+            if best_observed is not None and (current is None or observed_quality(current['checkpoint']['client_hex'],rules)>
+                    observed_quality(best_observed['checkpoint']['client_hex'],rules)):
+                recover_best_failure(reason)
     except InterruptedError as exc:
         invalidate_current();result.update(stop_reason='interrupted',error=str(exc))
+        if getattr(exc,'recoverable',False):recover_best_failure('capture_interrupted')
     except TimeoutError as exc:
         invalidate_current();result.update(stop_reason='insufficient_time',error=str(exc))
+        recover_best_failure('phase_timeout')
     except (ValueError,OSError,RuntimeError,KeyError) as exc:
         invalidate_current()
         result.update(stop_reason='observation_failed',error=type(exc).__name__+': '+str(exc))
+        if isinstance(exc,(VisualNotReady,OSError,RuntimeError)):recover_best_failure('recoverable_observation')
     except Exception as exc:
         invalidate_current()
         result.update(stop_reason='internal_error',error=type(exc).__name__+': '+str(exc),

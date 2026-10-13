@@ -348,10 +348,7 @@ class SessionStatusGoalTests(unittest.TestCase):
         self.assertFalse(result['screenshot_verified'])
     def test_generic_stop_after_verified_initial_keeps_history_without_current_match(self):
         for error,reason in ((InterruptedError('F9'),'interrupted'),
-                (TimeoutError('session deadline'),'insufficient_time'),
-                (OSError('process unavailable'),'observation_failed'),
                 (ValueError('invalid live read'),'observation_failed'),
-                (RuntimeError('capture unavailable'),'observation_failed'),
                 (KeyError('missing live data'),'observation_failed')):
             with self.subTest(error=type(error).__name__):
                 io=RecordedGoalIO()
@@ -365,6 +362,32 @@ class SessionStatusGoalTests(unittest.TestCase):
                 self.assertEqual(result['actual_colors'],[None,None,None])
                 self.assertEqual(result['outcome'],'stopped');self.assertTrue(result['last_verified_screenshot'])
                 self.assertEqual(io.released,1)
+    def test_recoverable_failure_requires_new_actual_read_before_accepting_current_color(self):
+        for error,reason in ((TimeoutError('local phase deadline'),'insufficient_time'),
+                (OSError('transient read failure'),'observation_failed'),
+                (RuntimeError('transient capture failure'),'observation_failed')):
+            with self.subTest(error=type(error).__name__):
+                io=RecordedGoalIO();original=io.frames
+                initial_time=io.current['frames'][-1]['captured_monotonic']
+                def frames(label,deadline):
+                    values=original(label,deadline)
+                    first=initial_time+io.reads
+                    for i,frame in enumerate(values):frame['captured_monotonic']=first+i*.1
+                    io.now=values[-1]['captured_monotonic']+.01
+                    return values
+                io.frames=frames
+                rules=[dict(enabled=True,exact=True,colors=[c],tolerance=0.) for c in io.current['checkpoint']['client_hex']]
+                def event(row):
+                    if row['event']=='native_retry_available' and row['reason']=='searching':raise error
+                result=run_goal_loop(io,io.session,io.settings,rules,engineering_deadline=io.end,
+                    clock=io.clock,pause=io.pause,retry_requested=lambda:False,event=event)
+                self.assertEqual(result['stop_reason'],reason,result.get('error'))
+                self.assertTrue(result['failure_recovery']['verified'])
+                self.assertTrue(result['verified']);self.assertTrue(result['accepted'])
+                self.assertGreaterEqual(io.reads,2)
+                self.assertGreater(result['current']['frames'][-1]['captured_monotonic'],initial_time)
+                self.assertEqual(io.actions,[])
+                self.assertEqual(result['actual_colors'],io.current['checkpoint']['client_hex'])
     def test_unknown_input_goal_stop_cannot_reaccept_a_cached_matching_color(self):
         from native_live.controller import GoalStop
         io=RecordedGoalIO()

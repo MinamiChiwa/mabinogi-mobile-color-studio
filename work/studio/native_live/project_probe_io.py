@@ -98,17 +98,29 @@ def _recognize_native_layout(image,board,region_count=3):
     # a large desktop can still contain small, fully visible cards.
     left=max(0,math.floor(l-side*.06));top=max(0,math.floor(t-side*.30))
     right=min(w,math.ceil(r+side*.06));bottom=min(h,math.ceil(b+side*.03))
-    scene=recognize(image[top:bottom,left:right],with_ocr=False,region_count=region_count)
-    scene.cards=[(x+left,y+top,cw,ch) for x,y,cw,ch in scene.cards]
-    scene.markers=[(x+left,y+top) for x,y in scene.markers]
-    vl,vt,vr,vb=scene.board;scene.board=(vl+left,vt+top,vr+left,vb+top)
-    centers=[c[0]+c[2]/2 for c in scene.cards]
-    tolerance=4*max(1.,side/499.2)
-    if len(centers)!=region_count or max(abs(x-(l+(i+.5)*side/region_count)) for i,x in enumerate(centers))>tolerance:
-        raise ValueError('Visual cards disagree with native board')
-    if max(abs(a-v) for a,v in zip(board,scene.board))>max(6.,side*.025):
-        raise ValueError('Visual board disagrees with native board')
-    return scene
+    # A reference card is ~81 px on a 500 px board. Use the measured board
+    # scale rather than ROI dimensions; cropping must not shrink the opening
+    # kernel and leave a card connected to its long picker stem.
+    diagnostic=dict(native_board=list(board),roi=[left,top,right,bottom],
+        region_count=region_count,card_width=side*81/500,attempts=[])
+    for ratio in (.065,.09,.12):
+        attempt=dict(opening_ratio=ratio);diagnostic['attempts'].append(attempt)
+        try:
+            scene=recognize(image[top:bottom,left:right],with_ocr=False,region_count=region_count,
+                card_width=diagnostic['card_width'],opening_ratio=ratio,card_diagnostic=attempt)
+            scene.cards=[(x+left,y+top,cw,ch) for x,y,cw,ch in scene.cards]
+            scene.markers=[(x+left,y+top) for x,y in scene.markers]
+            vl,vt,vr,vb=scene.board;scene.board=(vl+left,vt+top,vr+left,vb+top)
+            centers=[c[0]+c[2]/2 for c in scene.cards]
+            tolerance=4*max(1.,side/499.2)
+            if len(centers)!=region_count or max(abs(x-(l+(i+.5)*side/region_count)) for i,x in enumerate(centers))>tolerance:
+                raise ValueError('Visual cards disagree with native board')
+            if max(abs(a-v) for a,v in zip(board,scene.board))>max(6.,side*.025):
+                raise ValueError('Visual board disagrees with native board')
+            return scene
+        except ValueError as exc:attempt['error']=str(exc)
+    from .dye_visual_readiness import NativeLayoutNotReady
+    raise NativeLayoutNotReady(diagnostic)
 
 
 def read_probe_frame(image,*,deadline,check=lambda:None,clock=time.monotonic,previous_timer=None,captured_at=None,hex_fallback=None,
@@ -275,6 +287,7 @@ class ProjectProbeIO:
         raise error_type(message,diagnostic)
 
     def _check_observed_session(self,observed,stage,*,expected=None,full_binding=False):
+        original_observed=observed
         expected=self.reference['baseline'] if expected is None else expected
         self._input_guard()
         identity=self.backend.process_identity()
@@ -286,6 +299,17 @@ class ProjectProbeIO:
         if json.dumps(identity)!=json.dumps(expected['process_identity']):
             self._session_stop(SessionBindingChanged,observed,stage,expected=expected,changed_fields=['process_identity'])
         if observed.get('active') is False:
+            # No input occurs while confirming an inactive read. A returning
+            # observation must retain the original token/process/window chain.
+            for attempt in range(2):
+                self._input_guard()
+                if time.monotonic()>=self.deadline:raise TimeoutError('Inactive confirmation deadline expired')
+                time.sleep(min(.05,max(0.,self.deadline-time.monotonic())))
+                observed=(self.backend.observe_motion(self.reference['instance_address'],self.deadline,self._input_guard,
+                    include_geometry=True,include_window=True) if full_binding else
+                    self.backend.probe(self.reference['instance_address'],self.deadline,self._input_guard))
+                if observed.get('active') is not False:
+                    return self._check_observed_session(observed,stage,expected=expected,full_binding=full_binding)
             self._session_stop(PaletteEnded,observed,stage,expected=expected)
         if observed.get('active') is not True:
             self._session_stop(SessionProbeUnstable,observed,stage,expected=expected,changed_fields=['active'])
@@ -296,21 +320,25 @@ class ProjectProbeIO:
             first,last=json.loads(_binding(expected)),json.loads(_binding(observed))
             fields=[name for index,name in ((2,'motion_binding'),(3,'input_settings'),(4,'window_context')) if first[index]!=last[index]]
             self._session_stop(SessionBindingChanged,observed,stage,expected=expected,changed_fields=fields)
+        return original_observed
 
     def _input_guard(self):
-        focus_end=min(self.deadline,time.monotonic()+5.)
-        while True:
-            if self.stop.is_set() or self.f9_pressed():self.stop.set();raise InterruptedError('F9/stop requested')
-            if time.monotonic()>=self.deadline:raise TimeoutError('Probe deadline expired')
-            retry_check=getattr(self,'retry_check',None)
-            if retry_check is not None:retry_check()
-            try:
-                self.original_game_check();return
-            except Exception as exc:
-                focus_lost='游戏失去焦点' in str(exc)
-                if not focus_lost or self._performing_input or time.monotonic()>=focus_end:
-                    raise InterruptedError(str(exc)) from exc
-                time.sleep(min(.1,max(0.,focus_end-time.monotonic())))
+        terminal=getattr(self,'terminal_interruption',None)
+        if terminal is not None:raise terminal
+        if self.stop.is_set():raise InterruptedError('Stop requested')
+        if self.f9_pressed():
+            from run_stop import request_stop
+            request_stop(self.stop,'native_f9_poll',virtual_key=0x78)
+            raise InterruptedError('F9 key state detected')
+        if time.monotonic()>=self.deadline:raise TimeoutError('Probe deadline expired')
+        retry_check=getattr(self,'retry_check',None)
+        if retry_check is not None:retry_check()
+        try:self.original_game_check()
+        except Exception as exc:
+            # Focus/window guards are terminal for this run. A later return
+            # of focus must not authorize a cleanup-driven recovery gesture.
+            terminal=InterruptedError(str(exc));self.terminal_interruption=terminal
+            raise terminal from exc
 
     def check(self,deadline):
         self.deadline=min(deadline,getattr(self,'accepted_session_deadline',self.reference['session_deadline_monotonic']));self._input_guard()
@@ -334,7 +362,7 @@ class ProjectProbeIO:
                     self._session_stop(SessionProbeUnstable,dict(process_identity=identity),
                         'probe',changed_fields=[],error=exc)
                 time.sleep(min(.05,max(0.,self.deadline-time.monotonic())))
-        self._check_observed_session(state,'probe')
+        state=self._check_observed_session(state,'probe')
         # Independent cheap closing evidence; do not replace the checkpoint's
         # full observation or authorize input from this session-only probe.
         self.last_checked_state=state
@@ -387,10 +415,22 @@ class ProjectProbeIO:
         self.session_status_label=label
         frames=[]
         for index in range(2):
-            self.check(deadline);image=self.game.capture();captured=time.monotonic()
+            self.check(deadline)
+            try:image=self.game.capture()
+            except (InterruptedError,TimeoutError):raise
+            except OSError as exc:
+                self._input_guard()
+                from .session_status import ObservationInterrupted
+                raise ObservationInterrupted('Screenshot capture transport failed') from exc
+            captured=time.monotonic()
             expected=self.last_observation['window_context']['window']['client_size_physical']
             if [image.shape[1],image.shape[0]]!=list(expected):raise ValueError('Captured physical client extent mismatch')
-            path=self.folder/(label+'_frame'+str(index)+'.png');Image.fromarray(image).save(path)
+            path=self.folder/(label+'_frame'+str(index)+'.png')
+            writer=getattr(self,'evidence_writer',None)
+            if writer is None or writer.stopped.is_set():
+                from screenshot_evidence import ScreenshotWriter
+                writer=self.evidence_writer=ScreenshotWriter(self.folder)
+            writer.submit(path.name,image)
             board=self.last_observation['window_mapping_candidate']['client_board_candidate']
             region_count=_observation_region_count(self.last_observation)
             try:
@@ -439,7 +479,7 @@ class ProjectProbeIO:
         self.check(deadline)
         fresh=self.backend.observe_motion(self.reference['instance_address'],deadline,self._input_guard,
             include_geometry=True,include_window=True)
-        self._check_observed_session(fresh,'pre_input',expected=self.last_observation,full_binding=True)
+        fresh=self._check_observed_session(fresh,'pre_input',expected=self.last_observation,full_binding=True)
         if (fresh.get('active') is not True or _binding(fresh)!=_binding(self.last_observation)
                 or fresh['motion']['pose']!=self.last_observation['motion']['pose']
                 or fresh['geometry_diagnostic']!=self.last_observation['geometry_diagnostic']
@@ -467,6 +507,13 @@ class ProjectProbeIO:
             (self.folder/(action['label']+'.input.json')).write_text(json.dumps(receipt,indent=2),encoding='utf-8')
 
     def release(self):
+        writer=getattr(self,'evidence_writer',None)
+        if writer is not None:
+            writer.close()
+            self.evidence_writer=None
+            try:(self.folder/'evidence-writer.json').write_text(json.dumps(dict(
+                saved=writer.saved,dropped=writer.dropped,errors=writer.errors)),encoding='utf-8')
+            except OSError:pass
         if self.sent_any:
             errors=[]
             for flag in (4,16):

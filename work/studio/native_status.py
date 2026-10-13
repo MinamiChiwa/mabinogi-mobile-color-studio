@@ -84,6 +84,8 @@ def result_text(data):
         return ('未能唯一绑定染色板','检测到多个活动色板候选。请确认只打开了一个染色板，并附上诊断记录。')
     if reason=='no_active_palette_timeout':
         return ('等待染色界面超时','等待期间未找到已验证的活动染色板，本轮没有发送操作。')
+    if reason=='initial_visual_timeout':
+        return ('本局色卡布局识别未完成','已检测到本局染色板，但色卡或取色点未完成截图核对，本轮未发送操作。截图与分割诊断已保存，请以游戏当前画面为准。')
     if reason=='user_candidate_observed' and data.get('verified'):
         return ('所选方案已复核','已保留您选择的方案。请查看各区域实测色差，在游戏内手动确认是否套用。')
     if reason=='candidate_recovery_unconfirmed':
