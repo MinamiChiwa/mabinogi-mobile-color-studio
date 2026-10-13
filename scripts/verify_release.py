@@ -16,6 +16,8 @@ def normalized(code):
 
 def verify(release,source):
     sys.path.insert(0,str(source))
+    from release_documents import validate_package_documents
+    validate_package_documents(release)
     from build_info import source_identity
     identity=source_identity(source)
     manifest=json.loads((release/'_internal/build-info.json').read_text(encoding='utf-8'))
@@ -59,7 +61,7 @@ def verify(release,source):
     helper_digest=hashlib.sha256((release/'ColorStudioUpdater.exe').read_bytes()).hexdigest()
     assert helper_digest in recovery_code.co_consts,'Embedded recovery helper identity mismatch'
     return dict(build=manifest,production_modules=len(comparisons),module_comparisons=comparisons,
-                assets_match=assets,personal_data_absent=True,
+                assets_match=assets,personal_data_absent=True,development_documents_absent=True,
                 executable_sha256=hashlib.sha256((release/'ColorStudio.exe').read_bytes()).hexdigest())
 
 

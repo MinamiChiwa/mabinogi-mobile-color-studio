@@ -74,5 +74,5 @@ if (source/'doc').exists():shutil.copytree(source/'doc',licenses/'tesseract',dir
 from release_documents import package_documents
 package_documents(workspace,out/'ColorStudio')
 # Development validation reports remain in the workspace. Distributions
-# contain current user documentation and one current verification summary.
+# contain only the root user guides; developer documentation stays online.
 print('RELEASE',out/'ColorStudio/ColorStudio.exe')

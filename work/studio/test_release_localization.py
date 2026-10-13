@@ -43,7 +43,7 @@ class ReleaseLocalizationTests(unittest.TestCase):
         self.assertEqual(normalize('日本語'),'日本語')
         self.assertEqual(normalize(None),'简体中文')
 
-    def test_packaged_guides_use_old_updater_paths_and_remove_stale_launchers(self):
+    def test_packaged_guides_use_old_updater_paths_and_remove_development_documents(self):
         from release_documents import package_documents
         from updater.manifest import validate_relative_path
         source=Path(__file__).resolve().parents[2]
@@ -51,21 +51,47 @@ class ReleaseLocalizationTests(unittest.TestCase):
             package=Path(temp)
             stale=['Korean-validation.cmd','Korean-preflight.cmd','native-window-check.ps1',
                    'WINDOW_CHECK.zh-CN.md','WINDOW_CHECK.zh-TW.md','WINDOW_CHECK.en.md',
-                   'SCREENSHOT_PREVIEW.md','docs/korean-validation.md']
+                   'SCREENSHOT_PREVIEW.md','docs/korean-validation.md',
+                   'docs/automatic-updates.md','work/studio/VERIFICATION.md',
+                   '_internal/docs/README.ja.md','_internal/docs/README.ko.md',
+                   'TESTING.md','RELEASE_NOTES.md']
             for name in stale:
                 path=package/name;path.parent.mkdir(parents=True,exist_ok=True)
                 path.write_text('obsolete',encoding='utf-8')
+            retained=['_internal/ocr/eng.traineddata','THIRD_PARTY/tesseract/LICENSE']
+            for name in retained:
+                path=package/name;path.parent.mkdir(parents=True,exist_ok=True)
+                path.write_bytes(b'required runtime or license')
             package_documents(source,package)
             self.assertTrue(all(not (package/name).exists() for name in stale))
+            for name in ('docs','work','_internal/docs'):
+                self.assertFalse((package/name).exists())
+            for name in retained:
+                self.assertEqual((package/name).read_bytes(),b'required runtime or license')
+            self.assertEqual({p.name for p in package.glob('*.md')},
+                             {'README.md','README.zh-TW.md','README.en.md'})
             for name in ('README.ja.md','README.ko.md'):
                 self.assertFalse((package/name).exists())
-                self.assertTrue((package/'_internal/docs'/name).is_file())
+                self.assertFalse((package/'_internal/docs'/name).exists())
+                self.assertIn('/'+name,(package/'README.md').read_text(encoding='utf-8'))
             for path in package.rglob('*.md'):
                 validate_relative_path(path.relative_to(package).as_posix())
                 text=path.read_text(encoding='utf-8')
+                self.assertNotRegex(text,r'(?m)^## (开发与测试|開發與測試|Development and tests)$')
+                self.assertNotIn('python work/studio/',text)
                 for link in re.findall(r'\]\(([^)]+)\)',text):
                     if '://' in link or link.startswith('#'):continue
                     self.assertTrue((path.parent/link.split('#')[0]).exists(),(path,link))
+
+    def test_release_guard_rejects_development_documents_including_empty_directories(self):
+        from release_documents import validate_package_documents
+        for name in ('docs','WORK','_internal/Docs','TESTING.md','release_notes.md'):
+            with self.subTest(name=name),tempfile.TemporaryDirectory() as temp:
+                package=Path(temp);path=package/name
+                if path.suffix:path.parent.mkdir(parents=True,exist_ok=True);path.write_text('stale')
+                else:path.mkdir(parents=True)
+                with self.assertRaisesRegex(ValueError,'Development documents'):
+                    validate_package_documents(package)
 
 
 @unittest.skipUnless(sys.platform=='win32','Real Tk layout requires Windows')

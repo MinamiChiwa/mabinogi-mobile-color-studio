@@ -11,6 +11,7 @@
 - 单区域截图寻色先检查当前视图，每次探索后立即复核，减少无必要的整板采集。
 - 修复更新器将已退出工具误判为仍运行、导致安装超时的问题；提供独立更新修复包。
 - 完善五语使用提示和说明文档。
+- 精简完整包及离线更新包，移除开发与测试文档，保留使用说明和运行依赖。
 
 更新提示：
 
@@ -30,6 +31,7 @@
 - 單區域每次探索後立即檢查，目標複核達標後停止，減少整板採集。
 - 修復更新器將已退出的工具誤判為仍在執行、導致安裝逾時的問題；提供獨立更新修復套件。
 - 完善五語使用提示與說明文件。
+- 精簡完整套件與離線更新套件，移除開發及測試文件，保留使用說明與執行所需檔案。
 
 更新提示：
 
@@ -49,6 +51,7 @@ Changes since 0.4.3:
 - Single-region search checks each view immediately and stops after verifying a match, avoiding unnecessary full-palette capture.
 - Fixed update timeouts caused by treating an exited app as still running; added a separate update recovery package.
 - Updated guidance and documentation in all five languages.
+- Removed development and testing documents from installation and offline update packages, keeping user guides and required runtime files.
 
 Update notes:
 
@@ -68,6 +71,7 @@ Multiple exact matches are not guaranteed. Check the actual game HEX values and 
 - 1部位だけの検索では移動後の画面をすぐに確認し、目標色の一致を確認すると停止します。不要なパレット全体の撮影を省きました。
 - 終了済みのアプリを起動中と誤判定し、更新がタイムアウトする問題を修正しました。独立した更新復旧パッケージも用意しました。
 - 5言語の案内と説明書を更新しました。
+- 完全パッケージとオフライン更新パッケージから開発・テスト用の文書を除き、利用ガイドと実行に必要なファイルだけを残しました。
 
 更新について：
 
@@ -87,6 +91,7 @@ Multiple exact matches are not guaranteed. Check the actual game HEX values and 
 - 한 영역만 검색할 때는 이동 후 화면을 즉시 확인하고 목표 색상이 확인되면 멈춰, 불필요한 전체 팔레트 수집을 줄입니다.
 - 종료된 도구를 실행 중으로 잘못 판단해 업데이트가 시간 초과되는 문제를 수정하고 별도의 업데이트 복구 패키지를 추가했습니다.
 - 5개 언어의 안내와 설명서를 정비했습니다.
+- 전체 설치 및 오프라인 업데이트 패키지에서 개발·테스트 문서를 제외하고 사용 안내와 실행에 필요한 파일만 남겼습니다.
 
 업데이트 안내:
 

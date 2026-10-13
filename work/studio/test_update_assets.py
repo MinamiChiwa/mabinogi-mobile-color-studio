@@ -11,20 +11,37 @@ class UpdateAssetTests(unittest.TestCase):
     seed=bytes.fromhex('9d61b19deffd5a60ba844af492ec2cc4' '4449c5697b326919703bac031cae7f60')
     public=bytes.fromhex('d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a')
 
-    def test_packaged_korean_launchers_and_guide_are_owned_but_other_scripts_are_not(self):
+    def test_obsolete_official_guides_remain_owned_for_removal_but_user_scripts_are_not(self):
         from updater.manifest import ManifestError,validate_relative_path
-        from scripts.verify_update_assets import verify_assets
-        from _updater_test_support import KEYS
         paths=('Korean-preflight.cmd','Korean-validation.cmd','docs/korean-validation.md',
             'docs/server-selection.md','SCREENSHOT_PREVIEW.md')
+        for name in paths:self.assertEqual(validate_relative_path(name),name)
+        for name in ('User-launcher.cmd','docs/personal.md','data/custom.cmd'):
+            with self.subTest(name=name),self.assertRaises(ManifestError):validate_relative_path(name)
+
+    def test_current_asset_builder_rejects_development_documents(self):
+        for name in ('docs/automatic-updates.md','work/studio/VERIFICATION.md',
+                     '_internal/docs/README.ja.md','TESTING.md','RELEASE_NOTES.md'):
+            with self.subTest(name=name),tempfile.TemporaryDirectory() as temp:
+                root=Path(temp)/'app';root.mkdir();(root/'ColorStudio.exe').write_bytes(b'exe')
+                path=root/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text('developer doc')
+                with self.assertRaisesRegex(ValueError,'Development documents'):
+                    build_assets(root,Path(temp)/'assets','0.4.4','stable',self.seed)
+
+    def test_asset_verifier_rejects_development_documents_even_with_valid_signature(self):
+        from scripts.verify_update_assets import verify_assets
+        from updater.manifest import sign_ed25519
+        from _updater_test_support import KEYS
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp)/'app';root.mkdir();(root/'ColorStudio.exe').write_bytes(b'exe')
-            for name in paths:
-                target=root/name;target.parent.mkdir(exist_ok=True);target.write_bytes(b'official validation entry')
-            out=Path(temp)/'assets';build_assets(root,out,'0.4.2','stable',self.seed)
-            self.assertEqual(verify_assets(out,root,trusted_keys=KEYS)['files'],6)
-            for name in ('User-launcher.cmd','docs/personal.md','data/custom.cmd'):
-                with self.subTest(name=name),self.assertRaises(ManifestError):validate_relative_path(name)
+            out=Path(temp)/'out';build_assets(root,out,'0.4.4','stable',self.seed)
+            payload=json.loads((out/'update-manifest.json').read_bytes())
+            payload['files'][0]['path']='TESTING.md'
+            raw=json.dumps(payload).encode('utf-8')
+            (out/'update-manifest.json').write_bytes(raw)
+            (out/'update-manifest.sig').write_bytes(sign_ed25519(raw,self.seed))
+            with self.assertRaisesRegex(ValueError,'Development documents'):
+                verify_assets(out,trusted_keys=KEYS)
 
     def test_missing_package_cannot_generate_empty_signed_release(self):
         with tempfile.TemporaryDirectory() as temp,self.assertRaises(ValueError):

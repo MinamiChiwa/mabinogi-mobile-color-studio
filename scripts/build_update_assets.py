@@ -5,6 +5,7 @@ from tempfile import TemporaryDirectory
 
 from updater.manifest import sign_ed25519,validate_relative_path,verify_manifest
 from updater.paths import checked_root,hash_file
+from release_documents import validate_package_documents
 
 def _zip_payload(path):
     from io import BytesIO
@@ -25,6 +26,7 @@ def _hex_seed(value):
 def build_assets(package,out,version,channel,private_seed,*,release_sequence=1,previous_manifest=None,key_id='release-tooling'):
     package=checked_root(package);out=Path(out);out.mkdir(parents=True,exist_ok=True)
     if not package.is_dir() or not (package/'ColorStudio.exe').is_file():raise ValueError('Complete package with ColorStudio.exe required')
+    validate_package_documents(package)
     rows=[];blobs={}
     small=[]
     for path in sorted(p for p in package.rglob('*') if p.is_file()):

@@ -4,10 +4,14 @@ from pathlib import Path
 from updater.manifest import verify_manifest,verify_ed25519,_key_bytes
 from updater.payload import unpack_blob
 from updater.paths import hash_file
+from release_documents import development_document_path,validate_package_documents
 
 def verify_assets(asset_dir,package=None,*,trusted_keys):
     asset_dir=Path(asset_dir);raw=(asset_dir/'update-manifest.json').read_bytes()
     manifest=verify_manifest(raw,(asset_dir/'update-manifest.sig').read_bytes(),trusted_keys)
+    if any(development_document_path(row.path) for row in manifest.files):
+        raise ValueError('Development documents in signed update manifest')
+    if package is not None:validate_package_documents(package)
     expected={r.path for r in manifest.files}
     archives=sorted({*asset_dir.glob('ColorStudio-offline-*.zip'),*asset_dir.glob('UPDATE-ONLY-ColorStudio-*.zip')})
     if not archives:raise ValueError('Full offline package missing')
