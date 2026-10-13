@@ -33,9 +33,15 @@ def process_creation(pid):
     k.OpenProcess.argtypes=[W.DWORD,W.BOOL,W.DWORD];k.OpenProcess.restype=W.HANDLE
     k.CloseHandle.argtypes=[W.HANDLE]
     k.GetProcessTimes.argtypes=[W.HANDLE,*([ctypes.POINTER(W.FILETIME)]*4)]
+    k.WaitForSingleObject.argtypes=[W.HANDLE,W.DWORD];k.WaitForSingleObject.restype=W.DWORD
     handle=k.OpenProcess(0x1000|0x100000,False,pid)
     if not handle:return None
     try:
+        # A launcher may retain a handle after exit. Creation times remain
+        # queryable, so only a nonsignaled process counts as a live identity.
+        status=k.WaitForSingleObject(handle,0)
+        if status==0:return None
+        if status!=0x102:raise ctypes.WinError(ctypes.get_last_error())
         times=[W.FILETIME() for _ in range(4)]
         if not k.GetProcessTimes(handle,*(ctypes.byref(v) for v in times)):return None
         return times[0].dwLowDateTime|(times[0].dwHighDateTime<<32)

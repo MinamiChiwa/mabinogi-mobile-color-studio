@@ -8,6 +8,34 @@ from updater.runtime import UpdateRuntime
 from update_helper import validated_transaction
 
 class HelperTests(unittest.TestCase):
+    @unittest.skipUnless(__import__('sys').platform=='win32','Windows process handles')
+    def test_exited_parent_with_retained_handle_does_not_block_installation(self):
+        import subprocess,sys
+        from updater.win_process import process_creation,wait_parent
+        child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(.2)'])
+        self.addCleanup(child._handle.Close)
+        creation=process_creation(child.pid)
+        self.assertIsNotNone(creation)
+        self.assertEqual(child.wait(timeout=5),0)
+        # Popen deliberately retains its process handle after wait(), as a
+        # launcher can do. GetProcessTimes still succeeds for the dead object.
+        wait_parent(child.pid,creation,timeout=.3)
+        self.assertIsNone(process_creation(child.pid))
+
+    @unittest.skipUnless(__import__('sys').platform=='win32','Windows process handles')
+    def test_live_parent_identity_still_blocks_installation(self):
+        import subprocess,sys
+        from updater.win_process import process_creation,wait_parent
+        child=subprocess.Popen([sys.executable,'-c','import time; time.sleep(20)'])
+        def cleanup():
+            if child.poll() is None:child.terminate()
+            child.wait(timeout=5);child._handle.Close()
+        self.addCleanup(cleanup)
+        creation=process_creation(child.pid);self.assertIsNotNone(creation)
+        with self.assertRaisesRegex(RuntimeError,'parent process did not exit'):
+            wait_parent(child.pid,creation,timeout=.2)
+        self.assertEqual(process_creation(child.pid),creation)
+
     def test_commit_journal_failure_stops_ready_child_before_restoring_files(self):
         import update_helper as helper
         import updater.transaction as journal
