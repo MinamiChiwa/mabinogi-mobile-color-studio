@@ -22,11 +22,13 @@ def verify(release,source):
     assert all(manifest.get(k)==v for k,v in identity.items()),(manifest,identity)
     assert manifest.get('git_commit'), 'Git commit missing from build manifest'
     archive=CArchiveReader(str(release/'ColorStudio.exe'));pyz=archive.open_embedded_archive('PYZ.pyz')
-    required={'app','build_info','profile_store','ui_presets','ui_dialogs','ui_strings','region_priority','dye_regions','process_access',
+    required={'app','build_info','profile_store','strategy_defaults','ui_presets','ui_dialogs','ui_strings','region_priority','dye_regions','process_access',
               'locale_ja','locale_ko','candidate_ranking','resize_surface','native_status','native_input_compile','eyedropper','eyedropper_native','screen_mapping',
               'native_live.retry','native_live.retry_recovery','native_live.session_deadline','native_live.time_policy','native_live.session_status',
               'native_live.controller','native_live.same_session_dye_planner','native_live.compromise',
               'native_live.route_feedback','input_gestures','screenshot_text','native_live.game_font_reader',
+              'screenshot_search','screenshot_samples','screenshot_geometry','screenshot_registration',
+              'screenshot_refinement','screenshot_control','screenshot_live','screenshot_preflight','screenshot_prediction','screenshot_single',
               'native_live.candidate_selection','native_live.collect_dye_validation',
               'native_live.read_dye_input_backend','native_periodic_route',
               'native_live.native_provider_backend','native_live.scan_live_dye',

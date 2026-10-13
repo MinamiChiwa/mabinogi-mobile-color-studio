@@ -38,6 +38,7 @@ from customtkinter.windows.widgets.scaling.scaling_base_class import CTkScalingB
 from ui_dialogs import support_dialog,tutorial_dialog,GITHUB
 from ui_settings import read_settings,save_settings
 from profile_store import read_profile,write_profile,canonical_profile,PresetStore
+from strategy_defaults import migrate_strategy_defaults
 from session_store import new_session_path,start_session_cleanup
 from ui_typography import FONT_FAMILY,TITLE_FONT,SECTION_FONT,BODY_FONT,SMALL_FONT,ICON_FONT,HEX_FONT
 from resize_rendering import TopLevelResizeRedrawOptimization
@@ -141,9 +142,10 @@ def build_preview(target,tolerance):
     return pixels,overview(pixels)
 
 SERVER_OPTIONS=(('tw','台服'),('kr','韩服'),('jp','日服'))
+NATIVE_STRATEGY_LABEL='精准寻色（读取内存，风险较高）'
 
-def build_runner(emit,folder,strategy='native',entry=None,entry_size=None):
-    # Native owns user-goal execution; existing visual strategies remain explicit.
+def build_runner(emit,folder,strategy='atlas',entry=None,entry_size=None):
+    # Screenshot is the default. Memory access requires an explicit selection.
     if strategy=='native':
         from native_live.service import run_native_search
         return Runner(emit,folder,native_runner=run_native_search)
@@ -317,6 +319,7 @@ class App(ct.CTk):
         self.q=queue.Queue();self.runner=None;self.busy=False;self.picking=False;self.keys={};self.cards=[]
         self._closing=False
         self._update_health_pending='--update-ready' in sys.argv
+        self._strategy_defaults=migrate_strategy_defaults(DATA,persist=not self._update_health_pending)
         # The page follows the resizable native window. Its fixed-size card
         # viewport remains centered inside the responsive page.
         self.grid_columnconfigure(0,weight=1); self.grid_rowconfigure(0,weight=1)
@@ -386,13 +389,13 @@ class App(ct.CTk):
         self.start=ct.CTkButton(controls,text='开始寻色   F8',height=44,width=165,font=(FONT,13,'bold'),fg_color=ACCENT,text_color='#102A27',hover_color='#80E5CF',command=lambda:self.go(activate=True));self.start.grid(row=0,column=0,padx=(0,8),pady=4,sticky='w')
         self.stop_button=ct.CTkButton(controls,text='停止   F9',height=44,width=100,font=BODY_FONT,fg_color='#2B384C',command=self.stop);self.stop_button.grid(row=0,column=1,padx=(0,8),pady=4,sticky='w')
         self.controls=controls;controls.grid_columnconfigure(2,weight=1)
-        selected=read_settings(DATA/'settings.json').get('search_strategy','native')
-        self.search_strategy=tk.StringVar(value=selected if selected in ('native','atlas') else 'native')
-        self.strategy_menu=ct.CTkOptionMenu(controls,values=[str(tr('精准寻色')),str(tr('截图寻色'))],
-            width=220,height=30,font=BODY_FONT,command=self.change_search_strategy)
+        selected=self._strategy_defaults['settings'].get('search_strategy','atlas')
+        self.search_strategy=tk.StringVar(value=selected if selected in ('native','atlas') else 'atlas')
+        self.strategy_menu=ct.CTkOptionMenu(controls,values=[str(tr('截图寻色')),str(tr(NATIVE_STRATEGY_LABEL))],
+            width=330,height=30,font=BODY_FONT,command=self.change_search_strategy)
         self.strategy_menu.grid(row=1,column=0,columnspan=2,sticky='w',pady=(4,2))
-        self.strategy_menu.set(str(tr('精准寻色' if self.search_strategy.get()=='native' else '截图寻色')))
-        self.strategy_note=ct.CTkLabel(controls,text='截图寻色：精准寻色故障时使用；结果以游戏实测为准。',font=SMALL_FONT,
+        self.strategy_menu.set(str(tr(NATIVE_STRATEGY_LABEL if self.search_strategy.get()=='native' else '截图寻色')))
+        self.strategy_note=ct.CTkLabel(controls,text='截图寻色使用截图和鼠标操作，不读取游戏内存，风险相对较低。',font=SMALL_FONT,
             text_color=MUTED,anchor='w',justify='left',wraplength=340,height=18)
         self.strategy_note.grid(row=2,column=0,columnspan=3,sticky='w',pady=(2,0))
         self.region_note=ct.CTkLabel(controls,text='',font=SMALL_FONT,text_color=MUTED,
@@ -435,6 +438,7 @@ class App(ct.CTk):
         try:state=json.loads((self._update_transaction/'state.json').read_text(encoding='utf-8'))
         except (OSError,ValueError):state={}
         if state.get('status')=='committed':
+            migrate_strategy_defaults(DATA)
             self._update_health_pending=False;self._hotkey_thread.start();self.deiconify();self.start.configure(state='normal');self.after(3000,self.updater.check)
         else:
             from update_bootstrap import helper_alive
@@ -561,15 +565,18 @@ class App(ct.CTk):
         self.refresh_window_label()
         self.refresh_server_label()
         if hasattr(self,'strategy_menu'):
-            self.strategy_menu.configure(values=[str(tr('精准寻色')),str(tr('截图寻色'))])
-            self.strategy_menu.set(str(tr('精准寻色' if self.search_strategy.get()=='native' else '截图寻色')))
+            self.strategy_menu.configure(values=[str(tr('截图寻色')),str(tr(NATIVE_STRATEGY_LABEL))])
+            self.strategy_menu.set(str(tr(NATIVE_STRATEGY_LABEL if self.search_strategy.get()=='native' else '截图寻色')))
+            self.strategy_note.configure(text=tr('警示：精准寻色会读取游戏内存，风险较高。') if self.search_strategy.get()=='native' else
+                tr('截图寻色使用截图和鼠标操作，不读取游戏内存，风险相对较低。'))
     def change_search_strategy(self,value):
         if getattr(self,'_update_health_pending',False):return
         if self.busy:
-            self.strategy_menu.set(str(tr('精准寻色' if self.search_strategy.get()=='native' else '截图寻色')))
+            self.strategy_menu.set(str(tr(NATIVE_STRATEGY_LABEL if self.search_strategy.get()=='native' else '截图寻色')))
             return
-        strategy='native' if value==str(tr('精准寻色')) else 'atlas'
+        strategy='native' if value in (str(tr(NATIVE_STRATEGY_LABEL)),str(tr('精准寻色'))) else 'atlas'
         self.search_strategy.set(strategy);save_settings(DATA/'settings.json',search_strategy=strategy)
+        self.refresh_language()
         self.schedule_autosave()
     def refresh_server_label(self):
         self.server_menu.configure(values=[str(tr(label)) for _,label in SERVER_OPTIONS])
@@ -760,7 +767,9 @@ class App(ct.CTk):
         self._show_dialog('presets',lambda parent:PresetDialog(parent,PresetStore(DATA/'presets.json'),
             self.current_profile,self.apply_profile))
     def load(self):
-        try:profile=read_profile(DATA/'profile.json',search_strategy=self.search_strategy.get())
+        try:
+            migrated=getattr(self,'_strategy_defaults',{}).get('profile')
+            profile=canonical_profile(migrated) if migrated is not None else read_profile(DATA/'profile.json',search_strategy=self.search_strategy.get())
         except (OSError,ValueError):
             from profile_store import default_profile
             profile=default_profile();profile['search_strategy']=self.search_strategy.get()

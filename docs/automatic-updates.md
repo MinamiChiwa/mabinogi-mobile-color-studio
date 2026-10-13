@@ -16,9 +16,9 @@
 
 ## 下载哪个文件
 
-- 首次安装：`ColorStudio-v0.4.3-Windows-x64.zip`，解压完整目录运行。
-- 完整离线更新：`UPDATE-ONLY-ColorStudio-0.4.3-win-x64.zip`，在旧工具内导入。
-- 0.4.2 差异离线更新：`UPDATE-ONLY-ColorStudio-from-0.4.2-to-0.4.3-win-x64.zip`，仅适用官方 0.4.2。
+- 首次安装：`ColorStudio-v0.4.4-Windows-x64.zip`，解压完整目录运行。
+- 完整离线更新：`UPDATE-ONLY-ColorStudio-0.4.4-win-x64.zip`，在旧工具内导入。
+- 0.4.3 差异离线更新：`UPDATE-ONLY-ColorStudio-from-0.4.3-to-0.4.4-win-x64.zip`，仅适用官方 0.4.3。
 
 带 `UPDATE-ONLY-` 的文件不是安装包，不能直接解压运行。在线更新会自行选择缺少或变更的文件，不需要手动下载 blobs。
 
@@ -33,3 +33,5 @@ python scripts/verify_update_assets.py <资产目录> --package <干净包> --pu
 ```
 
 公开包不包含签名私钥或测试种子；测试 seed 仅保留测试代码，未由生产导入。正式发布前核对嵌入公钥、所有者清单以及便携包逐文件一致，再将清单/签名和全部 blobs 一次上传到 draft。资产齐全并从 GitHub 复验后才发布。不得发布测试签名演练产物。
+
+用户数据保留在原 data 目录。0.4.4 首次正常启动时会一次性将旧配置的寻色方式切为截图寻色，颜色、区域开关、容差、优先级、保存方案名称和历史记录均保留。迁移之后仍可主动选择精准寻色；它会读取游戏内存，风险较高。更新健康检查完成并提交之前不改玩家配置。

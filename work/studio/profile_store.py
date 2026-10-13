@@ -8,7 +8,7 @@ from vision import normalize_hex
 
 
 def default_profile():
-    return dict(schema=1, priority_order=[0, 1, 2], search_strategy='native',
+    return dict(schema=1, priority_order=[0, 1, 2], search_strategy='atlas',
                 regions=[dict(enabled=True, target='#202020', alt='', mode='精准 HEX',
                               tolerance=8.) for _ in range(3)])
 
@@ -24,7 +24,7 @@ def canonical_profile(value, *, strict=False):
     order = value.get('priority_order', [0, 1, 2])
     if not isinstance(order, list) or len(order) != 3 or any(type(v) is not int for v in order) or sorted(order) != [0, 1, 2]:
         raise ValueError('区域优先级必须包含三个不同区域。')
-    strategy = value.get('search_strategy', 'native')
+    strategy = value.get('search_strategy', 'atlas')
     if strategy not in ('native', 'atlas'):
         raise ValueError('寻色方式无效。')
     clean = []
@@ -61,7 +61,7 @@ def _write(path, value):
         temporary.unlink(missing_ok=True)
 
 
-def read_profile(path, *, search_strategy='native'):
+def read_profile(path, *, search_strategy='atlas'):
     path=Path(path)
     if not path.exists():
         value=default_profile();value['search_strategy']=search_strategy
@@ -82,7 +82,7 @@ def write_profile(path, value):
         except ValueError:
             import shutil
             shutil.copy2(path,path.with_name(path.name+'.unreadable-'+uuid.uuid4().hex))
-    _write(path, value)
+    _write(path, dict(value,screenshot_default_revision=1))
 
 
 class PresetStore:
@@ -129,11 +129,12 @@ class PresetStore:
         rows = [row if old['id'] == preset_id else old for old in rows]
         if not any(old['id'] == preset_id for old in rows):
             rows.append(row)
-        _write(self.path, dict(schema=1, presets=rows))
+        _write(self.path, dict(schema=1, presets=rows,screenshot_default_revision=1))
         return preset_id
 
     def delete(self, preset_id):
         rows = self.rows()
         if not any(row['id'] == preset_id for row in rows):
             raise ValueError('所选方案已不存在。')
-        _write(self.path, dict(schema=1, presets=[row for row in rows if row['id'] != preset_id]))
+        _write(self.path, dict(schema=1, presets=[row for row in rows if row['id'] != preset_id],
+            screenshot_default_revision=1))

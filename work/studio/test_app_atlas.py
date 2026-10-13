@@ -44,12 +44,13 @@ class AppAtlasWiringTests(unittest.TestCase):
         self.assertIsNone(runner.atlas_runner)
         game.assert_not_called()
 
-    def test_build_runner_uses_native_user_rules_by_default(self):
+    def test_build_runner_uses_screenshot_user_rules_by_default(self):
         emit=lambda *_:None
         with tempfile.TemporaryDirectory() as folder, patch.object(app,'Runner') as runner:
             result=app.build_runner(emit,folder)
         self.assertEqual(runner.call_args.args,(emit,folder))
-        self.assertTrue(callable(runner.call_args.kwargs['native_runner']))
+        self.assertTrue(callable(runner.call_args.kwargs['screenshot_runner']))
+        self.assertNotIn('native_runner',runner.call_args.kwargs)
         self.assertIs(result,runner.return_value)
 
     def test_old_profile_visual_identifier_selects_new_screenshot_runner(self):

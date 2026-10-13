@@ -5,8 +5,8 @@ import json
 from pathlib import Path
 import sys
 
-APP_VERSION = '0.4.3'
-POLICY_REVISION = 'priority-joint-near-search-v1'
+APP_VERSION = '0.4.4'
+POLICY_REVISION = 'screenshot-default-mixed-single-fast-v2'
 
 
 def source_identity(root):

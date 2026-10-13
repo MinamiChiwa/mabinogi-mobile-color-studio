@@ -1,3 +1,14 @@
+# Release preparation 0.4.4 (2026-10-13)
+
+- Screenshot Search is the default. Existing preferences migrate once; colors, tolerances and priorities are preserved. Explicit memory access is labeled as higher risk in five languages. Update health staging does not modify player settings before commit.
+- Includes mixed exact/similar screenshot search, measured refinement and best-result recovery, and deduplicated final recovery reads. The rc1/rc2 tests are live user trials; saved-image replays are separate evidence. No guarantee of multiple exact matches.
+- Single-region Screenshot Search checks the current view and each new exploration view immediately, without building or fully scanning a periodic palette. Only the enabled region's HEX is decoded. Failed trials retain exploration progress and reserve best-result recovery time; a confirmed target ends exploration. Saved-image replay and offline regressions are not a new live-match claim.
+- Final single-region focused regression: 188 passed, no skips, failures or errors, 58.33 seconds. The new local package has 154 source-matching production modules; frozen saved-image preflight verified three HEX values and a 109-second timer with no game input or memory access.
+- Live frozen-app single-region test reached #000000 in 3.67 seconds and independently confirmed it at 3.92 seconds, with 2 positioning inputs and about 116 seconds remaining. No full palette sampling or game-memory reading occurred. One dye was consumed; the result was canceled without applying it. This proves that session, not every target or material.
+- Final review added a gated actual-HEX check when exploration already places a match beneath the excluded marker; swatches only request verification and never certify a match. Eleven single-region tests pass; the original live frames also confirm #000000 in a separate latest-source offline replay.
+- Latest focused checks: 189 passed, no skips, failures or errors, 67.53 seconds. The first 858-test release run retained 3 known missing-history skips and 5 errors from an intermediate single-region revision; every error is covered by the corrected final focused run. The original report remains available, and complete historical release evidence is not claimed.
+- The rc2 endpoint report is investigated and the user has authorized publication after this live test. Current verification is recorded in docs/verification-release-0.4.4.md.
+
 # Release 0.4.3 (2026-10-13)
 
 - Five UI/readme languages: Simplified Chinese, Traditional Chinese, English, Japanese and Korean. Taiwan is supported; Korean and Japanese client support remains in testing. Language changes preserve HEX values and saved rules. Real Tk layout/switching checks passed for narrow and wide windows; update dialogs and helper error messages include Japanese/Korean.

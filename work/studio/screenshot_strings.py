@@ -1,5 +1,15 @@
 """User-facing translations for screenshot search; traditional uses OpenCC."""
 EN={
+'单区域寻色：先检查当前画面，找到目标后立即定位。':'Single-region search: checking the current view and positioning any match immediately.',
+'单区域寻色：正在定位并核对游戏色码。':'Single-region search: positioning and verifying game HEX.',
+'单区域寻色：正在探索新位置，每次移动后立即检查目标。':'Single-region search: exploring new positions and checking for a match after each move.',
+'精准寻色（读取内存，风险较高）':'Precise Search (memory; higher risk)',
+'警示：精准寻色会读取游戏内存，风险较高。':'Warning: Precise Search reads game memory and carries higher risk.',
+'截图寻色使用截图和鼠标操作，不读取游戏内存，风险相对较低。':'Screenshot Search uses images and mouse input without reading game memory, so its risk is relatively lower.',
+'按 F8 或点击开始，等待提示后手动进入游戏染色界面。也可在已经进入染色界面后启动工具。默认使用截图寻色，通过原始截图搜索并核对实际色码。':'Press F8 or click Start, then open dyeing after the waiting message. You may also start with dyeing already open. Screenshot Search uses captured images and verifies actual game HEX values.',
+'截图寻色采集原始颜色，规划平移、缩放与旋转，并核对游戏色码。未全部达标时尽量保留按优先级排序的最佳实测妥协结果；浮窗只显示实测状态，不显示预测候选。':'Screenshot Search captures original colors, plans translation, zoom and rotation, and verifies game HEX values. It tries to retain the best measured compromise in priority order. The overlay shows measured states without predicted candidates.',
+'使用风险':'Risks of use',
+'截图寻色使用截图和鼠标操作，不读取游戏内存，风险相对较低。精准寻色读取游戏内存，风险较高，可能触发游戏检测或账号处罚。截图方式也不保证账号安全，请自行评估是否使用。':'Screenshot Search uses images and mouse input without reading game memory, so its risk is relatively lower. Precise Search reads game memory and carries higher risk, including possible detection or account penalties. Screenshot Search does not guarantee account safety either. Decide whether to use the tool based on these risks.',
 '截图寻色':'Screenshot Search',
 '截图寻色：精准寻色故障时使用；结果以游戏实测为准。':'Screenshot search: use if precise search fails; results are verified in game.',
 '截图寻色已就绪，可进入染色，也可直接识别已打开的色板。F9 可停止。':'Screenshot search is ready. Enter dyeing or use an already open palette. F9 stops.',

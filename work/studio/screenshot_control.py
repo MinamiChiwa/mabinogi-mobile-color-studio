@@ -86,9 +86,10 @@ class Controller:
         self.failed_board_frames=0;self.registration=None;self.samples=None;self.last_timer=0
         self.timer_observations=[]
         self.feature_cache=[]
+        self._completed_restore=None
 
     def register(self,before,after):
-        return register(before,after,self.scene,cache=self.feature_cache)
+        return register(before,after,self.scene,cache=self.feature_cache,check=self.check)
 
     def check(self):
         if self.owner.stop.is_set() or u.GetAsyncKeyState(0x78)&0x8000:raise Interrupted('已停止，鼠标已释放。')
@@ -103,6 +104,7 @@ class Controller:
         except OSError:pass
 
     def capture(self,label,validate=True):
+        self._completed_restore=None
         self.check();frame=self.game.capture()
         if validate:
             try:
@@ -138,6 +140,8 @@ class Controller:
         if self.owner.consume_retry_request():raise RetryRequested()
         if not self.budget.can_input(seconds):raise TimeEnded()
         before=self.frame
+        self.current=None
+        self._completed_restore=None
         try:perform()
         finally:self.game.release()
         self.check()
@@ -257,8 +261,11 @@ class Controller:
             if not self.relocalize():return False
         return True
 
-    def observe(self,label='actual'):
-        self.progress('verify');self.capture(label)
+    def observe(self,label='actual',*,reuse_frame=False):
+        previous=self.current
+        self.progress('verify')
+        if reuse_frame:self.check()
+        else:self.capture(label)
         if time.monotonic()-self.last_timer>5 and self.budget.remaining()>8:
             signal=timer_bar_signal(self.frame,unit=self.scene.cards[0][2])
             diagnostics={};before=self.budget.remaining()
@@ -271,9 +278,20 @@ class Controller:
                 remaining=self.budget.remaining(),text=diagnostics))
             self.write('timer.json',self.timer_observations)
         deadline=min(time.monotonic()+3.5,self.budget.deadline-.3)
-        try:colors,diagnostics=read_visible(self.frame,self.scene.cards,deadline=deadline,check=self.check)
+        active=[i for i,rule in enumerate(self.rules) if rule['enabled']]
+        try:
+            if len(active)==1:
+                # A disabled card must not spend the single-region search's
+                # OCR budget or erase a correctly verified active region.
+                index=active[0]
+                values,diagnostics=read_visible(self.frame,[self.scene.cards[index]],deadline=deadline,check=self.check)
+                colors=[None]*len(self.rules);colors[index]=values[0]
+                diagnostics=[dict(row,region=index) for row in diagnostics]
+            else:colors,diagnostics=read_visible(self.frame,self.scene.cards,deadline=deadline,check=self.check)
         except TimeoutError:colors=[None]*len(self.rules);diagnostics=[dict(reason='text_time_used')]
         result=actual_result(colors,self.rules)
+        result['confirmed']=bool(result['accepted'] and not reuse_frame and previous
+            and previous.get('accepted'))
         result.update(label=label,matrix=self.pose.copy() if self.pose_known else None,
             elapsed=time.monotonic()-self.budget.started,text=diagnostics)
         self.current=result;self.observations.append(result);self.write('actual-hex.json',self.observations)
@@ -296,6 +314,16 @@ class Controller:
         target=self.best
         if self.current is not None and self.current['verified'] and self.current['rank']<=target['rank']:
             return self.current
+        previous=self._completed_restore
+        if previous is not None:
+            best,best_matrix,current,frame,actions,pose,known=previous
+            if (target is best and self.current is current and self.frame is frame
+                and len(self.actions)==actions and self.pose_known==known and np.array_equal(self.pose,pose)
+                and np.array_equal(target.get('matrix'),best_matrix)):
+                # Nested callers share one completed recovery. A new frame,
+                # input, retry or best target automatically invalidates it.
+                self.check()
+                return self.current
         for _ in range(3):
             # Reanchor every correction to the measured best image, including
             # when a previous read was incomplete. Do not probe away from it.
@@ -303,10 +331,18 @@ class Controller:
             if direct is not None and target.get('matrix') is not None:
                 self.pose=np.linalg.inv(direct)@np.asarray(target['matrix']);self.pose_known=True
             desired=direct@self.pose if direct is not None and self.pose_known else target.get('matrix')
+            before_actions=len(self.actions)
             if desired is not None and self.budget.can_input(.6):
                 try:self.move_to(desired,'return-best',local=True)
                 except TimeEnded:pass
             result=self.observe('return-best-actual')
             if result['verified'] and result['rank']<=target['rank']:return result
+            if result['verified'] and len(self.actions)==before_actions:
+                # The controller found no correction to send. Another full
+                # OCR loop cannot improve this readable, unchanged position.
+                self._completed_restore=(target,np.array(target.get('matrix'),copy=True),
+                    self.current,self.frame,len(self.actions),
+                    self.pose.copy(),self.pose_known)
+                break
             if not self.budget.can_input(2):break
         return result

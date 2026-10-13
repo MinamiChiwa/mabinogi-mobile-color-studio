@@ -129,7 +129,7 @@ class ScreenshotLiveTests(unittest.TestCase):
         rules=[dict(enabled=True,colors=['#FFFFFF'],exact=True,tolerance=8,priority=i+1) for i in range(2)]
         samples=RawSamples(150,rules);samples.frames=6
         zooms=[]
-        c=SimpleNamespace(scene=scene,pose=np.eye(3),pose_known=True,budget=Budget(120,.4),
+        c=SimpleNamespace(scene=scene,rules=rules,pose=np.eye(3),pose_known=True,budget=Budget(120,.4),
             frame=np.zeros((300,300,3),np.uint8),progress=lambda *a,**k:None,
             check=lambda:None,owner=SimpleNamespace(consume_retry_request=lambda:False),
             return_cost=lambda **kw:0.,

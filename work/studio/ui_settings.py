@@ -12,6 +12,8 @@ def read_settings(path):
 
 def save_settings(path,**updates):
     path=Path(path);data=read_settings(path);data.update(updates)
+    if updates.get('search_strategy') in ('atlas','native'):
+        data['screenshot_default_revision']=1
     try:
         path.parent.mkdir(parents=True,exist_ok=True)
         temp=path.with_suffix('.tmp');temp.write_text(json.dumps(data,ensure_ascii=False,indent=2),encoding='utf-8')

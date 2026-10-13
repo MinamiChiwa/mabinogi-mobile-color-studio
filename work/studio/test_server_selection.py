@@ -125,7 +125,7 @@ class ServerSelectionDesktopTests(unittest.TestCase):
         import app,test_native_ui_hit_testing as fixtures
         helper=fixtures.NativeUIHitTestingTests();self.addCleanup(helper.doCleanups);helper.setUp()
         ui=helper.ui
-        self.assertEqual(ui.server.get(),'tw');self.assertEqual(ui.search_strategy.get(),'native')
+        self.assertEqual(ui.server.get(),'tw');self.assertEqual(ui.search_strategy.get(),'atlas')
         ui.change_server(str(app.tr('日服')));helper.pump(.05)
         self.assertEqual(ui.server.get(),'jp')
         for width in (560,850,1120):

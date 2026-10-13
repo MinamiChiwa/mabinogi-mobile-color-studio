@@ -172,4 +172,92 @@ class ScreenshotControlTests(unittest.TestCase):
         c=Controller(owner,None,SimpleNamespace(board=(0,0,20,20),cards=[],markers=[]),[],Budget(120,.4))
         self.assertGreater(c.return_cost(dict(matrix=np.diag([1.0005,1.0005,1.]))),13)
 
+class ScreenshotRestoreDedupTests(unittest.TestCase):
+    def make_controller(self,folder):
+        from screenshot_control import Controller,Budget
+        from screenshot_search import actual_result
+        rules=[dict(enabled=True,colors=['#000000'],exact=True,tolerance=8.,priority=i+1)
+            for i in range(3)]
+        scene=SimpleNamespace(board=(0,0,100,100),cards=[],markers=[(20,50),(50,50),(80,50)])
+        owner=SimpleNamespace(stop=threading.Event(),event=lambda *a,**kw:None,folder=Path(folder))
+        c=Controller(owner,None,scene,rules,Budget(120,.4));c.check=lambda:None
+        c.frame=np.zeros((100,100,3),np.uint8)
+        c.current=actual_result(['#001522','#020202','#10000C'],rules)
+        c.best=dict(actual_result(['#000D15','#131915','#150010'],rules),
+            matrix=np.eye(3),frame=c.frame.copy())
+        c.last_timer=time.monotonic();c.register=lambda *a:(np.eye(3),{})
+        def capture(*a):c.frame=c.frame.copy();return c.frame
+        c.capture=capture
+        return c
+
+    def test_nested_restore_calls_do_not_repeat_verified_motionless_reads(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as folder:
+            c=self.make_controller(folder);moves=[]
+            def move(*a,**kw):
+                moves.append(True)
+                if len(moves)==1:c.actions.append(dict(name='return-best'));c.current=None
+                return True
+            c.move_to=move
+            with patch('screenshot_control.read_visible',return_value=(['#000F19','#0F1311','#0C0009'],[])):
+                for _ in range(4):result=c.restore()
+            self.assertEqual(len(c.observations),2)
+            self.assertEqual(len(moves),2)
+            self.assertEqual(len(c.actions),1)
+            self.assertTrue(result['verified']);self.assertFalse(result['accepted'])
+            self.assertGreater(result['rank'],c.best['rank'])
+            self.assertEqual(result['actual_colors'],['#000F19','#0F1311','#0C0009'])
+
+    def test_new_frame_input_retry_or_best_target_all_reopen_recovery(self):
+        from unittest.mock import patch
+        for change in ('frame','input','retry','best','best_matrix','pose'):
+            with self.subTest(change=change),tempfile.TemporaryDirectory() as folder:
+                c=self.make_controller(folder);c.move_to=lambda *a,**kw:True
+                with patch('screenshot_control.read_visible',return_value=(['#000F19','#0F1311','#0C0009'],[])):
+                    c.restore();before=len(c.observations)
+                    if change=='frame':c.capture('external-observation')
+                    elif change=='input':c.actions.append(dict(name='new-input'))
+                    elif change=='retry':c.current=None
+                    elif change=='best':c.best=dict(c.best)
+                    elif change=='best_matrix':c.best['matrix'][0,2]+=.01
+                    elif change=='pose':c.pose[0,2]+=.01
+                    c.restore()
+                self.assertGreater(len(c.observations),before)
+
+    def test_unreadable_color_does_not_suppress_later_recovery_read(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as folder:
+            c=self.make_controller(folder);c.move_to=lambda *a,**kw:True
+            with patch('screenshot_control.read_visible',return_value=([None]*3,[])):
+                result=c.restore();before=len(c.observations)
+            self.assertFalse(result['verified'])
+            with patch('screenshot_control.read_visible',return_value=(c.best['actual_colors'],[])):
+                result=c.restore()
+            self.assertEqual(len(c.observations),before+1)
+            self.assertEqual(result['actual_colors'],c.best['actual_colors'])
+
+    def test_recovery_continues_while_real_corrections_improve_the_pose(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as folder:
+            c=self.make_controller(folder)
+            def move(*a,**kw):
+                c.actions.append(dict(name='correction'));c.current=None
+                return True
+            c.move_to=move
+            readings=[(['#000F19','#0F1311','#0C0009'],[])]*2+[(c.best['actual_colors'],[])]
+            with patch('screenshot_control.read_visible',side_effect=readings):result=c.restore()
+            self.assertEqual(len(c.actions),3)
+            self.assertEqual(result['actual_colors'],c.best['actual_colors'])
+
+    def test_restored_match_still_needs_an_independent_confirmation(self):
+        from screenshot_live import _publish
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as folder:
+            c=self.make_controller(folder);c.move_to=lambda *a,**kw:True
+            with patch('screenshot_control.read_visible',return_value=(['#000000']*3,[])):
+                first=c.restore();result=_publish(c)
+            self.assertFalse(first['confirmed'])
+            self.assertEqual(len(c.observations),2)
+            self.assertTrue(result['accepted']);self.assertTrue(result['confirmed'])
+
 if __name__=='__main__':unittest.main()

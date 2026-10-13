@@ -16,7 +16,9 @@ PROFILES = ('quick', 'release', 'research', 'full')
 
 # Stable current contracts: settings/UI, native IO, DPI geometry and safe return.
 QUICK_MODULES = frozenset('''
-test_screenshot_search test_screenshot_control test_screenshot_live test_screenshot_text test_screenshot_preflight
+test_screenshot_search test_screenshot_control test_screenshot_live test_screenshot_text test_screenshot_preflight test_screenshot_precision
+test_strategy_defaults test_strategy_default_ui
+test_screenshot_endpoint test_screenshot_single
 test_app_data test_build_info test_core test_dpi_layout test_display_geometry
 test_hotkeys test_input_gestures test_window_target test_platform_dpi
 test_lossless_scoring

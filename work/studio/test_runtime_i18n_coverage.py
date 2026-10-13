@@ -10,6 +10,7 @@ _RUNTIME_MODULES = (
     'native_live/build_adapters.py',
     'native_live/service.py',
     'screenshot_live.py',
+    'screenshot_single.py',
     'screenshot_control.py',
     'screenshot_presentation.py',
     'engine.py',

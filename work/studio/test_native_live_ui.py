@@ -10,10 +10,11 @@ class NativeUIConnectionTests(unittest.TestCase):
             result=app.build_runner(lambda *_:None,tmp,'native')
         self.assertTrue(callable(runner.call_args.kwargs['native_runner']))
         self.assertIs(result,runner.return_value)
-    def test_default_factory_uses_native_user_goal_service(self):
+    def test_default_factory_uses_screenshot_user_goal_service(self):
         with tempfile.TemporaryDirectory() as tmp,patch.object(app,'Runner') as runner:
             app.build_runner(lambda *_:None,tmp)
-        self.assertIn('native_runner',runner.call_args.kwargs)
+        self.assertIn('screenshot_runner',runner.call_args.kwargs)
+        self.assertNotIn('native_runner',runner.call_args.kwargs)
 
 
 if __name__=='__main__':unittest.main()

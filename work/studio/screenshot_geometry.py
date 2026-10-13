@@ -45,7 +45,8 @@ def _lattice_offsets(extent, center):
 
 
 def solve_joint(sites, period, markers, min_factor=1, max_factor=6,
-                current_matrix=None, time_budget=5, limit=24, check=lambda:None):
+                current_matrix=None, time_budget=5, limit=24, check=lambda:None,
+                fixed_pair=None,candidate_quality=None,endpoint_quality=None):
     """Return ``{candidates, exhausted, elapsed_seconds, evaluated_pairs, ...}``.
 
     ``sites`` contains three N x 2 arrays, ``markers`` is 3 x 2, and ``period``
@@ -94,7 +95,9 @@ def solve_joint(sites, period, markers, min_factor=1, max_factor=6,
         raise ValueError("at least two markers must be distinct")
     # Fewer site pairs and fewer possible lattice copies reduce work. No pair
     # is discarded geometrically: every triple can be expressed using this pair.
-    i, j = min(pairs, key=lambda ij: (
+    if fixed_pair is not None and tuple(fixed_pair) not in pairs:
+        raise ValueError('fixed_pair must be an ordered pair of distinct markers')
+    i, j = tuple(fixed_pair) if fixed_pair is not None else min(pairs, key=lambda ij: (
         len(canonical[ij[0]]) * len(canonical[ij[1]])
         * (1 + math.pi * (abs(m[ij[1]] - m[ij[0]]) / (min_factor * period)) ** 2),
         -abs(m[ij[1]] - m[ij[0]])))
@@ -135,11 +138,22 @@ def solve_joint(sites, period, markers, min_factor=1, max_factor=6,
             return
         q, indices, means, centered, denom = (
             arr[valid] for arr in (q, indices, means, centered, denom))
-        a = np.sum(np.conj(centered) * mcenter, axis=1) / denom
+        if fixed_pair is None:
+            a = np.sum(np.conj(centered) * mcenter, axis=1) / denom
+        else:
+            difference=q[:,j]-q[:,i]
+            valid=np.abs(difference)>1e-12
+            q,indices,means,centered,denom,difference=(arr[valid] for arr in (q,indices,means,centered,denom,difference))
+            if not len(q):return
+            a=(m[j]-m[i])/difference
+            # Clamping a fixed pair would move its exact anchor sites.
+            valid=(np.abs(a)>=min_factor-1e-10)&(np.abs(a)<=max_factor+1e-10)
+            q,indices,means,centered,denom,a=(arr[valid] for arr in (q,indices,means,centered,denom,a))
+            if not len(q):return
         magnitude = np.abs(a)
         phase = np.divide(a, magnitude, out=np.ones_like(a), where=magnitude > 1e-20)
         a = phase * np.clip(magnitude, min_factor, max_factor)
-        b = mmean - a * means
+        b = mmean - a * means if fixed_pair is None else m[i]-a*q[:,i]
         if current_a is not None:
             # A common integer lift represents the same periodic mapping.
             # Choose its translation nearest the supplied current translation.
@@ -155,15 +169,22 @@ def solve_joint(sites, period, markers, min_factor=1, max_factor=6,
         residuals = np.abs(a[:, None] * q + b[:, None] - m)
         maximum = residuals.max(axis=1)
         scores = maximum + 0.05 * cost
+        qualities=(np.column_stack((scores,maximum,cost)) if candidate_quality is None else
+                   np.asarray(candidate_quality(indices,residuals,cost),float))
+        if endpoint_quality is not None:
+            endpoints=(m[None,:]-b[:,None])/a[:,None]
+            qualities=np.asarray(endpoint_quality(_xy(endpoints),np.abs(a),indices,residuals,cost),float)
+        if qualities.ndim!=2 or len(qualities)!=len(q):raise ValueError('Invalid candidate quality array')
         fitted_triples += len(q)
         count = min(keep, len(q))
-        selected = np.argpartition(scores, count - 1)[:count]
+        selected = np.lexsort(qualities.T[::-1])[:count]
         for pos in selected:
             alpha, beta = a[pos], b[pos]
             angle = math.degrees(math.atan2(alpha.imag, alpha.real))
             key = (round(abs(alpha), 8), round(angle, 7),
                    round(beta.real, 6), round(beta.imag, 6))
-            if key in retained and retained[key]["score"] <= scores[pos]:
+            quality=tuple(qualities[pos])
+            if key in retained and tuple(retained[key]['geometry_rank']) <= quality:
                 continue
             original = np.array([canonical[n][indices[pos, n]] for n in range(3)])
             lifted = _xy(q[pos])
@@ -180,9 +201,11 @@ def solve_joint(sites, period, markers, min_factor=1, max_factor=6,
                 "lifts": np.rint((lifted - original) / period).astype(np.int64),
                 "lifted_sites": lifted, "site_indices": indices[pos].copy(),
                 "cost": float(cost[pos]), "score": float(scores[pos]), "source": source,
+                'geometry_rank':quality,
             }
+            if fixed_pair is not None:retained[key]['fixed_exact_pair']=list(fixed_pair)
         if len(retained) > keep * 2:
-            ordered = sorted(retained.items(), key=lambda item: item[1]["score"])
+            ordered = sorted(retained.items(), key=lambda item: item[1]['geometry_rank'])
             retained = dict(ordered[:keep])
 
     def nearest_third(first, second):
@@ -277,13 +300,13 @@ def solve_joint(sites, period, markers, min_factor=1, max_factor=6,
             consume(q, indices, "search")
         if exhausted:
             break
-    candidates = sorted(retained.values(), key=lambda candidate: (
-        candidate["score"], candidate["max_residual"], candidate["cost"]))[:limit]
+    candidates = sorted(retained.values(), key=lambda candidate:candidate['geometry_rank'])[:limit]
     return {
         "candidates": candidates, "exhausted": exhausted,
         "elapsed_seconds": time.perf_counter() - start,
         "evaluated_pairs": evaluated_pairs, "examined_pairs": examined_pairs,
         "fitted_triples": fitted_triples, "visited_offsets": visited_offsets,
         "anchor_indices": (i, j, k), "site_counts": tuple(map(len, canonical)),
-        "search_method": "all feasible lifted pairs, nearest periodic third, three-point fit",
+        "search_method": "all feasible lifted pairs, nearest periodic third, "+
+            ("fixed exact anchors" if fixed_pair is not None else "three-point fit"),
     }

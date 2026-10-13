@@ -1,5 +1,5 @@
 """User-rule screenshot search. No memory reads, apply, start or cancel buttons."""
-import time,traceback
+import itertools,time,traceback
 import numpy as np
 from platform_win import Game,Interrupted
 from window_target import WindowUnavailable,resolve_target
@@ -10,6 +10,8 @@ from screenshot_control import Controller,Budget,TimeEnded,PaletteEnded,RetryReq
 from screenshot_registration import period_from_image
 from screenshot_samples import RawSamples
 from screenshot_search import solve,actual_result
+from screenshot_refinement import local_candidates
+from screenshot_prediction import VisibleColorField,ObservedColorField
 from screenshot_text import read_timer,timer_bar_signal
 
 def _sampling_check(c):
@@ -47,6 +49,9 @@ def _wait_board(owner,game_factory,target,activate,*,server=None):
     raise Interrupted('已停止，鼠标已释放。')
 
 def _collect(c,samples=None):
+    if sum(bool(r['enabled']) for r in c.rules)==1:
+        from screenshot_single import collect
+        collect(c);return None
     c.progress('capture','正在缩小画板并采集原始颜色，随后会自动寻找目标。')
     def can_shrink(steps):
         if not c.pose_known and not c.relocalize():return False
@@ -95,7 +100,10 @@ def _collect(c,samples=None):
         c.samples=samples
     l,t,r,b=c.scene.board;masks=material_masks(c.scene)
     def add():
-        if c.pose_known:samples.add(c.frame[t:b,l:r],masks,c.pose,check=lambda:_sampling_check(c))
+        if c.pose_known:
+            samples.add(c.frame[t:b,l:r],masks,c.pose,check=lambda:_sampling_check(c))
+            if hasattr(samples,'visible_field'):
+                samples.visible_field.add_frame(c.frame[t:b,l:r],masks,c.pose,check=lambda:_sampling_check(c))
     add()
     if samples.frames>5:
         # Retry uses the same canonical samples; new transform measurements
@@ -126,7 +134,7 @@ def _collect(c,samples=None):
     except OSError:pass
     return samples
 
-def _refine(c):
+def _refine_visible(c):
     center=c.preview();best_preview=center;offset=np.zeros(2)
     protected=c.best
     for point in ((0,.4),(0,-.4),(.4,0),(-.4,0),(1,0),(-1,0),(0,1),(0,-1)):
@@ -161,7 +169,53 @@ def _refine(c):
         c.wheel(steps,'refine-scale',anchor);value=c.observe('scale-actual')
         if value['accepted']:return
 
+def _refine(c,max_rounds=None):
+    if c.samples is None:return _refine_visible(c)
+    attempted=set();step=.4;unchanged=0;rows=[]
+    markers=np.asarray(c.scene.markers)-c.scene.board[:2]
+    for round_number in itertools.count():
+        if max_rounds is not None and round_number>=max_rounds:break
+        c.check()
+        if c.owner.consume_retry_request():raise RetryRequested()
+        if c.current and c.current['accepted']:return
+        if not c.relocalize():break
+        reference=c.best
+        candidates=local_candidates(c.samples,markers,c.rules,c.pose,step=step,
+            exclude=attempted,check=lambda:_sampling_check(c))
+        candidate=None
+        for row in candidates:
+            cost=c.return_cost(dict(matrix=row['matrix']))
+            recovery=c.return_cost(reference,from_matrix=row['matrix'])
+            if c.budget.can_input(cost+recovery+1.5):candidate=row;break
+        if candidate is None:break
+        attempted.add(candidate.get('signature',tuple(np.round(candidate['matrix'][:2].ravel(),5))))
+        before=dict(c.current or {});measured=c.pose.copy()
+        if not c.move_to(candidate['matrix'],'refine-measured',local=True):break
+        value=c.observe('refine-measured-actual',reuse_frame=True)
+        improved=value['verified'] and (not before.get('verified') or value['rank']<before['rank'])
+        rows.append(dict(round=round_number,reference=measured,desired=candidate['matrix'],
+            measured=c.pose.copy(),kind=candidate['kind'],improved=improved,
+            actual_colors=value['actual_colors'],actual_deltas=value['actual_deltas']))
+        c.write('refinement.json',rows)
+        c.progress('refinement','正在微调颜色，并保留已经实测的较好结果。',
+            current_colors=value['actual_colors'],current_deltas=value['actual_deltas'],
+            verified=value['verified'],screenshot_verified=value['verified'])
+        if value['accepted']:return
+        if reference is not None and (not value['verified'] or value['rank']>reference['rank']):
+            recovered=c.restore()
+            if not recovered or not recovered.get('verified') or recovered['rank']>reference['rank']:
+                break
+        unchanged=0 if improved else unchanged+1
+        if unchanged>=4:
+            step=step/2 if step>.08 else .8;unchanged=0
+    if c.best and (c.current is None or c.current['rank']>c.best['rank']):c.restore()
+
+
 def _search(c,samples):
+    if sum(bool(r['enabled']) for r in c.rules)==1:
+        from screenshot_single import search
+        return search(c)
+    sample_at=None
     if samples is None:
         c.progress('observe','未能测得完整重复周期，正在使用当前截图寻找较接近的颜色。')
         # Local fallback contains only actually visible samples. A large
@@ -169,6 +223,9 @@ def _search(c,samples):
         l,t,r,b=c.scene.board;period=max(r-l,b-t)*8
         samples=RawSamples(period,c.rules)
         samples.add(c.frame[t:b,l:r],material_masks(c.scene),np.eye(3),check=lambda:_sampling_check(c))
+        sample_at=VisibleColorField(c.frame[t:b,l:r],material_masks(c.scene))
+        samples.visible_field=ObservedColorField(samples.period)
+        samples.visible_field.add_frame(c.frame[t:b,l:r],material_masks(c.scene),np.eye(3),check=lambda:_sampling_check(c))
         old=c.pose.copy();old_known=c.pose_known
         c.pose=np.eye(3);c.reference=c.frame.copy();c.pose_known=True
         if c.best and c.best.get('matrix') is not None:
@@ -180,7 +237,11 @@ def _search(c,samples):
     def check():
         c.check()
         if c.owner.consume_retry_request():raise RetryRequested()
-    found=solve(sites,colors,samples.period,markers,c.rules,c.pose,search_time,check)
+    if sample_at is None and hasattr(samples,'color_field'):
+        sample_at=getattr(samples,'visible_field',samples.color_field)
+        if hasattr(sample_at,'prepare'):sample_at.prepare(lambda:_sampling_check(c))
+    found=solve(sites,colors,samples.period,markers,c.rules,c.pose,search_time,check,sample_at=sample_at)
+    c.samples=samples
     c.write('proposals.json',found)
     if not found['candidates']:return samples
     for candidate in found['candidates']:
@@ -197,12 +258,23 @@ def _search(c,samples):
         _refine(c)
         if c.current and c.current['accepted']:
             if c.observe('refinement-confirmation')['accepted']:break
-        c.restore()
+        recovered=c.restore()
+        if c.best and (not recovered or not recovered.get('verified') or recovered['rank']>c.best['rank']):
+            break
         if c.budget.remaining()<c.return_cost()+7:break
     return samples
 
 def _publish(c,reason=None):
+    if c.current and c.current.get('accepted') and not c.current.get('confirmed'):
+        try:c.observe('final-match-confirmation')
+        except (PaletteEnded,Interrupted) as exc:
+            c.current=None
+            reason=reason or ('palette_ended' if isinstance(exc,PaletteEnded) else 'stopped')
+        except Exception as exc:
+            c.write('final-confirmation-error.json',dict(error=str(exc),traceback=traceback.format_exc()))
+            c.current=None;reason=reason or 'verification_error'
     result=dict(c.current or actual_result([None]*len(c.rules),c.rules))
+    result['accepted']=bool(result.get('accepted') and result.get('confirmed'))
     historical=c.best or {}
     result.update(region_count=len(c.rules),rules=c.rules,
         best_actual_colors=historical.get('actual_colors'),
@@ -244,7 +316,7 @@ def run_screenshot_search(owner,rules,mode='search',auto=False,activate=False,ta
                     c.restore()
             except RetryRequested:
                 owner.event('native_retry_reset',status='zooming',backend='screenshot')
-                c.current=None
+                c.current=None;c.single_retry=True
                 samples=c.samples or samples
                 continue
             except TimeEnded:
@@ -254,7 +326,7 @@ def run_screenshot_search(owner,rules,mode='search',auto=False,activate=False,ta
                 except RetryRequested:
                     if c.budget.can_input(5):
                         owner.event('native_retry_reset',status='zooming',backend='screenshot')
-                        c.current=None;samples=c.samples or samples
+                        c.current=None;c.single_retry=True;samples=c.samples or samples
                         continue
                     owner.event('native_retry_reset',status='rejected',reason='insufficient_retry_time',backend='screenshot')
                     try:c.restore()
@@ -269,7 +341,7 @@ def run_screenshot_search(owner,rules,mode='search',auto=False,activate=False,ta
                 if owner.consume_retry_request():
                     owner.event('native_retry_reset',status='zooming',backend='screenshot')
                     if c.budget.can_input(5):
-                        c.current=None;break
+                        c.current=None;c.single_retry=True;break
                     owner.event('native_retry_reset',status='rejected',reason='insufficient_retry_time',backend='screenshot')
                     owner.event('native_retry_available',enabled=False,waiting_for_retry=True,backend='screenshot')
                 if owner.stop.wait(.15):c.check()
