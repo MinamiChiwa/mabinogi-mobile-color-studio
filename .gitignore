@@ -45,3 +45,31 @@ VALIDATION.md
 # Compact models derived from the game font; no original font files.
 !/work/studio/native_live/assets/game_font_glyphs.json
 !/work/studio/native_live/assets/game_font_glyphs.npz
+
+# Generated packages, runtime records and local configuration at any depth.
+outputs/
+build/
+dist/
+venv/
+sessions/
+*.zip
+*.7z
+*.exe
+*.msi
+.env.*
+settings.json
+profile.json
+presets.json
+history.json
+captures/
+debug-screenshots/
+/data/
+.cache/
+*.log
+
+# Signing secrets remain outside the repository; public trust JSON is tracked.
+*.dpapi
+*.key
+*.pem
+*.p12
+*.pfx

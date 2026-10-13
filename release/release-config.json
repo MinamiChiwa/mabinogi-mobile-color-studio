@@ -1,0 +1,11 @@
+{
+  "version": "0.4.5",
+  "tag": "v0.4.5",
+  "channel": "stable",
+  "release_sequence": 6,
+  "key_id": "colorstudio-production-2026-10",
+  "previous_version": "0.4.4",
+  "full_package": "ColorStudio-v0.4.5-Windows-x64.zip",
+  "offline_package": "UPDATE-ONLY-ColorStudio-0.4.5-win-x64.zip",
+  "delta_package": "UPDATE-ONLY-ColorStudio-from-0.4.4-to-0.4.5-win-x64.zip"
+}

@@ -61,33 +61,19 @@ class UiLanguageTests(unittest.TestCase):
         self.assertNotIn('设置颜色与窗口 → 开始 / F8 → 手动进入染色倒计时',source)
         self.assertNotIn('先拼接本局色板，再搜索并定位；最终是否染色由你确认。',source)
 
-    def test_tutorial_step_is_short_and_tips_cover_matching_behavior(self):
-        section=dict(TUTORIAL)['3. 选择匹配模式']
-        self.assertIn('六位色码完全一致',section)
-        self.assertEqual(len([heading for heading,_ in TUTORIAL if heading.startswith('Tips ')]),5)
-        self.assertTrue(any('F7' in body and '重试' in body for _,body in TUTORIAL))
-        tips=dict(TUTORIAL)
-        self.assertIn('优先级',tips['Tips 1 · 寻色与结果'])
-        self.assertIn('皮革、木材',tips['Tips 2 · 材质限制'])
-        self.assertIn('不能保证成功率',tips['Tips 3 · 多色精准'])
-        self.assertIn('自动保存',tips['Tips 4 · 自动保存与方案'])
-        self.assertNotIn('1280',str(TUTORIAL))
-        self.assertNotIn('60 秒',str(TUTORIAL))
-        for heading,body in TUTORIAL:
-            self.assertIn(heading,EN)
-            self.assertIn(body,EN)
-            self.assertIn(body,TW)
-
-    def test_short_tutorial_copy_has_natural_english_and_traditional_versions(self):
-        source=dict(TUTORIAL)['Tips 1 · 寻色与结果']
+    def test_tutorial_sections_translate_in_all_five_languages(self):
         original=i18n.language
         try:
-            i18n.set_language('English')
-            self.assertEqual(str(i18n.tr(source)),EN[source])
-            self.assertIn('priority order',EN[source])
-            i18n.set_language('繁體中文')
-            self.assertEqual(str(i18n.tr(source)),TW[source])
-            self.assertIn('優先順序',TW[source])
+            from user_copy import EN as reviewed_en, TW as reviewed_tw, JA, KO
+            for language,translations in (('English',reviewed_en),('繁體中文',reviewed_tw),
+                    ('日本語',JA),('한국어',KO)):
+                i18n.set_language(language)
+                for heading,body in TUTORIAL:
+                    for source in (heading,body):
+                        with self.subTest(language=language,source=source):
+                            translated=str(i18n.tr(source))
+                            self.assertEqual(translated,translations[source])
+                            self.assertNotIn('\\n',translated)
         finally:i18n.set_language(original)
 
     def test_risk_notice_uses_courteous_language(self):
@@ -177,20 +163,20 @@ class UiLanguageTests(unittest.TestCase):
                     outcome='compromise')
         title,body=single_result_presentation(result)
         self.assertIn('妥协方案',title)
-        self.assertIn('正常结束状态',body)
+        self.assertIn('实测',body)
         original=i18n.language
         try:
             for language in ('English','繁體中文'):
                 i18n.set_language(language)
                 translated_title=str(i18n.tr(title));translated_body=str(i18n.tr(body))
                 self.assertNotIn('妥协方案',translated_title if language=='English' else '')
-                self.assertNotIn('正常结束状态',translated_body if language=='English' else '')
+                self.assertNotIn('实测',translated_body if language=='English' else '')
                 if language=='English':
                     self.assertIn('Compromise',translated_title)
-                    self.assertIn('normal outcome',translated_body)
+                    self.assertIn('measured HEX',translated_body)
                 else:
                     self.assertIn('折衷',translated_title)
-                    self.assertIn('正常結束狀態',translated_body)
+                    self.assertIn('實測',translated_body)
         finally:i18n.set_language(original)
 
     def test_single_region_unrestored_best_is_separate_from_normal_compromise(self):

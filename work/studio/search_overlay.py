@@ -633,12 +633,12 @@ class SearchOverlay(ct.CTkToplevel):
         elif kind=='activation':
             self.render('请点击游戏窗口',data['message'])
         elif kind in ('restoring','restore_action','restore_fallback'):
-            self.phase='restoring';self.render('正在回退 · 随时可按 F9 接管','正在恢复本轮最佳组合，结束前提前停止微调。\n如需保留当前画面，请按 F9 停止。')
+            self.phase='restoring';self.render('正在尝试返回本轮最好颜色','正在按游戏画面调整位置。F9 可停止。')
         elif kind in ('scene','action') and self.phase!='restoring':
             self.phase='searching'
             colors=data.get('colors',data.get('after',[]))
             title='当前组合已达标 · 仍在优化' if accepted(colors,self.rules) else '持续搜索最佳颜色组合'
-            self.render(title,'剩余约 30 秒回退最佳方案。\n如需保留当前颜色，请按 F9 停止，并在游戏内手动确认是否套用。')
+            self.render(title,'正在寻找目标颜色。可按 F9 停止，再查看游戏当前结果。')
         elif kind=='input_recheck':
             self.render('正在复查画面变化','尚未确认输入失败，请稍候。\n如需保留当前颜色，仍可按 F9 接管。')
         elif kind in ('done','error','interrupted','wait_timeout','finished'):

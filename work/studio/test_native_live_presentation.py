@@ -2,6 +2,23 @@ import importlib,importlib.util,unittest
 
 
 class NativePresentationTests(unittest.TestCase):
+    def test_terminal_single_result_overrides_an_earlier_match(self):
+        from ui_progress import single_result_presentation
+        for reason in ('interrupted','palette_ended'):
+            with self.subTest(reason=reason):
+                title,body=single_result_presentation(dict(stop_reason=reason,
+                    verified=True,accepted=True,outcome='matched',best_current=True))
+                self.assertIn('停止',title)
+                self.assertNotIn('达标',title)
+                self.assertNotIn('恢复',body)
+                self.assertIn('游戏',body)
+
+    def test_active_round_layout_timeout_does_not_ask_player_to_enter_again(self):
+        title,body=self.module().result_text(dict(stop_reason='initial_visual_timeout',verified=False))
+        self.assertIn('色卡',title)
+        self.assertNotIn('请进入',body)
+        self.assertIn('诊断',body)
+
     def module(self):
         self.assertIsNotNone(importlib.util.find_spec('native_status'),'Native presentation missing')
         return importlib.import_module('native_status')
@@ -86,11 +103,12 @@ class NativePresentationTests(unittest.TestCase):
         title,body=self.module().result_text(dict(verified=False,stop_reason='ambiguous_active_palette_timeout'))
         self.assertIn('唯一',title);self.assertIn('多个',body)
 
-    def test_discovery_progress_does_not_invite_entering_before_armed(self):
+    def test_discovery_progress_describes_preparation_without_inviting_dye_entry(self):
         from ui_progress import progress_text
         title,body=progress_text(dict(stage='discovery'))
         self.assertIn('准备',title)
-        self.assertIn('暂时不要进入',body)
+        self.assertNotIn('请进入',body)
+        self.assertIn('F9',body)
 
     def test_refinement_explains_stationary_board_and_shows_only_measured_results(self):
         from ui_progress import progress_text
@@ -99,8 +117,9 @@ class NativePresentationTests(unittest.TestCase):
             current_colors=['#FFFFFF','#FFFFFF','#EBEEDC'],current_deltas=[0.,0.,11.4525766],
             checked_routes=14527)
         title,body=progress_text(data)
-        self.assertIn('已保留当前配色',title)
-        self.assertIn('数十秒',body);self.assertIn('F9',body)
+        self.assertIn('正在',title)
+        self.assertNotIn('已保留',title)
+        self.assertIn('暂时不动',body);self.assertIn('F9',body)
         self.assertIn('区域 3  #EBEEDC · ΔE 11.45',body)
         self.assertNotIn('14527',body)
         for count in (2,3):

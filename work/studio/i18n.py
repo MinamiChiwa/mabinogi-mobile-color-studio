@@ -162,7 +162,6 @@ EN={
 '正在恢复本轮最佳组合，结束前提前停止微调。\n如需保留当前画面，请按 F9 停止。':'Restoring the best combination with time to spare.\nPress F9 to retain the current colors.',
 '当前组合已达标 · 仍在优化':'Current colors meet targets · Optimizing',
 '持续搜索最佳颜色组合':'Searching for the best combination',
-'剩余约 30 秒回退最佳方案。\n如需保留当前颜色，请按 F9 停止，并在游戏内手动确认是否套用。':'At about 30 seconds remaining, restore the best.\nLike these colors? Press F9 and confirm in game.',
 '寻色完成：已保留接近最佳的组合，停止微调，未精确复现最佳记录。':'Stopped on a combination close to the best; the saved best was not reproduced exactly.',
 '正在停止并释放鼠标…':'Stopping and releasing the mouse…',
 
@@ -193,7 +192,6 @@ EN={
 '开始寻色   F8':'Start   F8','停止   F9':'Stop   F9','达标后自动复核并套用':'Verify & apply automatically',
 '诊断':'Diagnostics',
 '就绪 · 支持横屏与竖屏识别':'Ready · Landscape and portrait supported',
-'持续寻找更接近的颜色，剩余约 30 秒返回本轮最佳组合；是否套用请在游戏内手动确认。':'Keeps improving colors, then returns to the best observed set with about 30 seconds left.',
 'F9 随时停止并释放鼠标  ·  切换窗口停止寻色  ·  不自动开启下一瓶染色剂':'F9 stops input · Switching windows stops search · One dye per session',
 '记录最近 50 次结果 · ΔE 越小越接近目标，0 表示目标原色':'Last 50 results · Lower ΔE is closer; 0 is the target color',
 '完成一次寻色后，颜色组合会自动保存在这里。':'Completed color sets will be saved here.',
@@ -220,7 +218,6 @@ EN={
 '请先进入游戏限时染色界面。\n将依次测试左键平移、右键圆弧和滚轮缩放，记录前后色码与截图，不套用结果。\n\n是否开始？':'Open the timed dye screen first.\nTests dragging, right-button rotation and wheel zoom without applying colors.\n\nStart diagnostics?',
 '发现区域 ':'Found a nearby color in region ',' 的接近颜色，正在放大寻找纯色。':'. Enlarging to find an exact color.',
 '当前范围没有合适候选，正在拖动色板探索新颜色。':'No suitable candidate in view. Exploring another area.',
-'剩余约 30 秒，正在回到本轮最接近的已观察颜色。':'About 30 seconds left. Returning to the best observed colors.',
 '寻色完成：全部目标已匹配并复核。请返回游戏确认使用。':'All enabled targets matched and verified. Confirm use in the game.',
 '寻色完成：已回到本轮最接近结果。':'Returned to the best observed result.',
 '寻色结束：未能可靠恢复本轮最佳颜色，已停止操作。':'Search stopped. Could not reliably restore the best colors.',
@@ -253,6 +250,16 @@ EN.update({'请先停止寻色再切换语言。': 'Stop the search before switc
 
 EN.update({'未检测到唯一窗口': 'No unique window found', '① 设置颜色与窗口    →    ② 点击开始或按 F8    →    ③ 进入普通染色，教学后自动寻色': '1 Set colors and window   →   2 Start / F8   →   3 Open regular dye; search begins after the tutorial', '任务已启动，正在等待或寻色；按 F9 停止。': 'Already waiting or searching. Press F9 to stop.', '快捷键不可用：': 'Unavailable hotkeys: ', '快捷键已就绪：F8 开始 / F9 停止': 'Hotkeys ready: F8 Start / F9 Stop', '正在识别窗口：': 'Detecting window: ', '浮窗暂不可用，寻色状态请查看主窗口。': 'Overlay unavailable. Follow progress in the main window.', '游戏窗口 · ': 'Game window · ', '窗口选择已更新，下次开始时生效。': 'Window selection updated for the next start.', '自动检测': 'Auto-detect', '请先按 F9 停止，再更换游戏窗口。': 'Press F9 to stop before changing the game window.', '；请关闭其他工具副本或使用按钮。': '. Close other copies of this tool or use its buttons.', '未能自动切回游戏。请点击游戏窗口，程序会继续等待识别，无需再次开始。': 'Could not focus the game. Click the game window; detection will continue without restarting.', '选择游戏窗口': 'Select game window', '默认自动识别瑪奇Mobile，也可选择标题不同的游戏窗口。': 'Automatically finds Mabinogi Mobile. Choose a window manually if its title differs.', '刷新窗口': 'Refresh list', '使用此窗口': 'Use selection', '自动检测到：': 'Detected: ', '确认后仅对所选窗口识别；窗口关闭后需重新选择。': 'Only the selected window will be used. Select it again if it closes.', '发现多个游戏窗口，请手动选择目标窗口。': 'Multiple game windows found. Select the intended window manually.', '所选窗口已关闭，请重新选择游戏窗口。': 'The selected window closed. Select the game window again.', '无法读取窗口列表，请重试。': 'Could not list windows. Try again.', '未找到游戏窗口。请启动游戏，或手动选择窗口。': 'Game window not found. Open the game or select a window manually.', '感知色差 ΔE ≤ ': 'Color difference ΔE ≤ ', ' · 数值越小越严格': ' · Lower is stricter', '色差由中心向外增加 · 放大查看每个颜色，拖动或滚动浏览，悬停查看 HEX': 'Difference increases outward · Use +/− to zoom, drag to browse, hover for HEX', '色差由中心向外增加 · ＋／－缩放，拖动浏览，悬停查看 HEX': 'Difference increases outward · Use +/− to zoom, drag to browse, hover for HEX'})
 
+EN.update({
+    '已检测到本局色板，但截图中的色卡与取色点尚未完成识别。':'The current dye palette was detected, but its visible color cards and pickers have not been identified yet.',
+    '已检测到本局色板，正在重新识别色卡与取色点；请保持染色画面可见。F9 可停止。':'The current palette was detected. Retrying color card and picker recognition; keep the dye screen visible. Press F9 to stop.',
+    '本局色卡布局识别未完成':'Color card layout could not be verified',
+    '已检测到本局染色板，但色卡或取色点未完成截图核对，本轮未发送操作。截图与分割诊断已保存，请以游戏当前画面为准。':'The current palette was detected, but its color cards or pickers could not be verified from screenshots. No input was sent. Screenshots and segmentation diagnostics were saved; check the current game screen.'})
+EN.update({
+    '截图寻色处理异常':'Screenshot search encountered an error',
+    '错误记录已保存，当前色码未完成复核；请以游戏当前颜色为准。':'An error log was saved. The current HEX values could not be verified; check the colors in the game.',
+    '错误记录已保存，当前颜色已复核，但未能恢复此前较好的结果；请以游戏当前颜色为准。':'An error log was saved. The current colors were verified, but a better earlier result could not be restored; check the colors in the game.',
+    '已保留或恢复本轮较好的实测颜色，错误记录已保存；请查看当前色差后再决定是否套用。':'The better measured colors from this round were kept or restored, and an error log was saved. Check the current color differences before applying them.'})
 TW={
 '确认后仅对所选窗口识别；窗口关闭后需重新选择。':'確認後僅辨識所選視窗；視窗關閉後請重新選擇。',
 '默认自动识别瑪奇Mobile，也可选择标题不同的游戏窗口。':'預設自動辨識瑪奇Mobile，也可選擇標題不同的遊戲視窗。',
@@ -297,8 +304,17 @@ from screenshot_strings import EN as SCREENSHOT_EN
 EN.update(SCREENSHOT_EN)
 EN['支持台服、韩服、日服；韩服、日服仍在测试中。多色精准结果以游戏实测为准。']='Supports Taiwan, Korea and Japan. Korean and Japanese support is in testing. Multi-color exact matches depend on in-game results.'
 TW['支持台服、韩服、日服；韩服、日服仍在测试中。多色精准结果以游戏实测为准。']='支援台服、韓服、日服；韓服與日服仍在測試中。多色精準結果以遊戲實測為準。'
+EN.update({
+    '自动确认已关闭，请在游戏内手动确认。':'Automatic confirmation is disabled. Confirm manually in the game.',
+    '自动套用已关闭，请在游戏内手动套用。':'Automatic application is disabled. Apply the result manually in the game.',
+    '自动结束已关闭，请在游戏内手动选择。':'Automatic completion is disabled. Make your choice manually in the game.',
+})
+
 from locale_ja import JA
 from locale_ko import KO
+# Apply the reviewed display copy after historical compatibility messages.
+from user_copy import EN as USER_EN, TW as USER_TW
+EN.update(USER_EN); TW.update(USER_TW)
 _locales={'日本語':JA,'한국어':KO}
 _locale_patterns={name:re.compile('|'.join(re.escape(key) for key in sorted(values,key=len,reverse=True)))
                   for name,values in _locales.items()}

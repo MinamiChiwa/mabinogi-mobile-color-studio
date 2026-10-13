@@ -31,15 +31,16 @@ TEXTS={
  'cancelled':('下载已暂停，结束当前操作后可继续。','下載已暫停，結束目前操作後可繼續。','Download paused. Resume after the current operation.'),
  'importing':('正在验证离线更新包…','正在驗證離線更新包…','Verifying offline update…'),
  'installing':('正在准备安装，请稍候…','正在準備安裝，請稍候…','Preparing installation…'),
- 'trust_unconfigured':('当前候选包尚未配置正式更新公钥。','目前候選包尚未設定正式更新公鑰。','This candidate has no production update key configured.'),
+ 'trust_unconfigured':('此包未配置正式更新，请使用完整官方安装包。','此套件未設定正式更新，請使用完整官方安裝套件。','Updates are not configured for this package. Use the full official installation package.'),
  'verification':('更新包未能验证，请重新获取官方包。','更新包未能驗證，請重新取得官方套件。','Update verification failed. Obtain the official package again.'),
  'wrong_base':('此离线包不适用于当前文件，请导入完整离线更新包。','此離線套件不適用於目前檔案，請匯入完整離線更新包。','This offline package does not match your files. Import a full offline update.'),
  'conflicts':('程序文件被修改或占用，请保留 data 并使用完整官方包升级。','程式檔案被修改或占用，請保留 data 並使用完整官方套件升級。','Application files were changed or are in use. Keep data and use the full official package.'),
- 'manual':('此版本需要手动安装新的引导包。','此版本需要手動安裝新的引導套件。','This version requires a new bootstrap package installed manually.'),
+ 'manual':('请使用完整安装包手动升级，并保留数据。','請使用完整安裝套件手動升級，並保留資料。','Upgrade manually with the full installation package and keep your data.'),
  'rate_limit':('GitHub 请求已达限制，请稍后重试或使用离线包。','GitHub 請求已達限制，請稍後重試或使用離線套件。','GitHub request limit reached. Retry later or use an offline package.'),
  'automatic':('启动后自动检查','啟動後自動檢查','Check automatically after startup'),
  'prerelease':('允许候选版本','允許候選版本','Include prereleases'),
- 'checking_notice':('检查不会下载或安装。更新保留设置、方案和全部 data。','檢查不會下載或安裝。更新保留設定、方案與全部 data。','Checking does not download or install. Settings, presets and all data are kept.'),
+ 'checking_notice':('检查不会下载或安装。更新保留设置、方案和记录。','檢查不會下載或安裝。更新保留設定、方案及紀錄。','Checking does not download or install. Settings, presets and records are kept.'),
+ 'offline_notice':('离线更新包仅用于已安装的工具，不能首次安装或直接运行。','離線更新套件僅供已安裝的工具使用，不能首次安裝或直接執行。','Offline update packages require an existing installation; they cannot be used for a first install or run directly.'),
 }
 
 def text(key,language):
@@ -74,6 +75,7 @@ class UpdateUI:
         self.heading=ct.CTkLabel(frame,text='',font=('',18,'bold'),wraplength=450,justify='left');self.heading.pack(fill='x',pady=8)
         self.body=ct.CTkLabel(frame,text='',wraplength=450,justify='left');self.body.pack(fill='x',pady=8)
         self.notice=ct.CTkLabel(frame,text=text('checking_notice',self.language),wraplength=450,justify='left');self.notice.pack(fill='x',pady=8)
+        self.offline_notice=ct.CTkLabel(frame,text=text('offline_notice',self.language),wraplength=450,justify='left');self.offline_notice.pack(fill='x',pady=8)
         self.automatic=tk.BooleanVar(value=self.runtime.prefs.get('automatic',True))
         self.prerelease=tk.BooleanVar(value=self.runtime.prefs.get('prerelease',False))
         self.auto_button=ct.CTkCheckBox(frame,text=text('automatic',self.language),variable=self.automatic,
@@ -119,6 +121,7 @@ class UpdateUI:
         self.button.configure(text=copy['title'] if version and self.runtime.service.state in ('available','ready') else text('check',self.language))
         if self.dialog is None or not self.dialog.winfo_exists():return
         self.dialog.title(text('title',self.language));self.notice.configure(text=text('checking_notice',self.language))
+        self.offline_notice.configure(text=text('offline_notice',self.language))
         self.auto_button.configure(text=text('automatic',self.language));self.pre_button.configure(text=text('prerelease',self.language))
         self.heading.configure(text=copy['title'] if version else text('title',self.language))
         body=copy['detail'] if kind=='available' else text('checking_notice' if kind=='idle' else kind if kind in TEXTS else ('manual' if event.get('reason')=='bootstrap_required' else event.get('reason','verification')),self.language)

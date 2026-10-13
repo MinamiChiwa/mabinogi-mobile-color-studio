@@ -5,8 +5,8 @@ import json
 from pathlib import Path
 import sys
 
-APP_VERSION = '0.4.4'
-POLICY_REVISION = 'screenshot-default-mixed-single-fast-v2'
+APP_VERSION = '0.4.5'
+POLICY_REVISION = 'native-screenshot-budget-recovery-v4'
 
 
 def source_identity(root):
