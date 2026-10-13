@@ -1,4 +1,4 @@
-import unittest
+import unittest,sys,threading,subprocess
 from unittest.mock import patch
 import numpy as np
 import vision
@@ -9,6 +9,20 @@ from subprocess import CompletedProcess,TimeoutExpired
 
 
 class OcrSetupTests(unittest.TestCase):
+    def test_cancelled_startup_probe_terminates_child_without_waiting_for_probe_timeout(self):
+        probe=getattr(vision,'_ocr_probe',None)
+        self.assertTrue(callable(probe),'OCR startup probe needs a cancellable process boundary')
+        stop=threading.Event();children=[];popen=subprocess.Popen
+        def child(*args,**kwargs):
+            process=popen([sys.executable,'-c','import time; time.sleep(10)'],**kwargs)
+            children.append(process);stop.set();return process
+        def check():
+            if stop.is_set():raise InterruptedError('F9')
+        with patch.object(vision.subprocess,'Popen',side_effect=child):
+            with self.assertRaisesRegex(InterruptedError,'F9'):probe(['fixture'],check=check)
+        self.assertEqual(len(children),1)
+        self.assertIsNotNone(children[0].poll(),'Cancelled OCR left its subprocess running')
+
     def setUp(self):
         self.old_state=vision.OCR_AVAILABLE
         self.addCleanup(setattr,vision,'OCR_CONFIG',vision.OCR_CONFIG)

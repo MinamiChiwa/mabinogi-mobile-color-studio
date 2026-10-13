@@ -25,6 +25,7 @@ u.SetForegroundWindow.argtypes=[W.HWND];u.SetForegroundWindow.restype=W.BOOL
 u.BringWindowToTop.argtypes=[W.HWND];u.BringWindowToTop.restype=W.BOOL
 u.AttachThreadInput.argtypes=[W.DWORD,W.DWORD,W.BOOL];u.AttachThreadInput.restype=W.BOOL
 u.ShowWindow.argtypes=[W.HWND,C.c_int];u.ShowWindow.restype=W.BOOL
+u.ShowWindowAsync.argtypes=[W.HWND,C.c_int];u.ShowWindowAsync.restype=W.BOOL
 k.OpenProcess.argtypes=[W.DWORD,W.BOOL,W.DWORD];k.OpenProcess.restype=W.HANDLE
 k.QueryFullProcessImageNameW.argtypes=[W.HANDLE,W.DWORD,W.LPWSTR,C.POINTER(W.DWORD)];k.QueryFullProcessImageNameW.restype=W.BOOL
 k.CloseHandle.argtypes=[W.HANDLE]
@@ -39,21 +40,31 @@ def window_title(hwnd):
     text=C.create_unicode_buffer(u.GetWindowTextLengthW(hwnd)+1)
     u.GetWindowTextW(hwnd,text,len(text));return text.value
 
-def list_windows():
-    windows=[]
+def list_windows(*,check=lambda:None):
+    check();windows=[];errors=[]
     @CALLBACK
     def visit(hwnd,_):
-        if not u.IsWindowVisible(hwnd):return True
-        title=window_title(hwnd);pid=window_pid(hwnd)
-        if not title or pid==os.getpid():return True
-        executable='';handle=k.OpenProcess(0x1000,False,pid)
-        if handle:
-            try:
-                size=W.DWORD(32768);buffer=C.create_unicode_buffer(size.value)
-                if k.QueryFullProcessImageNameW(handle,0,buffer,C.byref(size)):executable=os.path.basename(buffer.value)
-            finally:k.CloseHandle(handle)
-        windows.append(WindowTarget(int(hwnd),pid,title,executable));return True
-    if not u.EnumWindows(visit,0):raise RuntimeError('无法读取窗口列表，请重试。')
+        try:
+            check()
+            if not u.IsWindowVisible(hwnd):return True
+            # Same-process title requests send a synchronous message to the
+            # owner UI thread. Exclude our own windows before reading titles.
+            pid=window_pid(hwnd)
+            if pid==os.getpid():return True
+            title=window_title(hwnd)
+            if not title:return True
+            executable='';handle=k.OpenProcess(0x1000,False,pid)
+            if handle:
+                try:
+                    size=W.DWORD(32768);buffer=C.create_unicode_buffer(size.value)
+                    if k.QueryFullProcessImageNameW(handle,0,buffer,C.byref(size)):executable=os.path.basename(buffer.value)
+                finally:k.CloseHandle(handle)
+            windows.append(WindowTarget(int(hwnd),pid,title,executable));return True
+        except Exception as exc:errors.append(exc);return False
+    completed=u.EnumWindows(visit,0)
+    if errors:raise errors[0]
+    check()
+    if not completed:raise RuntimeError('无法读取窗口列表，请重试。')
     return windows
 
 def normalized_title(title):
@@ -85,7 +96,7 @@ def choose_auto(windows,foreground=0,*,server=None):
 def valid_target(target):
     return bool(u.IsWindow(target.hwnd)) and window_pid(target.hwnd)==target.pid
 
-def activate_target_window(target):
+def activate_target_window(target,*,check=lambda:None):
     """Return the bound game window to the foreground after an overlay click.
 
     The retry button is deliberately usable without activating the overlay,
@@ -94,29 +105,28 @@ def activate_target_window(target):
     consumes the request prevents the input guard from treating the button
     click as a session failure.
     """
+    check()
     if target is None or not valid_target(target):
         return False
     if u.IsIconic(target.hwnd):
-        u.ShowWindow(target.hwnd,9)  # SW_RESTORE
-    current_thread=int(k.GetCurrentThreadId())
-    foreground=u.GetForegroundWindow()
-    foreground_thread=(int(u.GetWindowThreadProcessId(foreground,None))
-                       if foreground else 0)
-    attached=False
-    if foreground_thread and foreground_thread!=current_thread:
-        attached=bool(u.AttachThreadInput(current_thread,foreground_thread,True))
-    try:
-        u.BringWindowToTop(target.hwnd)
-        u.SetForegroundWindow(target.hwnd)
-        for _ in range(6):
-            foreground=u.GetForegroundWindow()
-            if foreground and int(foreground)==int(target.hwnd):return True
+        u.ShowWindowAsync(target.hwnd,9)  # SW_RESTORE; do not wait on its UI.
+        for _ in range(34):
+            check()
+            if not u.IsIconic(target.hwnd):break
             time.sleep(.03)
-        return False
-    finally:
-        if attached:u.AttachThreadInput(current_thread,foreground_thread,False)
+        else:return False
+    # Joining the worker to the foreground UI's input queue can make window
+    # activation synchronous. An unresponsive target would then hide F9 until
+    # that call returns. Leave queues independent and observe the transition.
+    check();u.SetForegroundWindow(target.hwnd)
+    for _ in range(6):
+        check();foreground=u.GetForegroundWindow()
+        if foreground and int(foreground)==int(target.hwnd):return True
+        time.sleep(.03)
+    check();return False
 
-def resolve_target(target=None,*,server=None):
-    if target is None:return choose_auto(list_windows(),u.GetForegroundWindow(),server=server)
+def resolve_target(target=None,*,server=None,check=lambda:None):
+    check()
+    if target is None:return choose_auto(list_windows(check=check),u.GetForegroundWindow(),server=server)
     if not valid_target(target):raise WindowUnavailable('所选窗口已关闭，请重新选择游戏窗口。')
     return target

@@ -8,7 +8,7 @@ from vision import normalize_hex
 
 
 def default_profile():
-    return dict(schema=1, priority_order=[0, 1, 2], search_strategy='atlas',
+    return dict(schema=1, priority_order=[0, 1, 2], search_strategy='screenshot',
                 regions=[dict(enabled=True, target='#202020', alt='', mode='精准 HEX',
                               tolerance=8.) for _ in range(3)])
 
@@ -24,8 +24,9 @@ def canonical_profile(value, *, strict=False):
     order = value.get('priority_order', [0, 1, 2])
     if not isinstance(order, list) or len(order) != 3 or any(type(v) is not int for v in order) or sorted(order) != [0, 1, 2]:
         raise ValueError('区域优先级必须包含三个不同区域。')
-    strategy = value.get('search_strategy', 'atlas')
-    if strategy not in ('native', 'atlas'):
+    strategy = value.get('search_strategy', 'screenshot')
+    if strategy=='atlas':strategy='screenshot'
+    if strategy not in ('native', 'screenshot'):
         raise ValueError('寻色方式无效。')
     clean = []
     for row in regions:
@@ -61,7 +62,7 @@ def _write(path, value):
         temporary.unlink(missing_ok=True)
 
 
-def read_profile(path, *, search_strategy='atlas'):
+def read_profile(path, *, search_strategy='screenshot'):
     path=Path(path)
     if not path.exists():
         value=default_profile();value['search_strategy']=search_strategy

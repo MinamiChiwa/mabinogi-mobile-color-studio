@@ -5,6 +5,14 @@ from unittest.mock import patch
 from profile_store import default_profile,read_profile,write_profile,PresetStore
 
 class StrategyDefaultTests(unittest.TestCase):
+    def test_existing_atlas_alias_migrates_without_resetting_native_choice(self):
+        from strategy_defaults import migrate_strategy_defaults
+        profile=default_profile();profile['search_strategy']='atlas';profile['screenshot_default_revision']=1
+        (self.root/'profile.json').write_text(json.dumps(profile),encoding='utf8')
+        (self.root/'settings.json').write_text(json.dumps(dict(search_strategy='native',screenshot_default_revision=1)),encoding='utf8')
+        result=migrate_strategy_defaults(self.root)
+        self.assertEqual(result['profile']['search_strategy'],'screenshot')
+        self.assertEqual(result['settings']['search_strategy'],'native')
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
         self.root=Path(self.tmp.name)
@@ -21,16 +29,16 @@ class StrategyDefaultTests(unittest.TestCase):
         return settings,profile,presets
 
     def test_new_and_legacy_profiles_default_to_screenshot(self):
-        self.assertEqual(default_profile()['search_strategy'],'atlas')
-        self.assertEqual(read_profile(self.root/'missing.json')['search_strategy'],'atlas')
+        self.assertEqual(default_profile()['search_strategy'],'screenshot')
+        self.assertEqual(read_profile(self.root/'missing.json')['search_strategy'],'screenshot')
         (self.root/'profile.json').write_text(json.dumps(default_profile()['regions']),encoding='utf8')
-        self.assertEqual(read_profile(self.root/'profile.json')['search_strategy'],'atlas')
+        self.assertEqual(read_profile(self.root/'profile.json')['search_strategy'],'screenshot')
 
     def test_existing_draft_settings_and_presets_switch_without_losing_options(self):
         from strategy_defaults import migrate_strategy_defaults
         settings,profile,presets=self.legacy_data()
         result=migrate_strategy_defaults(self.root)
-        self.assertEqual(result['settings']['search_strategy'],'atlas')
+        self.assertEqual(result['settings']['search_strategy'],'screenshot')
         self.assertEqual(result['errors'],[])
         for name,expected in (('settings.json',settings),('profile.json',profile),('presets.json',presets)):
             actual=json.loads((self.root/name).read_text(encoding='utf8'))
@@ -56,18 +64,18 @@ class StrategyDefaultTests(unittest.TestCase):
         from strategy_defaults import migrate_strategy_defaults
         self.legacy_data();before={p.name:p.read_bytes() for p in self.root.iterdir()}
         preview=migrate_strategy_defaults(self.root,persist=False)
-        self.assertEqual(preview['settings']['search_strategy'],'atlas')
-        self.assertEqual(preview['profile']['search_strategy'],'atlas')
+        self.assertEqual(preview['settings']['search_strategy'],'screenshot')
+        self.assertEqual(preview['profile']['search_strategy'],'screenshot')
         self.assertEqual({p.name:p.read_bytes() for p in self.root.iterdir()},before)
         migrate_strategy_defaults(self.root)
-        self.assertEqual(read_profile(self.root/'profile.json')['search_strategy'],'atlas')
+        self.assertEqual(read_profile(self.root/'profile.json')['search_strategy'],'screenshot')
 
     def test_broken_profile_is_preserved_and_does_not_reset_other_files_again(self):
         from strategy_defaults import migrate_strategy_defaults
         self.legacy_data();(self.root/'profile.json').write_bytes(b'{broken')
         result=migrate_strategy_defaults(self.root)
         self.assertTrue(result['errors']);self.assertEqual((self.root/'profile.json').read_bytes(),b'{broken')
-        self.assertEqual(result['settings']['search_strategy'],'atlas')
+        self.assertEqual(result['settings']['search_strategy'],'screenshot')
         settings=result['settings'];settings['search_strategy']='native'
         (self.root/'settings.json').write_text(json.dumps(settings),encoding='utf8')
         self.assertEqual(migrate_strategy_defaults(self.root)['settings']['search_strategy'],'native')
@@ -77,8 +85,8 @@ class StrategyDefaultTests(unittest.TestCase):
         self.legacy_data();before={p.name:p.read_bytes() for p in self.root.iterdir()}
         with patch('strategy_defaults._write',side_effect=OSError('denied')):
             result=migrate_strategy_defaults(self.root)
-        self.assertEqual(result['settings']['search_strategy'],'atlas')
-        self.assertEqual(result['profile']['search_strategy'],'atlas')
+        self.assertEqual(result['settings']['search_strategy'],'screenshot')
+        self.assertEqual(result['profile']['search_strategy'],'screenshot')
         self.assertTrue(result['errors'])
         self.assertEqual({p.name:p.read_bytes() for p in self.root.iterdir()},before)
 

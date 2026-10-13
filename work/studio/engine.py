@@ -1,4 +1,5 @@
-import time,json,threading,traceback,queue
+import time,json,threading,traceback,queue,sys
+import uuid
 from pathlib import Path
 from collections import deque
 import numpy as np
@@ -13,6 +14,7 @@ from input_response import assess_response,ResponseGuard
 from session_store import (SessionStore,cleanup,mark_session,ACTIVE_MARKER,
                            start_session_cleanup)
 from build_info import runtime_identity
+from run_stop import StopEvent,stop_diagnostic,request_stop as set_stop
 
 def local_offsets(radius=2):
     """Visit nearby integer offsets without ever issuing a zero displacement."""
@@ -95,13 +97,43 @@ def bounded_zoom(ticks,current,best):
 
 class Runner:
     def __init__(self,emit,folder,atlas_runner=None,native_runner=None,screenshot_runner=None):
-        self.emit=emit; self.stop=threading.Event(); self.folder=Path(folder); self.trace=deque(maxlen=2048);self.store=SessionStore(self.folder)
+        self.emit=emit; self.stop=StopEvent(); self.folder=Path(folder); self.trace=deque(maxlen=2048);self.store=SessionStore(self.folder)
+        self.run_token=uuid.uuid4().hex
+        self._run_finished=threading.Event();self._worker_thread_id=None
+        self._stop_observer_lock=threading.Lock();self._stop_observer_started=False
+        self._last_event=None
         self.atlas_runner=atlas_runner
         self.native_runner=native_runner
         self.screenshot_runner=screenshot_runner
         self.candidate_choices=queue.Queue()
         self.retry_requests=threading.Event()
         self._retry_lock=threading.Lock()
+    def request_stop(self,source):
+        set_stop(self.stop,source)
+        if self._worker_thread_id is None or self._run_finished.is_set():return
+        with self._stop_observer_lock:
+            if self._stop_observer_started:return
+            self._stop_observer_started=True
+        # No disk IO or worker join on the UI/hotkey thread. A slow cancellation
+        # is diagnosed, never treated as completion while input may remain live.
+        threading.Thread(target=self._observe_stop,name='stop-diagnostic',daemon=True).start()
+    def _observe_stop(self):
+        record=dict(run_token=self.run_token,stop_diagnostic=stop_diagnostic(self.stop),last_event=self._last_event)
+        try:
+            self.folder.mkdir(parents=True,exist_ok=True)
+            (self.folder/'stop-request.json').write_text(json.dumps(record,indent=2),encoding='utf-8')
+        except (OSError,TypeError,ValueError):pass
+        if self._run_finished.wait(2):return
+        frame=sys._current_frames().get(self._worker_thread_id)
+        record.update(last_event=self._last_event,worker_thread_id=self._worker_thread_id,
+                      worker_stack=traceback.format_stack(frame) if frame is not None else [],
+                      worker_finished=self._run_finished.is_set())
+        if record['worker_finished']:return
+        try:(self.folder/'stop-wait.json').write_text(json.dumps(record,indent=2),encoding='utf-8')
+        except (OSError,TypeError,ValueError):pass
+    def _finish(self):
+        if self._run_finished.is_set():return
+        self._run_finished.set();self.emit('finished',{})
     def request_retry(self):
         """Request a native same-round retry without setting the stop flag."""
         with self._retry_lock:
@@ -122,7 +154,15 @@ class Runner:
         return None
     def event(self,kind,**data):
         entry={'time':round(time.time(),3),'kind':kind,**data}
+        self._last_event={key:entry[key] for key in ('time','kind','stage') if key in entry}
         self.trace.append(entry); self.emit(kind,data)
+        # A completion-only summary cannot diagnose a worker stuck before its
+        # first result. Persist plain events at their source, without images.
+        try:
+            self.folder.mkdir(parents=True,exist_ok=True)
+            with (self.folder/'run-events.jsonl').open('a',encoding='utf-8') as stream:
+                stream.write(json.dumps(entry,ensure_ascii=False)+'\n')
+        except (OSError,TypeError,ValueError):pass
         self.store.event(entry)
     def snapshot(self,g,label):
         im=g.capture(); self.store.image(label,im); return im
@@ -157,7 +197,16 @@ class Runner:
                 if self.stop.is_set():raise
                 im=None
     def launch(self,rules,mode='search',auto=False,activate=False,target=None,strategy='legacy',**strategy_context):
-        if strategy not in ('legacy','atlas','native'):
+        self._worker_thread_id=threading.get_ident()
+        try:return self._launch(rules,mode,auto,activate,target,strategy,**strategy_context)
+        except Exception as exc:
+            self.event('worker_failed',error=type(exc).__name__+': '+str(exc),error_traceback=traceback.format_exc())
+            raise
+        finally:self._finish()
+    def _launch(self,rules,mode='search',auto=False,activate=False,target=None,strategy='legacy',**strategy_context):
+        if strategy=='atlas':strategy='screenshot' # old saved profiles/API alias
+        auto=False # permanent production contract, including legacy routes
+        if strategy not in ('legacy','screenshot','native'):
             raise ValueError('Unknown search strategy')
         if strategy=='native':
             if self.native_runner is None:raise RuntimeError('Native strategy is not connected to this Runner')
@@ -173,12 +222,12 @@ class Runner:
             finally:
                 try:
                     (self.folder/'run-summary.json').write_text(json.dumps(dict(stop_requested=self.stop.is_set(),
-                        events=list(self.trace)),ensure_ascii=False,indent=2),encoding='utf-8')
+                        stop_diagnostic=stop_diagnostic(self.stop),events=list(self.trace)),ensure_ascii=False,indent=2),encoding='utf-8')
                 finally:
                     (self.folder/ACTIVE_MARKER).unlink(missing_ok=True)
-                    start_session_cleanup(self.folder.parent);self.emit('finished',{});self.trace.clear()
+                    start_session_cleanup(self.folder.parent);self._finish();self.trace.clear()
             return None
-        if strategy=='atlas':
+        if strategy=='screenshot':
             single=self.screenshot_runner is None and mode=='search' and sum(bool(r.get('enabled')) for r in rules)==1
             if not single and self.atlas_runner is None and self.screenshot_runner is None:
                 raise RuntimeError('Atlas strategy is not connected to this Runner')
@@ -221,13 +270,13 @@ class Runner:
                 try:
                     self.folder.mkdir(parents=True,exist_ok=True)
                     (self.folder/'run-summary.json').write_text(json.dumps(dict(
-                        stop_requested=self.stop.is_set(),events=list(self.trace)),
+                        stop_requested=self.stop.is_set(),stop_diagnostic=stop_diagnostic(self.stop),events=list(self.trace)),
                         ensure_ascii=False,indent=2),encoding='utf-8')
                 except (OSError,TypeError,ValueError):pass
                 try:(self.folder/ACTIVE_MARKER).unlink(missing_ok=True)
                 except OSError:pass
                 start_session_cleanup(self.folder.parent)
-                self.emit('finished',{})
+                self._finish()
                 self.trace.clear()
             return None
         self.store=SessionStore(self.folder,enabled=mode in ('diagnostic','recovery_test'))
@@ -570,7 +619,7 @@ class Runner:
             self.store.close()
             self.trace.clear()
             if hasattr(self,'best'):del self.best
-            self.emit('finished',{})
+            self._finish()
     def refine_actual(self,g,im,scene,rules,deadline):
         """Bound local trials; retain best globally and leave on no improvement."""
         trials=[('drag',(1,0)),('drag',(0,1))]
@@ -595,7 +644,7 @@ class Runner:
             return im,next_scene
         return im,scene
     def restore_best(self,g,im,scene,rules,deadline):
-        self.event('restoring',message='剩余约 30 秒，正在回到本轮最接近的已观察颜色。',colors=self.best.colors)
+        self.event('restoring',message='正在按游戏画面调整位置。F9 可停止。',colors=self.best.colors)
         restored=False
         self.best.begin_restore()
         target_best=True;stalls=0;attempt=0;previous_error=float('inf')
@@ -671,38 +720,10 @@ class Runner:
             if delta<1.5:raise RuntimeError(f'{label} 输入后色板没有可确认的变化，校准未通过。')
         self.event('done',message='输入校准完成：平移、旋转、缩放均引起画面变化；未套用颜色。',colors=scene.colors)
     def submit(self,g,scene,rules):
-        # Submit only on an identified active board. Final apply requires result re-recognition.
-        if scene.button is None:raise RuntimeError('已匹配，但未识别到游戏确认按钮。请手动确认。')
-        g.click(scene.button)
-        for _ in range(12):
-            time.sleep(.25); im=g.capture(); colors=result_colors(im)
-            if colors is not None:break
-        else:raise RuntimeError('已提交，但结果页未能可靠识别，未点击套用。请在游戏中确认。')
-        self.store.image('result',im)
-        if not accepted(colors,rules):raise RuntimeError('结果色码与目标不符，已停止套用。请取消本次结果。')
-        return self.apply_result(g,im,colors)
+        raise RuntimeError('自动确认已关闭，请在游戏内手动确认。')
+
     def apply_result(self,g,im,colors):
-        # Color pills appear before the final button during the result animation.
-        # Wait for both, and recheck the same colors before any irreversible click.
-        for attempt in range(17):
-            g.check()
-            buttons=green_buttons(im)
-            if len(buttons)==1 and result_colors(im)==colors:break
-            if attempt==16:raise RuntimeError('结果页按钮在等待后仍无法可靠定位，未套用。')
-            time.sleep(.25);im=g.capture()
-        self.store.image('result-ready',im)
-        g.click(buttons[0][:2]);time.sleep(.8);after=self.snapshot(g,'applied')
-        if result_colors(after) is not None:raise RuntimeError('确认点击后结果页仍在，未确认套用成功。')
-        self.event('done',message='染色完成：目标色已通过结果页复核并套用。',colors=colors,popup=True,outcome='applied')
+        raise RuntimeError('自动套用已关闭，请在游戏内手动套用。')
+
     def reject(self,g,scene):
-        if scene.button is None:raise RuntimeError('未找到目标且无法定位结束按钮，请手动选择不使用。')
-        g.click(scene.button)
-        for _ in range(12):
-            time.sleep(.25);im=g.capture()
-            if result_colors(im) is not None:break
-        else:raise RuntimeError('未识别到结果页，请手动选择不使用本次染色。')
-        g.escape();time.sleep(.5);im=self.snapshot(g,'cancel-dialog');buttons=green_buttons(im)
-        # Cancellation dialog must dim the result pills and expose exactly one button.
-        if result_colors(im) is not None or len(buttons)!=1:raise RuntimeError('取消确认窗口未能可靠识别，请手动取消。')
-        g.click(buttons[0][:2]);time.sleep(.5);self.snapshot(g,'rejected')
-        self.event('done',message='本轮未找到全部目标，已取消结果并保留原色。本次消耗 1 个染色剂。')
+        raise RuntimeError('自动结束已关闭，请在游戏内手动选择。')

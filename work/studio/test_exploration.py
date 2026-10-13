@@ -39,12 +39,12 @@ class ExplorationTests(unittest.TestCase):
             self.assertNotEqual(point,previous)
             self.assertLessEqual(max(abs(point[i]-previous[i]) for i in range(2)),2)
             previous=point
-    def test_apply_waits_for_result_animation(self):
+    def test_apply_is_permanently_disabled_even_when_result_animation_finishes(self):
         im=np.zeros((100,100,3),np.uint8);game=MagicMock();game.capture.return_value=im
         colors=['#FFFFFF','#848484','#BE9953']
         with tempfile.TemporaryDirectory() as folder,patch('engine.time.sleep'),patch('engine.green_buttons',side_effect=[[],[],[(50,90,40,10)]]),patch('engine.result_colors',side_effect=[colors,None]):
-            Runner(lambda *args:None,folder).apply_result(game,im,colors)
-        game.click.assert_called_once_with((50,90))
+            with self.assertRaises(RuntimeError):Runner(lambda *args:None,folder).apply_result(game,im,colors)
+        game.click.assert_not_called();game.capture.assert_not_called()
 
     def test_apply_never_clicks_if_result_changes(self):
         im=np.zeros((100,100,3),np.uint8);game=MagicMock();game.capture.return_value=im

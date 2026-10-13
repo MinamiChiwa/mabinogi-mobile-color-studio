@@ -11,7 +11,7 @@ class StrategyDefaultUITests(unittest.TestCase):
         from profile_store import read_profile
         helper=NativeUIHitTestingTests();self.addCleanup(helper.doCleanups);helper.setUp()
         ui=helper.ui;original=i18n.language;self.addCleanup(i18n.set_language,original)
-        self.assertEqual(ui.search_strategy.get(),'atlas')
+        self.assertEqual(ui.search_strategy.get(),'screenshot')
         for language in i18n.LANGUAGES:
             ui.change_language(language);helper.pump(.02)
             options=ui.strategy_menu.cget('values')
@@ -21,9 +21,9 @@ class StrategyDefaultUITests(unittest.TestCase):
             self.assertEqual(ui.search_strategy.get(),'native')
             self.assertEqual(ui.strategy_note.cget('text'),str(i18n.tr('警示：精准寻色会读取游戏内存，风险较高。')))
             ui.change_search_strategy(options[0]);helper.pump(.02)
-            self.assertEqual(ui.search_strategy.get(),'atlas')
+            self.assertEqual(ui.search_strategy.get(),'screenshot')
         ui.flush_autosave()
-        self.assertEqual(read_profile(Path(helper.folder.name)/'profile.json')['search_strategy'],'atlas')
+        self.assertEqual(read_profile(Path(helper.folder.name)/'profile.json')['search_strategy'],'screenshot')
         self.assertEqual(helper.errors,[])
 
     def test_runner_default_has_no_native_service(self):

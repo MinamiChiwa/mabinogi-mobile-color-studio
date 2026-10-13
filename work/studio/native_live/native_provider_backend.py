@@ -24,6 +24,19 @@ EXPECTED_BUILD='1675c2131534d0ab2fc053af8a2e394d326ba7d22eff0019734be96b1808678f
 EXPECTED_METADATA='3f6827a41d26ab50ef0051b881cb2c6dcab0c12aab5e95cc7da0071fae63a847'
 UNINITIALIZED_DYE_CLASS_TOKEN=0x20035507
 
+def _hash_build_file(path,check):
+    """Hash every byte without buffering a large client DLL or hiding F9."""
+    check();before=path.stat();digest=hashlib.sha256()
+    with path.open('rb') as stream:
+        while True:
+            check();chunk=stream.read(1024*1024);check()
+            if not chunk:break
+            digest.update(chunk)
+    after=path.stat();check()
+    if (before.st_size,before.st_mtime_ns)!=(after.st_size,after.st_mtime_ns):
+        raise OSError('Game build file changed during fingerprint validation')
+    return digest.hexdigest()
+
 class DyeClassUnavailable(ValueError):
     def __init__(self,message,*,class_value=None):
         self.class_value=class_value
@@ -43,7 +56,8 @@ class GuardedReader(Reader):
 
 
 class CurrentBuildBackend:
-    def __init__(self, pid, *, output_root=None,clock=time.monotonic):
+    def __init__(self, pid, *, output_root=None,clock=time.monotonic,check=lambda:None):
+        check()
         self.clock=clock
         self.reader = GuardedReader(pid)
         self.output_root=Path(output_root) if output_root is not None else Path.cwd()/'native-captures'
@@ -54,10 +68,11 @@ class CurrentBuildBackend:
             raise OSError('Process creation identity unavailable')
         self.creation = (creation.dwHighDateTime << 32) | creation.dwLowDateTime
         try:
+            check()
             self.build_files=resolve_build_files(self.reader.module_files)
-            self.version = hashlib.sha256(self.build_files['gameassembly'].read_bytes()).hexdigest()
-            self.metadata_version = hashlib.sha256(self.build_files['metadata'].read_bytes()).hexdigest()
-            self.unityplayer_version = hashlib.sha256(self.build_files['unityplayer'].read_bytes()).hexdigest()
+            self.version = _hash_build_file(self.build_files['gameassembly'],check)
+            self.metadata_version = _hash_build_file(self.build_files['metadata'],check)
+            self.unityplayer_version = _hash_build_file(self.build_files['unityplayer'],check)
             self.adapter=select_adapter(dict(gameassembly=self.version,metadata=self.metadata_version,unityplayer=self.unityplayer_version))
         except BuildUnsupported as exc:
             self.build_diagnostic={'hashes':exc.hashes,'adapter':'unsupported','inputs_sent':0}

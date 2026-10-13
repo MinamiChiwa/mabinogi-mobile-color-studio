@@ -3,10 +3,26 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 import unittest
+import hashlib,tempfile
 from native_live import native_provider_backend as module
 
 
 class NativePortableBackendTests(unittest.TestCase):
+    def test_build_fingerprint_is_streamed_and_responds_to_cancel_between_chunks(self):
+        digest=getattr(module,'_hash_build_file',None)
+        self.assertTrue(callable(digest),'Whole-file hashing must not hide F9')
+        data=b'\x12\x34\x56\x78'*(1024*1024)
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'GameAssembly.dll';path.write_bytes(data)
+            with patch.object(Path,'read_bytes',side_effect=AssertionError('Whole-file buffering')):
+                self.assertEqual(digest(path,lambda:None),hashlib.sha256(data).hexdigest())
+                checks=[]
+                def cancelled():
+                    checks.append(True)
+                    if len(checks)==3:raise InterruptedError('F9')
+                with self.assertRaisesRegex(InterruptedError,'F9'):digest(path,cancelled)
+                self.assertEqual(len(checks),3)
+
     def backend(self):
         b=object.__new__(module.CurrentBuildBackend)
         b.reader=SimpleNamespace(guard=lambda:None);b.window_hwnd=1;b.unityplayer_version='verified'

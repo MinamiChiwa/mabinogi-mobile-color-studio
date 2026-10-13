@@ -11,7 +11,7 @@ RULES=[dict(enabled=True,exact=True,colors=['#FFFFFF'],tolerance=8,priority=i+1)
 class ScreenshotUITests(unittest.TestCase):
     def setUp(self):
         self.helper=hit.NativeUIHitTestingTests();self.helper.setUp();self.addCleanup(self.helper.doCleanups)
-        self.ui=self.helper.ui;self.ui.search_strategy.set('atlas');self.ui.active_rules=copy.deepcopy(RULES)
+        self.ui=self.helper.ui;self.ui.search_strategy.set('screenshot');self.ui.active_rules=copy.deepcopy(RULES)
         self.ui.busy=True;self.requests=[]
         self.ui.runner=SimpleNamespace(stop=threading.Event(),request_retry=lambda:self.requests.append(True))
         self.ui.overlay=SearchOverlay(self.ui,self.ui.stop,self.ui.select_candidate)
