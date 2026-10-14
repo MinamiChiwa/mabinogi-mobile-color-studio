@@ -316,6 +316,7 @@ class App(ct.CTk):
         super().__init__();self.title(f"{tr('染色工坊 · 瑪奇 Mobile')}  v{APP_VERSION}");self.geometry('1120x800');self.minsize(MIN_WINDOW_WIDTH,560);self.configure(fg_color=BG)
         self._resize_redraw=TopLevelResizeRedrawOptimization()
         self.after(100,self.fit_screen)
+        self.after_idle(self._disable_resize_redraw)
         self.selected_window=None;self._bound_target=None;self.overlay=None;self.active_rules=None;self.history=read_history(DATA/'history.json');self.best_summary=None
         self.q=queue.Queue();self.runner=None;self.busy=False;self.picking=False;self.keys={};self.cards=[]
         self._closing=False
@@ -435,6 +436,9 @@ class App(ct.CTk):
             self.after_idle(lambda:signal_ready(self._update_transaction))
             self.start.configure(state='disabled');self.after(100,self._await_update_commit)
         elif getattr(sys,'frozen',False):self.after(3000,self.updater.check)
+    def _disable_resize_redraw(self):
+        try:self._resize_redraw.disable_for(self.winfo_id())
+        except (tk.TclError,AttributeError,ValueError):return
     def _await_update_commit(self):
         try:state=json.loads((self._update_transaction/'state.json').read_text(encoding='utf-8'))
         except (OSError,ValueError):state={}
