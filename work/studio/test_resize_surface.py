@@ -68,9 +68,11 @@ class ResizeSurfaceTests(unittest.TestCase):
             self.ui.body_scroll._parent_canvas.yview_moveto(.25)
             self.helper.pump(.03)
             before=self.ui.body_scroll._parent_canvas.yview()[0]
-            for _ in range(2):
+            # Both iterations must change size. Repeating the same dimensions
+            # is a move-only gesture, which deliberately leaves the page live.
+            for width in (600,560):
                 emit_resize_event(surface,EVENT_SYSTEM_MOVESIZESTART,self.helper)
-                self.ui.geometry(f'{round(600*density)}x950+20+20');self.helper.pump(.03)
+                self.ui.geometry(f'{round(width*density)}x950+20+20');self.helper.pump(.03)
                 self.assertTrue(surface.active)
                 emit_resize_event(surface,EVENT_SYSTEM_MOVESIZEEND,self.helper)
                 self.assertEqual(self.ui._layout_columns,1)

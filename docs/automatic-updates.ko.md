@@ -6,9 +6,10 @@
 
 | 용도 | 파일 | 사용 방법 |
 |---|---|---|
-| 첫 설치 또는 수동 업그레이드 | `ColorStudio-v0.4.5-Windows-x64.zip` | 전체 압축을 풀어 실행 |
-| 전체 오프라인 업데이트 | `UPDATE-ONLY-ColorStudio-0.4.5-win-x64.zip` | 기존 도구에서 가져오기 |
-| 공식 0.4.4에서 업데이트 | `UPDATE-ONLY-ColorStudio-from-0.4.4-to-0.4.5-win-x64.zip` | 파일이 일치하는 공식 0.4.4 최종 수정판만 사용 가능 |
+| 첫 설치 또는 수동 업그레이드 | `ColorStudio-v0.4.6-Windows-x64.zip` | 전체 압축을 풀어 실행 |
+| 전체 오프라인 업데이트 | `UPDATE-ONLY-ColorStudio-0.4.6-win-x64.zip` | 기존 도구에서 가져오기 |
+| 공식 0.4.5에서 업데이트 | `UPDATE-ONLY-ColorStudio-from-0.4.5-to-0.4.6-win-x64.zip` | 파일이 일치하는 공식 0.4.5만 사용 가능 |
+| 공식 0.4.4에서 업데이트 | `UPDATE-ONLY-ColorStudio-from-0.4.4-to-0.4.6-win-x64.zip` | 파일이 일치하는 공식 0.4.4 최종 수정판만 사용 가능 |
 
 **UPDATE-ONLY는 첫 설치용이 아니며 압축을 풀어 직접 실행할 수도 없습니다.** 작은 증분 패키지가 맞지 않으면 전체 오프라인 업데이트를 사용하세요. 릴리스 페이지의 `blob-` 파일을 따로 받을 필요는 없습니다.
 
@@ -43,4 +44,4 @@ GitHub에 접속할 수 없으면 다른 컴퓨터에서 전체 오프라인 업
 
 실패 후에는 현재 버전과 업데이트 기록을 먼저 확인하세요. 도움이 필요하면 [GitHub Issues](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/issues)에 로그를 첨부하세요.
 
-[사용 안내로 돌아가기](../README.ko.md) · [0.4.5 변경 내용](release-notes-0.4.5.md)
+[사용 안내로 돌아가기](../README.ko.md) · [0.4.6 변경 내용](release-notes-0.4.6.md)
