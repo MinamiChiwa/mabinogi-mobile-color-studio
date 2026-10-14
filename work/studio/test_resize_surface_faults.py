@@ -5,7 +5,7 @@ import tkinter as tk
 import unittest
 from unittest.mock import MagicMock,patch
 
-from resize_surface import NativeResizeSurface
+from resize_surface import EVENT_SYSTEM_MOVESIZEEND,EVENT_SYSTEM_MOVESIZESTART,NativeResizeSurface
 
 
 class ResizeSurfaceFaultTests(unittest.TestCase):
@@ -15,6 +15,17 @@ class ResizeSurfaceFaultTests(unittest.TestCase):
         surface._poll_events()
         self.assertFalse(surface._native_sizing)
         self.assertFalse(surface._scale_owns_surface)
+
+    def tracking_surface(self,size):
+        surface=self.surface()
+        surface.size={'value':size}
+        surface.window.winfo_width=lambda:surface.size['value'][0]
+        surface.window.winfo_height=lambda:surface.size['value'][1]
+        surface.window.state=lambda:'normal'
+        surface.window.after=MagicMock(return_value='next')
+        surface._events.clear()
+        surface._settled_size=size
+        return surface
 
     def surface(self):
         page=SimpleNamespace(mapped=True)
@@ -70,6 +81,98 @@ class ResizeSurfaceFaultTests(unittest.TestCase):
         self.assertFalse(surface.active)
         self.assertIsNone(surface._photo)
         self.assertIsNone(surface._image_id)
+
+    def test_move_only_gesture_does_not_cover_or_reflow(self):
+        surface=self.tracking_surface((800,600))
+        surface.enter=MagicMock(return_value=True)
+        surface._events.extend([EVENT_SYSTEM_MOVESIZESTART,EVENT_SYSTEM_MOVESIZEEND])
+        surface._poll_events()
+        surface.enter.assert_not_called()
+        surface.window.reflow.assert_not_called()
+        self.assertFalse(surface.active)
+        self.assertFalse(surface._native_sizing)
+
+    def test_resize_enters_only_after_the_client_size_changes(self):
+        surface=self.tracking_surface((800,600))
+        def enter():
+            surface.active=True
+            return True
+        surface.enter=enter
+        surface._events.append(EVENT_SYSTEM_MOVESIZESTART)
+        surface._poll_events()
+        self.assertFalse(surface.active)
+        surface.window.reflow.assert_not_called()
+        surface.size['value']=(900,640)
+        surface._poll_events()
+        self.assertTrue(surface.active)
+        surface.window.reflow.assert_not_called()
+        surface._events.append(EVENT_SYSTEM_MOVESIZEEND)
+        surface._poll_events()
+        self.assertFalse(surface.active)
+        surface.window.reflow.assert_called_once()
+
+    def test_resize_already_applied_before_the_poll_still_reflows_on_release(self):
+        surface=self.tracking_surface((800,600))
+        order=[]
+        def enter():
+            order.append('enter')
+            surface.active=True
+            return True
+        surface.enter=enter
+        surface.window.reflow=lambda:order.append('reflow')
+        surface.size['value']=(960,600)
+        surface._events.extend([EVENT_SYSTEM_MOVESIZESTART,EVENT_SYSTEM_MOVESIZEEND])
+        surface._poll_events()
+        self.assertEqual(order,['enter','reflow'])
+        self.assertFalse(surface.active)
+        self.assertEqual(surface._settled_size,(960,600))
+
+    def test_configure_during_a_queued_move_waits_for_a_real_size_change(self):
+        surface=self.tracking_surface((800,600))
+        surface._settled_size=(800,600)
+        surface.enter=MagicMock(return_value=True)
+        surface._events.append(EVENT_SYSTEM_MOVESIZESTART)
+        surface._on_configure(SimpleNamespace(widget=surface.window))
+        surface.enter.assert_not_called()
+        surface.size['value']=(880,600)
+        surface._on_configure(SimpleNamespace(widget=surface.window))
+        surface.enter.assert_called_once()
+        surface.window.reflow.assert_not_called()
+        self.assertEqual(surface._settled_size,(800,600))
+
+    def test_programmatic_configure_refreshes_the_move_baseline(self):
+        surface=self.tracking_surface((700,500))
+        surface._settled_size=(100,100)
+        surface.enter=MagicMock(return_value=True)
+        surface._on_configure(SimpleNamespace(widget=surface.window))
+        surface.enter.assert_not_called()
+        self.assertEqual(surface._settled_size,(700,500))
+        surface._events.extend([EVENT_SYSTEM_MOVESIZESTART,EVENT_SYSTEM_MOVESIZEEND])
+        surface._poll_events()
+        surface.enter.assert_not_called()
+        surface.window.reflow.assert_not_called()
+
+    def test_configure_between_queued_start_and_end_keeps_the_pre_gesture_size(self):
+        surface=self.tracking_surface((800,600))
+        surface.enter=lambda:setattr(surface,'active',True) or True
+        surface._events.extend([EVENT_SYSTEM_MOVESIZESTART,EVENT_SYSTEM_MOVESIZEEND])
+        surface.size['value']=(910,600)
+        surface._on_configure(SimpleNamespace(widget=surface.window))
+        self.assertTrue(surface.active)
+        self.assertEqual(surface._settled_size,(800,600))
+        surface._poll_events()
+        self.assertFalse(surface.active)
+        surface.window.reflow.assert_called_once()
+        self.assertEqual(surface._settled_size,(910,600))
+
+    def test_hold_scaling_still_covers_without_a_client_size_change(self):
+        surface=self.tracking_surface((800,600))
+        entered=[]
+        surface.enter=lambda:entered.append(True) or True
+        surface.hold_scaling()
+        self.assertEqual(entered,[True])
+        self.assertTrue(surface._scale_owns_surface)
+        surface.window.update_idletasks.assert_called_once()
 
     def test_destroy_event_cancels_poll_and_discards_queued_events(self):
         surface=self.surface()

@@ -142,6 +142,26 @@ class ResizeTests(unittest.TestCase):
         self.assertTrue(optimization.restore())
         self.assertEqual(api.style,CS_HREDRAW|CS_VREDRAW|0x3000)
 
+    def test_app_disables_resize_redraw_once_toplevel_hwnd_is_ready(self):
+        import tkinter as tk
+        from pathlib import Path
+        source=(Path(__file__).resolve().parent/'app.py').read_text(encoding='utf-8')
+        self.assertIn('self.after_idle(self._disable_resize_redraw)',source)
+        self.assertIn('def _disable_resize_redraw(self):',source)
+        body=source.split('def _disable_resize_redraw(self):',1)[1].split('\n    def ',1)[0]
+        self.assertIn('self._resize_redraw.disable_for(self.winfo_id())',body)
+        self.assertIn('self._resize_redraw.restore()',source)
+        namespace={'tk':tk}
+        exec('def _disable_resize_redraw(self):'+body,namespace)
+        redraw=MagicMock()
+        window=SimpleNamespace(winfo_id=lambda:77,_resize_redraw=redraw)
+        namespace['_disable_resize_redraw'](window)
+        redraw.disable_for.assert_called_once_with(77)
+        redraw.reset_mock()
+        window.winfo_id=MagicMock(side_effect=tk.TclError('destroyed'))
+        namespace['_disable_resize_redraw'](window)
+        redraw.disable_for.assert_not_called()
+
     def test_resize_redraw_optimization_is_noop_when_flags_are_absent_or_non_windows(self):
         from resize_rendering import TopLevelResizeRedrawOptimization
         api=SimpleNamespace(GetClassLongPtrW=lambda *_:0,SetClassLongPtrW=MagicMock())

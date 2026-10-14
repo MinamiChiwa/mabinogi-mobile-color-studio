@@ -27,10 +27,10 @@ class ResizeSurfaceTests(unittest.TestCase):
         from resize_surface import EVENT_SYSTEM_MOVESIZESTART,EVENT_SYSTEM_MOVESIZEEND
         surface=self.ui._resize_surface
         emit_resize_event(surface,EVENT_SYSTEM_MOVESIZESTART,self.helper)
-        self.assertTrue(surface.active)
-        self.assertFalse(self.ui.page.winfo_ismapped())
         self.ui.cards[0].target.set('#ABCDEF')
         self.ui.geometry('850x850+20+20');self.helper.pump(.08)
+        self.assertTrue(surface.active)
+        self.assertFalse(self.ui.page.winfo_ismapped())
         emit_resize_event(surface,EVENT_SYSTEM_MOVESIZEEND,self.helper)
         self.helper.pump(.15)
         self.assertFalse(surface.active)
@@ -47,6 +47,7 @@ class ResizeSurfaceTests(unittest.TestCase):
         surface=self.ui._resize_surface
         with patch('resize_surface.capture_client_image',side_effect=OSError('capture unavailable')):
             emit_resize_event(surface,EVENT_SYSTEM_MOVESIZESTART,self.helper)
+            self.ui.geometry('640x900+20+20');self.helper.pump(.08)
         self.assertFalse(surface.active)
         self.assertTrue(self.ui.page.winfo_ismapped())
         self.assertEqual(self.helper.errors,[])
@@ -69,8 +70,8 @@ class ResizeSurfaceTests(unittest.TestCase):
             before=self.ui.body_scroll._parent_canvas.yview()[0]
             for _ in range(2):
                 emit_resize_event(surface,EVENT_SYSTEM_MOVESIZESTART,self.helper)
-                self.assertTrue(surface.active)
                 self.ui.geometry(f'{round(600*density)}x950+20+20');self.helper.pump(.03)
+                self.assertTrue(surface.active)
                 emit_resize_event(surface,EVENT_SYSTEM_MOVESIZEEND,self.helper)
                 self.assertEqual(self.ui._layout_columns,1)
                 self.assertAlmostEqual(self.ui.body_scroll._parent_canvas.yview()[0],before,delta=.005)
@@ -87,6 +88,42 @@ class ResizeSurfaceTests(unittest.TestCase):
         self.assertFalse(surface.active)
         self.assertTrue(self.ui.page.winfo_ismapped())
         self.helper.hit(self.ui.cards[0].target_entry)
+        self.assertEqual(self.helper.errors,[])
+
+    def test_title_bar_move_keeps_live_page_until_a_real_resize(self):
+        from resize_surface import EVENT_SYSTEM_MOVESIZESTART,EVENT_SYSTEM_MOVESIZEEND
+        surface=self.ui._resize_surface
+        reflow=self.ui.reflow
+        calls=[]
+        def spy(*args,**kwargs):
+            calls.append(1)
+            return reflow(*args,**kwargs)
+        self.ui.reflow=spy
+        width,height=self.ui.winfo_width(),self.ui.winfo_height()
+        x,y=self.ui.winfo_x(),self.ui.winfo_y()
+        emit_resize_event(surface,EVENT_SYSTEM_MOVESIZESTART,self.helper)
+        self.ui.geometry(f'+{x+48}+{y+36}')
+        self.helper.pump(.08)
+        self.assertFalse(surface.active)
+        self.assertTrue(self.ui.page.winfo_ismapped())
+        self.assertFalse(surface._overlay.winfo_ismapped())
+        self.assertEqual((self.ui.winfo_width(),self.ui.winfo_height()),(width,height))
+        emit_resize_event(surface,EVENT_SYSTEM_MOVESIZEEND,self.helper)
+        self.helper.pump(.05)
+        self.assertFalse(surface.active)
+        self.assertEqual(calls,[])
+        emit_resize_event(surface,EVENT_SYSTEM_MOVESIZESTART,self.helper)
+        scale=self.ui._get_window_scaling()
+        logical_w=max(1,round(width/scale));logical_h=max(1,round(height/scale))
+        self.ui.geometry(f'{logical_w+80}x{logical_h}+30+30')
+        self.helper.pump(.08)
+        self.assertTrue(surface.active)
+        self.assertFalse(self.ui.page.winfo_ismapped())
+        emit_resize_event(surface,EVENT_SYSTEM_MOVESIZEEND,self.helper)
+        self.helper.pump(.08)
+        self.assertFalse(surface.active)
+        self.assertTrue(self.ui.page.winfo_ismapped())
+        self.assertTrue(calls)
         self.assertEqual(self.helper.errors,[])
 
     def test_scaling_batch_keeps_cover_until_all_live_children_settle(self):

@@ -82,10 +82,15 @@ class NativeResizeSurface:
         self._events=deque();self._poll_job=None
         self._scale_job=None;self._scale_owns_surface=False
         self._native_sizing=False
+        self._settled_size=None;self._gesture_size=None
+        self._awaiting_size_change=False;self._cover_attempted=False
+        self._configure_binding=None
         self._overlay=tk.Canvas(window,highlightthickness=0,borderwidth=0,bg='#10151F')
         self._overlay.bind('<Configure>',self._position_image)
         self._destroy_binding=window.bind('<Destroy>',self._on_destroy,add='+')
+        self._configure_binding=window.bind('<Configure>',self._on_configure,add='+')
         if sys.platform=='win32':self._install_hook()
+        self._settled_size=self._client_size()
         self._poll_job=window.after(16,self._poll_events)
 
     def _install_hook(self):
@@ -115,16 +120,18 @@ class NativeResizeSurface:
         try:
             while self._events:
                 event=self._events.popleft()
-                if event==EVENT_SYSTEM_MOVESIZESTART:
-                    self._native_sizing=True;self.enter()
-                else:
-                    self._native_sizing=False
-                    if not self._scale_owns_surface:self.exit()
+                if event==EVENT_SYSTEM_MOVESIZESTART:self._begin_move_size()
+                else:self._end_move_size()
+            if self._native_sizing:self._enter_if_resized()
             # Minimize/close can cancel the gesture before its end event.
             if self.window.state()=='iconic':
-                self._native_sizing=False;self._scale_owns_surface=False;self.exit()
+                self._native_sizing=False;self._scale_owns_surface=False
+                self._awaiting_size_change=False;self._cover_attempted=False;self._gesture_size=None
+                self.exit()
         except (tk.TclError,RuntimeError):
-            self._native_sizing=False;self._scale_owns_surface=False;self.exit()
+            self._native_sizing=False;self._scale_owns_surface=False
+            self._awaiting_size_change=False;self._cover_attempted=False;self._gesture_size=None
+            self.exit()
         finally:
             if not self._closed:
                 try:self._poll_job=self.window.after(16,self._poll_events)
@@ -135,41 +142,97 @@ class NativeResizeSurface:
             width=event.width if event is not None else self._overlay.winfo_width()
             self._overlay.coords(self._image_id,width//2,0)
 
+    def _client_size(self,event=None):
+        if event is not None and getattr(event,'widget',None) is self.window:
+            width,height=getattr(event,'width',None),getattr(event,'height',None)
+            if isinstance(width,int) and isinstance(height,int) and width>1 and height>1:
+                return width,height
+        try:width,height=int(self.window.winfo_width()),int(self.window.winfo_height())
+        except (tk.TclError,AttributeError,TypeError,ValueError):return None
+        if width<=1 or height<=1:return None
+        return width,height
+
+    def _resize_gesture_pending(self):
+        # A start still sitting in the queue is an open gesture even when its
+        # end event is already queued behind it. Updating the baseline first
+        # would hide a resize that finished before the timer drained.
+        if self._native_sizing or getattr(self,'_awaiting_size_change',False):return True
+        return any(event==EVENT_SYSTEM_MOVESIZESTART for event in self._events)
+
+    def _begin_move_size(self):
+        # A title-bar move and an edge resize are the same Windows gesture.
+        # Keep the pre-gesture client size and cover only after it changes.
+        self._native_sizing=True
+        self._awaiting_size_change=True
+        if getattr(self,'_gesture_size',None) is None:
+            if getattr(self,'_settled_size',None) is None:self._settled_size=self._client_size()
+            self._gesture_size=self._settled_size
+        self._enter_if_resized()
+
+    def _end_move_size(self):
+        self._enter_if_resized()
+        self._native_sizing=False
+        self._awaiting_size_change=False
+        self._cover_attempted=False
+        self._gesture_size=None
+        size=self._client_size()
+        if size is not None:self._settled_size=size
+        if not self._scale_owns_surface:self.exit()
+
+    def _enter_if_resized(self,event=None):
+        if self._closed or self.active or getattr(self,'_cover_attempted',False):return False
+        if not self._resize_gesture_pending():return False
+        current=self._client_size(event)
+        baseline=getattr(self,'_gesture_size',None)
+        if baseline is None:baseline=getattr(self,'_settled_size',None)
+        if current is None or baseline is None or current==baseline:return False
+        self._cover_attempted=True
+        return bool(self.enter())
+
+    def _on_configure(self,event):
+        if self._closed or getattr(event,'widget',None) is not self.window:return
+        if self._resize_gesture_pending():
+            self._enter_if_resized(event)
+            return
+        size=self._client_size(event)
+        if size is not None:self._settled_size=size
+
     def enter(self):
         if self.active or self._closed or self._capturing:return False
         self._capturing=True
         try:
-            image=capture_client_image(self.window)
-            self._photo=ImageTk.PhotoImage(image,master=self.window)
-        except Exception:
-            self._photo=None;return False
+            try:
+                image=capture_client_image(self.window)
+                self._photo=ImageTk.PhotoImage(image,master=self.window)
+            except Exception:
+                self._photo=None;return False
+            job=getattr(self.window,'_resize_layout_job',None)
+            if job is not None:
+                try:self.window.after_cancel(job)
+                except tk.TclError:pass
+                self.window._resize_layout_job=None
+            self._overlay.delete('all')
+            self._image_id=self._overlay.create_image(image.width//2,0,anchor='n',image=self._photo)
+            self._page_grid=dict(self.window.page.grid_info())
+            self._page_manager_call=getattr(self.window.page,'_last_geometry_manager_call',None)
+            # CTk reapplies this cached grid during its own _set_scaling callback.
+            # Clearing it keeps the live hierarchy hidden for the entire batch.
+            self.window.page._last_geometry_manager_call=None
+            try:
+                self.window.page.grid_remove()
+                self._overlay.grid(row=0,column=0,sticky='nsew')
+            except (tk.TclError,RuntimeError):
+                # A close or another geometry callback may race this boundary.
+                # Never leave the live page hidden when the snapshot cannot mount.
+                try:self._overlay.grid_remove()
+                except tk.TclError:pass
+                self._clear_snapshot()
+                self._restore_page()
+                self._page_grid=None
+                return False
+            self.active=True
+            return True
         finally:self._capturing=False
-        job=getattr(self.window,'_resize_layout_job',None)
-        if job is not None:
-            try:self.window.after_cancel(job)
-            except tk.TclError:pass
-            self.window._resize_layout_job=None
-        self._overlay.delete('all')
-        self._image_id=self._overlay.create_image(image.width//2,0,anchor='n',image=self._photo)
-        self._page_grid=dict(self.window.page.grid_info())
-        self._page_manager_call=getattr(self.window.page,'_last_geometry_manager_call',None)
-        # CTk reapplies this cached grid during its own _set_scaling callback.
-        # Clearing it keeps the live hierarchy hidden for the entire batch.
-        self.window.page._last_geometry_manager_call=None
-        try:
-            self.window.page.grid_remove()
-            self._overlay.grid(row=0,column=0,sticky='nsew')
-        except (tk.TclError,RuntimeError):
-            # A close or another geometry callback may race this boundary.
-            # Never leave the live page hidden when the snapshot cannot mount.
-            try:self._overlay.grid_remove()
-            except tk.TclError:pass
-            self._clear_snapshot()
-            self._restore_page()
-            self._page_grid=None
-            return False
-        self.active=True
-        return True
 
     def sizing(self):
         return self.active
@@ -229,6 +292,13 @@ class NativeResizeSurface:
                 self.window.page.grid(**grid)
         except (tk.TclError,RuntimeError):pass
 
+    def _unbind_configure(self):
+        binding=getattr(self,'_configure_binding',None)
+        if not binding:return
+        try:self.window.unbind('<Configure>',binding)
+        except (tk.TclError,AttributeError):pass
+        self._configure_binding=None
+
     def _remove_hook(self):
         if self._hook:
             try:self._user.UnhookWinEvent(self._hook)
@@ -237,7 +307,7 @@ class NativeResizeSurface:
 
     def _on_destroy(self,event):
         if event.widget is self.window:
-            self._closed=True;self.active=False;self._remove_hook()
+            self._closed=True;self.active=False;self._remove_hook();self._unbind_configure()
             self._events.clear();self._image_id=None;self._photo=None;self._page_grid=None
             if self._scale_job is not None:
                 try:self.window.after_cancel(self._scale_job)
@@ -250,7 +320,7 @@ class NativeResizeSurface:
 
     def destroy(self):
         if self._closed:return
-        self.exit();self._remove_hook();self._closed=True
+        self.exit();self._remove_hook();self._unbind_configure();self._closed=True
         if self._scale_job is not None:
             try:self.window.after_cancel(self._scale_job)
             except tk.TclError:pass
