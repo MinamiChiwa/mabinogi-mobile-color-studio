@@ -155,6 +155,7 @@ class ScreenshotMeasuredRefinementTests(unittest.TestCase):
                 def observe(*a):raise failure
                 c=SimpleNamespace(current=value,best=value,rules=mixed_rules(),actions=[],observations=[],
                     observe=observe,budget=Budget(120,.4),write=lambda *a:None,
+                    safe_restore=lambda *a,**kw:dict(verified=False),
                     owner=SimpleNamespace(event=lambda *a,**kw:events.append((a,kw))))
                 result=_publish(c,'processing_error')
                 self.assertEqual(result['outcome'],'unverified')
@@ -176,7 +177,7 @@ class ScreenshotMeasuredRefinementTests(unittest.TestCase):
         def move(matrix,*a,**kw):tested.append(matrix);c.pose=matrix;return True
         def read(*a,**kw):c.current=bad;return bad
         c.move_to=move;c.observe=read;c.restore=lambda:bad
-        samples=SimpleNamespace(period=100,arrays=lambda:([np.array([[0.,0.]])]*3,[np.array([[0,0,0]])]*3))
+        samples=SimpleNamespace(period=100,arrays=lambda **kw:([np.array([[0.,0.]])]*3,[np.array([[0,0,0]])]*3))
         desired=np.eye(3);desired[0,2]=10
         with patch('screenshot_live.solve',return_value=dict(candidates=[dict(matrix=desired)]*2)),patch('screenshot_live._refine'):
             _search(c,samples)

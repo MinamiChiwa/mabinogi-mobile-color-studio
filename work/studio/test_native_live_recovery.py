@@ -22,7 +22,7 @@ class RecoveryTests(unittest.TestCase):
         second['window_context']['window']['hwnd']=123456
         self.assertNotEqual(_binding(first),_binding(second))
 
-    def test_focus_return_before_input_does_not_force_a_restart(self):
+    def test_focus_loss_is_latched_even_if_focus_returns_before_input(self):
         from native_live import project_probe_io as module
         io=object.__new__(module.ProjectProbeIO)
         import threading
@@ -35,8 +35,9 @@ class RecoveryTests(unittest.TestCase):
         io.original_game_check=game_check;io._performing_input=False
         with patch.object(module.time,'monotonic',side_effect=lambda:tick[0]), \
              patch.object(module.time,'sleep',side_effect=lambda seconds:tick.__setitem__(0,tick[0]+seconds)):
-            io._input_guard()
-        self.assertEqual(len(attempts),2)
+            with self.assertRaises(InterruptedError):io._input_guard()
+            with self.assertRaises(InterruptedError):io._input_guard()
+        self.assertEqual(len(attempts),1)
 
     def test_focus_loss_inside_gesture_stops_immediately(self):
         from native_live import project_probe_io as module

@@ -32,7 +32,7 @@ class ProfileUITests(unittest.TestCase):
         saved=read_profile(self.root/'profile.json')
         self.assertEqual(saved['regions'][0],dict(enabled=False,target='#12',
             alt='#FFFFFF, #AABBCC',mode='相似颜色',tolerance=12.))
-        self.assertEqual(saved['search_strategy'],'atlas')
+        self.assertEqual(saved['search_strategy'],'screenshot')
         self.assertEqual(saved['priority_order'],[2,1,0])
         self.assertEqual([row.priority_menu.get() for row in self.ui.cards],['3','2','1'])
         self.assertEqual(self.helper.errors,[])

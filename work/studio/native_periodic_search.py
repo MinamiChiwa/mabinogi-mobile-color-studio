@@ -5,12 +5,32 @@ does not prove exhaustion of continuous bilinear color regions. Every returned
 solution is checked by the original float32 CPU picker, never treated as live.
 """
 from dye_regions import validate_region_rules
-import heapq,itertools,math,time
+import heapq,itertools,math,time,hashlib
+from collections import OrderedDict
 import numpy as np
 from native_palette_model import picker_view_uv,sample_cpu,color32,distort_uv
 from native_palette_scoring import score_native_pose,_pose
 from vision import rgb,lab
 from region_priority import priority_components, priority_indices, vector_priority_components
+
+
+def periodic_samples(session,index,fy,fx,*,check=lambda:None):
+    """Session-bound original-resolution sample preprocessing, never a hit cache."""
+    check();pixels=np.asarray(session['pixels'][index]);q=float(session['color_preserve_ratio'])
+    digest=hashlib.sha256(pixels.tobytes()).digest()
+    key=(index,pixels.shape,digest,q,float(fy),float(fx))
+    cache=session.setdefault('_periodic_sample_cache',OrderedDict())
+    if key in cache:
+        cache.move_to_end(key);check();return cache[key]
+    h,w=pixels.shape[:2];yy,xx=np.indices((h,w))
+    uv=np.stack(((xx+.5+fx)/w,(h-yy-.5+fy)/h),axis=-1).reshape(-1,2).astype(np.float32)
+    colors=color32(sample_cpu(pixels,uv,q)/np.float32(255));color_lab=lab(colors)
+    check()
+    for array in (uv,colors,color_lab):array.setflags(write=False)
+    value=(uv,colors,color_lab);cache[key]=value
+    while sum(sum(a.nbytes for a in row) for row in cache.values())>48*1024*1024 and len(cache)>1:
+        cache.popitem(last=False)
+    return value
 
 
 def inverse_periodic_uv(uv):
@@ -119,13 +139,12 @@ def search_periodic_targets(session,rules,*,minimum_scale,maximum_scale,
         enabled=([i for i,r in enumerate(rules) if r['enabled']] if prioritized is None else prioritized)
         for i in enabled:
             guard();pixels=session['pixels'][i];h,w=pixels.shape[:2]
-            yy,xx=np.indices((h,w));matched=[];sampled_uv=[];sampled_losses=[]
+            matched=[];sampled_uv=[];sampled_losses=[]
             for fy,fx in itertools.product(fractions,repeat=2):
                 guard()
-                uv=np.stack(((xx+.5+fx)/w,(h-yy-.5+fy)/h),axis=-1).reshape(-1,2).astype(np.float32)
-                colors=color32(sample_cpu(pixels,uv,session['color_preserve_ratio'])/np.float32(255))
+                uv,colors,color_lab=periodic_samples(session,i,fy,fx,check=guard)
                 mask=np.zeros(len(colors),bool);rule=rules[i]
-                color_lab=lab(colors);losses=np.full(len(colors),np.inf)
+                losses=np.full(len(colors),np.inf)
                 for target in rule['colors']:
                     guard();target_rgb=np.asarray(rgb(target))
                     delta=np.linalg.norm(color_lab-lab([target_rgb])[0],axis=1)

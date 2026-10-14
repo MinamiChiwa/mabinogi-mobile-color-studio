@@ -144,12 +144,13 @@ def build_preview(target,tolerance):
 SERVER_OPTIONS=(('tw','台服'),('kr','韩服'),('jp','日服'))
 NATIVE_STRATEGY_LABEL='精准寻色（读取内存，风险较高）'
 
-def build_runner(emit,folder,strategy='atlas',entry=None,entry_size=None):
+def build_runner(emit,folder,strategy='screenshot',entry=None,entry_size=None):
     # Screenshot is the default. Memory access requires an explicit selection.
     if strategy=='native':
         from native_live.service import run_native_search
         return Runner(emit,folder,native_runner=run_native_search)
-    if strategy not in ('atlas','legacy'):raise ValueError('Unknown search strategy')
+    if strategy=='atlas':strategy='screenshot'
+    if strategy not in ('screenshot','legacy'):raise ValueError('Unknown search strategy')
     from screenshot_live import run_screenshot_search
     return Runner(emit,folder,screenshot_runner=run_screenshot_search)
 
@@ -244,7 +245,7 @@ class Card(ct.CTkFrame):
         if getattr(self,'_last_exact',None)!=exact:
             self.slider.configure(state='disabled' if exact else 'normal',progress_color='#45505F' if exact else ACCENT,button_color='#596273' if exact else ACCENT,button_hover_color='#596273' if exact else '#80E5CF',fg_color='#303947' if exact else '#3A485D')
             self._last_exact=exact
-        self.hint.configure(text='六位色码必须完全一致' if exact else f'目标色差 ΔE ≤ {self.tolerance.get():.0f} · 数值越小越接近目标')
+        self.hint.configure(text='颜色要求：六位 HEX 必须一致' if exact else f'颜色要求：色差 ΔE ≤ {self.tolerance.get():.0f} · 越小越接近目标')
         self.schedule_palette()
     def preview(self,*_):
         try:
@@ -389,13 +390,13 @@ class App(ct.CTk):
         self.start=ct.CTkButton(controls,text='开始寻色   F8',height=44,width=165,font=(FONT,13,'bold'),fg_color=ACCENT,text_color='#102A27',hover_color='#80E5CF',command=lambda:self.go(activate=True));self.start.grid(row=0,column=0,padx=(0,8),pady=4,sticky='w')
         self.stop_button=ct.CTkButton(controls,text='停止   F9',height=44,width=100,font=BODY_FONT,fg_color='#2B384C',command=self.stop);self.stop_button.grid(row=0,column=1,padx=(0,8),pady=4,sticky='w')
         self.controls=controls;controls.grid_columnconfigure(2,weight=1)
-        selected=self._strategy_defaults['settings'].get('search_strategy','atlas')
-        self.search_strategy=tk.StringVar(value=selected if selected in ('native','atlas') else 'atlas')
+        selected=self._strategy_defaults['settings'].get('search_strategy','screenshot')
+        self.search_strategy=tk.StringVar(value=selected if selected in ('native','screenshot') else 'screenshot')
         self.strategy_menu=ct.CTkOptionMenu(controls,values=[str(tr('截图寻色')),str(tr(NATIVE_STRATEGY_LABEL))],
             width=330,height=30,font=BODY_FONT,command=self.change_search_strategy)
         self.strategy_menu.grid(row=1,column=0,columnspan=2,sticky='w',pady=(4,2))
         self.strategy_menu.set(str(tr(NATIVE_STRATEGY_LABEL if self.search_strategy.get()=='native' else '截图寻色')))
-        self.strategy_note=ct.CTkLabel(controls,text='截图寻色使用截图和鼠标操作，不读取游戏内存，风险相对较低。',font=SMALL_FONT,
+        self.strategy_note=ct.CTkLabel(controls,text='寻色方式：截图寻色。不读取游戏内存。',font=SMALL_FONT,
             text_color=MUTED,anchor='w',justify='left',wraplength=340,height=18)
         self.strategy_note.grid(row=2,column=0,columnspan=3,sticky='w',pady=(2,0))
         self.region_note=ct.CTkLabel(controls,text='',font=SMALL_FONT,text_color=MUTED,
@@ -405,7 +406,7 @@ class App(ct.CTk):
         self.status=ct.CTkLabel(status,text='就绪 · 请先选择游戏窗口和目标颜色',font=BODY_FONT,anchor='w',justify='left',wraplength=720,text_color=INK);self.status.grid(row=0,column=0,padx=18,pady=(12,5),sticky='ew')
         self.detail=ct.CTkLabel(status,text='',font=SMALL_FONT,text_color=MUTED,wraplength=720,anchor='w',justify='left')
         self.detail.grid(row=1,column=0,padx=18,pady=(0,8),sticky='ew');self.detail.grid_remove()
-        label=ct.CTkLabel(intro,text='支持台服、韩服、日服；韩服、日服仍在测试中。多色精准结果以游戏实测为准。',font=SMALL_FONT,text_color=MUTED,wraplength=320,justify='left',anchor='w');label.pack(fill='x',pady=(0,8));self.intro_labels.append(label)
+        label=ct.CTkLabel(intro,text='支持台服；韩服和日服测试中。',font=SMALL_FONT,text_color=MUTED,wraplength=320,justify='left',anchor='w');label.pack(fill='x',pady=(0,8));self.intro_labels.append(label)
         self.footer=ct.CTkLabel(self.page,text='F9 随时停止并释放鼠标  ·  切换窗口停止寻色  ·  不自动开启下一瓶染色剂',font=SMALL_FONT,text_color=MUTED,wraplength=340,justify='right');self.footer.grid(row=5,column=0,padx=BODY_SIDE_PADDING,pady=(0,8),sticky='e')
         self._layout_columns=None;self._layout_content_width=None;self._layout_width=None;self._pending_layout_width=None;self._resize_layout_job=None;self._topbars_compact=None
         self.apply_card_layout(3);self.apply_topbar_layout(False)
@@ -568,13 +569,13 @@ class App(ct.CTk):
             self.strategy_menu.configure(values=[str(tr('截图寻色')),str(tr(NATIVE_STRATEGY_LABEL))])
             self.strategy_menu.set(str(tr(NATIVE_STRATEGY_LABEL if self.search_strategy.get()=='native' else '截图寻色')))
             self.strategy_note.configure(text=tr('警示：精准寻色会读取游戏内存，风险较高。') if self.search_strategy.get()=='native' else
-                tr('截图寻色使用截图和鼠标操作，不读取游戏内存，风险相对较低。'))
+                tr('寻色方式：截图寻色。不读取游戏内存。'))
     def change_search_strategy(self,value):
         if getattr(self,'_update_health_pending',False):return
         if self.busy:
             self.strategy_menu.set(str(tr(NATIVE_STRATEGY_LABEL if self.search_strategy.get()=='native' else '截图寻色')))
             return
-        strategy='native' if value in (str(tr(NATIVE_STRATEGY_LABEL)),str(tr('精准寻色'))) else 'atlas'
+        strategy='native' if value in (str(tr(NATIVE_STRATEGY_LABEL)),str(tr('精准寻色'))) else 'screenshot'
         self.search_strategy.set(strategy);save_settings(DATA/'settings.json',search_strategy=strategy)
         self.refresh_language()
         self.schedule_autosave()
@@ -809,7 +810,7 @@ class App(ct.CTk):
         if mode=='search':
             try:
                 if self.overlay is None:self.overlay=SearchOverlay(self,self.stop,self.select_candidate,settings_path=DATA/'settings.json')
-                self.overlay.begin(rules,passive=strategy in ('native','atlas'))
+                self.overlay.begin(rules,passive=strategy in ('native','screenshot'))
             except Exception:
                 self.set_detail('浮窗暂不可用，寻色状态请查看主窗口。')
         threading.Thread(target=self.runner.launch,args=(rules,mode,False,activate,target),
@@ -817,7 +818,7 @@ class App(ct.CTk):
     def select_candidate(self,batch_id,candidate_id):
         if self.runner:self.runner.choose_candidate(batch_id,candidate_id)
     def request_native_retry(self):
-        if (self.runner and self.busy and self.search_strategy.get() in ('native','atlas')
+        if (self.runner and self.busy and self.search_strategy.get() in ('native','screenshot')
                 and getattr(self,'_retry_enabled',False)):
             target=self._bound_target or self.selected_window
             try:
@@ -830,8 +831,13 @@ class App(ct.CTk):
             self._retry_enabled=False
             if self.overlay is not None:self.overlay.mark_retry_requested()
             self.runner.request_retry()
-    def stop(self):
-        if self.runner:self.runner.stop.set()
+    def stop(self,source='ui_button'):
+        if self.runner:
+            request=getattr(self.runner,'request_stop',None)
+            if callable(request):request(source)
+            else:
+                from run_stop import request_stop
+                request_stop(self.runner.stop,source)
         self._native_candidate_closed=True
         self._retry_enabled=False
         self.status.configure(text='正在停止并释放鼠标…' if self.busy else '已停止自动染色，可重新开始。')
@@ -846,7 +852,16 @@ class App(ct.CTk):
         keys=[(1,0x77),(2,0x78),(3,0x76)]
         if not getattr(sys,'frozen',False):keys.append((5,0x75))
         def receive(kind,data):
-            if kind=='hotkey' and data['id']==2 and self.runner:self.runner.stop.set()
+            if kind=='hotkey' and data['id']==2:
+                runner=self.runner
+                data=dict(data,target_run_token=runner.run_token if runner is not None else None)
+                if runner is not None:
+                    source='hotkey_'+data.get('source','unknown')
+                    request=getattr(runner,'request_stop',None)
+                    if callable(request):request(source)
+                    else:
+                        from run_stop import request_stop
+                        request_stop(runner.stop,source)
             self.q.put((kind,data))
         run_hotkeys(platform_win.u,ctypes,platform_win.W,self._hotkeys_stop,receive,keys)
     def tick(self):
@@ -870,7 +885,9 @@ class App(ct.CTk):
         if k=='update':self.update_ui.handle(d)
         elif k=='hotkey':
             if d['id']==1:self.go(activate=True)
-            elif d['id']==2:self.stop()
+            elif d['id']==2:
+                if self.runner is None or d.get('target_run_token')!=self.runner.run_token:return
+                self.stop(source='hotkey_'+d.get('source','unknown'))
             elif d['id']==3:self.request_native_retry()
             elif d['id']==5:self.go('recovery_test')
         elif k=='hotkey_status':
@@ -1011,6 +1028,9 @@ class App(ct.CTk):
                     except OSError:self.set_detail('本轮结果未能保存，请检查程序文件夹是否可写。')
                 message=d['message']+'\n\n当前颜色：'+' / '.join(c or '未识别' for c in d.get('colors',[]))
                 self.after(100,lambda m=message,o=d.get('outcome'):messagebox.showinfo(tr('流程完成 · '+('妥协结果' if o=='compromise' else '目标达标')),tr(m),parent=self))
+        elif k=='worker_failed':
+            self.status.configure(text=tr('工具内部错误，已停止'))
+            self.set_detail(tr('本轮未继续发送操作，详细异常已写入诊断记录。'))
         elif k=='finished':self.finish_run()
     def apply_region_layout(self,data):
         from dye_regions import region_count
@@ -1029,7 +1049,7 @@ class App(ct.CTk):
         self._closing=True
         if hasattr(self,'updater'):self.updater.cancel()
         if self.busy:
-            self.stop();self._closing=False;self.after(250,self.close)
+            self.stop(source='window_close');self._closing=False;self.after(250,self.close)
         else:
             if not getattr(self,'_profile_read_failed',False) or getattr(self,'_autosave_job',None) is not None:self.flush_autosave()
             self._hotkeys_stop.set()

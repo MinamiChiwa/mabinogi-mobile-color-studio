@@ -31,7 +31,7 @@ class HotkeyTests(unittest.TestCase):
         def wait(_):stop.set()
         stop.wait=wait
         run_hotkeys(user,ctypes,W,stop,lambda k,d:events.append((k,d)),[(1,0x77),(2,0x78)])
-        self.assertIn(('hotkey',{'id':2}),events)
+        self.assertIn(('hotkey',{'id':2,'source':'poll'}),events)
 
     def test_failed_start_registration_cannot_start_a_second_run(self):
         user=MagicMock();stop=threading.Event();events=[]
@@ -39,5 +39,5 @@ class HotkeyTests(unittest.TestCase):
         user.GetAsyncKeyState.return_value=-32768
         stop.wait=lambda _:stop.set()
         run_hotkeys(user,ctypes,W,stop,lambda k,d:events.append((k,d)),[(1,0x77),(2,0x78)])
-        self.assertNotIn(('hotkey',{'id':1}),events)
+        self.assertFalse(any(k=='hotkey' and d['id']==1 for k,d in events))
         user.GetAsyncKeyState.assert_called_once_with(0x78)

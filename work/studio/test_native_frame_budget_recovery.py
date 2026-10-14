@@ -76,7 +76,8 @@ class FrameBudgetRecoveryTests(unittest.TestCase):
             io.last_client_hex=codes;io.hex_fallback=glyph;io.timer_grace_until=float('inf')
             with patch.object(probe,'_recognize_native_layout',return_value=scene), \
                  patch.object(probe,'read_codes',side_effect=exhausted):
-                frames=io.frames('partial',float('inf'))
+                try:frames=io.frames('partial',float('inf'))
+                finally:io.release()
         self.assertEqual([frame['hex'] for frame in frames],[codes,codes])
         self.assertEqual(frames[0]['screenshot_hex'],[codes[0],None,None])
         self.assertEqual(frames[0]['hex_source'],['screenshot','native_checkpoint','native_checkpoint'])
@@ -157,8 +158,10 @@ class ControllerFrameBudgetRecoveryTests(unittest.TestCase):
             return original(label,deadline)
         io.frames=frames;result=self.run_io(io)
         self.assertEqual(result['stop_reason'],'observation_failed')
-        self.assertFalse(result['accepted']);self.assertFalse(result['verified'])
-        self.assertEqual(result['actual_colors'],[None]*3)
+        self.assertTrue(result['verified'])
+        self.assertTrue(result['failure_recovery']['verified'])
+        self.assertTrue(result['best_current'])
+        self.assertEqual(result['actual_colors'],result['best_actual_colors'])
         self.assertEqual(result['native_current']['checkpoint']['client_hex'],[rule['colors'][0] for rule in io.case['rules']])
         self.assertEqual(len(io.actions),2)
         self.assertGreater(result['effective_deadline']-io.t,40.)

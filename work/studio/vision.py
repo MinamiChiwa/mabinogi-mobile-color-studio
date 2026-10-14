@@ -15,7 +15,24 @@ from marker_geometry import refine_marker_center
 OCR_AVAILABLE = None
 OCR_CONFIG = ''
 
-def configure_ocr(strict=False):
+def _ocr_probe(args,*,check=None):
+    flags=getattr(subprocess,'CREATE_NO_WINDOW',0)
+    if check is None:return subprocess.run(args,capture_output=True,timeout=5,creationflags=flags)
+    check();end=time.monotonic()+5
+    process=subprocess.Popen(args,stdout=subprocess.PIPE,stderr=subprocess.PIPE,creationflags=flags)
+    try:
+        while True:
+            check();remaining=end-time.monotonic()
+            if remaining<=0:raise subprocess.TimeoutExpired(args,5)
+            try:stdout,stderr=process.communicate(timeout=min(.05,remaining));break
+            except subprocess.TimeoutExpired:continue
+        check();return subprocess.CompletedProcess(args,process.returncode,stdout,stderr)
+    except BaseException:
+        if process.poll() is None:process.kill()
+        process.communicate();raise
+
+
+def configure_ocr(strict=False,*,check=None):
     """Check the OCR executable and English data before a timed capture."""
     global OCR_AVAILABLE, OCR_CONFIG
     OCR_CONFIG = ''
@@ -31,6 +48,7 @@ def configure_ocr(strict=False):
     found_candidate=False
     checked=set()
     for exe in candidates:
+        if check is not None:check()
         try:
             resolved=exe.resolve()
             if resolved in checked or not exe.is_file():continue
@@ -45,10 +63,9 @@ def configure_ocr(strict=False):
             # identifiers matter; decoding that header as UTF-8 can reject a
             # working installation. Avoid pytesseract's process-global cache
             # too: a failed executable must not poison the next candidate.
-            probe=subprocess.run([str(exe),'--list-langs',*data_args],
-                capture_output=True,timeout=5,
-                creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
+            probe=_ocr_probe([str(exe),'--list-langs',*data_args],check=check)
             if probe.returncode!=0 or b'eng' not in [line.strip() for line in probe.stdout.splitlines()]:continue
+        except InterruptedError:raise
         except (OSError,subprocess.TimeoutExpired):
             continue
         pytesseract.pytesseract.tesseract_cmd=str(exe)
@@ -211,20 +228,28 @@ def _complete_board_boundary(image,cards):
                for inside,outside in edges)
 
 
-def color_cards(image,region_count=None):
+def color_cards(image,region_count=None,*,card_width=None,opening_ratio=.065,diagnostics=None):
     if region_count is not None:
         from dye_regions import region_count as validate_count
         validate_count(region_count)
     h,w=image.shape[:2]
     mask=cv2.inRange(image,np.array([218]*3,np.uint8),np.array([255]*3,np.uint8))
-    k=max(5,round(min(w,h)*.007)); k+=1-k%2
+    if card_width is None:k=max(5,round(min(w,h)*.007))
+    else:
+        if not np.isfinite(card_width) or card_width<=0:raise ValueError('Invalid measured card scale')
+        k=max(3,round(card_width*opening_ratio))
+    k+=1-k%2
     mask=cv2.morphologyEx(mask,cv2.MORPH_OPEN,np.ones((k,k),np.uint8))
     candidates=[]
+    if diagnostics is not None:diagnostics.update(kernel=k,components=[])
     for c in cv2.findContours(mask,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)[0]:
         x,y,cw,ch=cv2.boundingRect(c)
+        if diagnostics is not None and len(diagnostics['components'])<32:
+            diagnostics['components'].append([x,y,cw,ch])
         if min(cw,ch)<min(w,h)*.045 or cw>w*.32 or not .7<cw/ch<1.45: continue
         if cv2.contourArea(c)<cw*ch*.45:continue
         candidates.append((x,y,cw,ch))
+    if diagnostics is not None:diagnostics['card_candidates']=list(candidates)
     for count in (3,2):
         for group in itertools.combinations(candidates,count):
             a=sorted(group)
@@ -696,8 +721,10 @@ def timer_seconds(image, unit=None, previous=None):
         if ordered:return min(ordered,key=lambda v:abs(v-int(previous)))
     return max(values)
 
-def recognize(image,with_ocr=True,previous=None,enabled=None,*,read_colors=True,region_count=None):
-    cards=color_cards(image,region_count=region_count)
+def recognize(image,with_ocr=True,previous=None,enabled=None,*,read_colors=True,region_count=None,
+              card_width=None,opening_ratio=.065,card_diagnostic=None):
+    scale={} if card_width is None else dict(card_width=card_width,opening_ratio=opening_ratio,diagnostics=card_diagnostic)
+    cards=color_cards(image,region_count=region_count,**scale)
     if cards is None:raise ValueError('未识别到染色小游戏的完整色码卡片。请先进入限时染色界面。')
     h,w=image.shape[:2]; white=np.min(image,axis=2)>210
     markers=[]

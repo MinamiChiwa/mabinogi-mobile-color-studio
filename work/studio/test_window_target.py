@@ -1,10 +1,68 @@
-import unittest,threading,tempfile
+import unittest,threading,tempfile,time,os
 from unittest.mock import patch,MagicMock
 from window_target import (WindowTarget,choose_auto,resolve_target,valid_target,
                            WindowUnavailable,MultipleWindows)
 from platform_win import Game,Interrupted
 
 class WindowTargetTests(unittest.TestCase):
+    def test_worker_activation_does_not_join_input_queues_and_can_stop_during_transition(self):
+        import window_target as module
+        stop=threading.Event();joined=threading.Event();unblock=threading.Event();completed=threading.Event();errors=[]
+        def attach(*args):joined.set();return True
+        def foreground(*args):
+            if joined.is_set():unblock.wait(2)
+            return True
+        def check():
+            if stop.is_set():raise InterruptedError('stop requested')
+        def worker():
+            try:
+                import inspect
+                options=dict(check=check) if 'check' in inspect.signature(module.activate_target_window).parameters else {}
+                module.activate_target_window(WindowTarget(1,2,'Game'),**options)
+            except InterruptedError:pass
+            except Exception as exc:errors.append(str(exc))
+            finally:completed.set()
+        with patch.object(module,'valid_target',return_value=True), \
+             patch.object(module.u,'IsIconic',return_value=False), \
+             patch.object(module.u,'AttachThreadInput',side_effect=attach), \
+             patch.object(module.u,'GetWindowThreadProcessId',return_value=20), \
+             patch.object(module.k,'GetCurrentThreadId',return_value=10), \
+             patch.object(module.u,'BringWindowToTop',return_value=True), \
+             patch.object(module.u,'SetForegroundWindow',side_effect=foreground), \
+             patch.object(module.u,'GetForegroundWindow',return_value=99):
+            thread=threading.Thread(target=worker,daemon=True);thread.start();time.sleep(.04);stop.set()
+            try:
+                self.assertTrue(completed.wait(.5),'F9 waited behind a synchronous joined input queue')
+                self.assertFalse(joined.is_set(),'Worker/UI input queues must stay independent')
+                self.assertEqual(errors,[])
+            finally:unblock.set();thread.join(2)
+
+    def test_worker_restore_uses_async_window_show_and_keeps_cancel_responsive(self):
+        import window_target as module
+        restored=[False]
+        def wait(*args):restored[0]=True
+        def focus(*args):
+            self.assertTrue(restored[0],'Focus/measurement began before asynchronous restore finished')
+            return True
+        with patch.object(module,'valid_target',return_value=True), \
+             patch.object(module.u,'IsIconic',side_effect=lambda hwnd:not restored[0]), \
+             patch.object(module.u,'ShowWindow',side_effect=AssertionError('Synchronous window restore can wait for a hung target')), \
+             patch.object(module.u,'ShowWindowAsync',return_value=True) as show, \
+             patch.object(module.u,'SetForegroundWindow',side_effect=focus),patch.object(module.time,'sleep',side_effect=wait), \
+             patch.object(module.u,'GetForegroundWindow',return_value=1):
+            self.assertTrue(module.activate_target_window(WindowTarget(1,2,'Game')))
+        show.assert_called_once_with(1,9)
+
+    def test_window_listing_skips_own_window_before_requesting_its_title(self):
+        import window_target as module
+        def enumerate(callback,_):return bool(callback(10,0))
+        with patch.object(module.u,'EnumWindows',side_effect=enumerate), \
+             patch.object(module.u,'IsWindowVisible',return_value=True), \
+             patch.object(module,'window_pid',return_value=os.getpid()), \
+             patch.object(module,'window_title',return_value='Own window') as title:
+            self.assertEqual(module.list_windows(),[])
+            title.assert_not_called()
+
     def test_visual_strategy_window_event_without_pid_keeps_window_label_working(self):
         import app
         from types import SimpleNamespace

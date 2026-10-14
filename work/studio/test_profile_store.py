@@ -75,7 +75,7 @@ class ProfileStoreTests(unittest.TestCase):
     def test_legacy_profile_keeps_separately_saved_search_strategy(self):
         path=self.root/'profile.json'
         path.write_text(json.dumps(default_profile()['regions']),encoding='utf-8')
-        self.assertEqual(read_profile(path,search_strategy='atlas')['search_strategy'],'atlas')
+        self.assertEqual(read_profile(path,search_strategy='atlas')['search_strategy'],'screenshot')
 
     def test_read_only_data_migration_preserves_presets(self):
         from app_data import _copy_user_data

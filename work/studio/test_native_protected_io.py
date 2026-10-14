@@ -203,9 +203,9 @@ class NativeProtectedIOTests(unittest.TestCase):
 
         self.io.original_game_check = lost_focus
         with patch('native_live.project_probe_io.time.sleep', pause):
-            with self.assertRaises(InputNotStarted):
+            with self.assertRaises(InterruptedError):
                 self.protected(deadline=10.4)
-        self.assertAlmostEqual(self.clock.now, 10.4)
+        self.assertAlmostEqual(self.clock.now, 10.)
         self.assert_no_inputs()
 
     def test_unknown_protected_input_receipt_is_not_changed_to_completed(self):

@@ -472,3 +472,7 @@ EN.update({
 TW.update({
 '1 为最高优先级，全部区域达标始终优先。需要妥协时，按优先级依次比较是否达标和色差；低优先级的精准命中不会压过高优先级的大幅改善。相似模式中，区域进入设定容差后优先改善后续区域。调整一个区域会自动交换另一区域的优先级。':'1 為最高優先級，全部區域達標始終優先。需要妥協時，依優先級依序比較是否達標與色差；低優先級的精準命中不會壓過高優先級的大幅改善。相似模式中，區域進入設定容差後優先改善後續區域。調整一個區域會自動交換另一區域的優先級。',
 })
+
+# Shared reviewed wording for the current user workflow.
+from user_copy import EN as USER_EN, TW as USER_TW
+EN.update(USER_EN); TW.update(USER_TW)

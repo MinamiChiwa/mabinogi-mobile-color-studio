@@ -159,6 +159,9 @@ class ContinuousRetryInputTests(unittest.TestCase):
                 game.geometry=lambda:(0,0,500,500);game.move_to=lambda p:None
                 self.io.game=game;game.check=self.io._input_guard
                 self.io.stop.clear();self.io.input_attempts=0;self.io.sent_any=False
+                # Each subtest represents a new run. Terminal focus/binding
+                # failures deliberately remain latched within a production run.
+                self.io.terminal_interruption=None
                 self.io.f9_pressed=lambda:reason=='F9' and len(events)>=7
                 def focus_check():
                     if len(events)>=7 and reason in ('focus','geometry'):

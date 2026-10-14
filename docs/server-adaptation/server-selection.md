@@ -1,31 +1,68 @@
-# 服务器选择 / Server selection
+# 服务器与游戏窗口 / Server and game window
 
-支持台服、韩服、日服；韩服与日服仍在测试中。Supported: Taiwan, Korea and Japan. Korean and Japanese support remains in testing.
+[简体中文](#简体中文) · [繁體中文](#繁體中文) · [English](#english) · [日本語](#日本語) · [한국어](#한국어)
 
-[简体中文](../../README.md) · [繁體中文](../../README.zh-TW.md) · [English](../../README.en.md) · [日本語](../../README.ja.md) · [한국어](../../README.ko.md)
+## 简体中文
 
-简体中文：启动普通 `ColorStudio.exe`，在游戏窗口按钮旁选择台服、韩服或日服，再使用自动检测或选择对应游戏窗口。服务器选择自动保存，切换服务器会清除旧窗口绑定。默认使用截图寻色；无需额外启动器或只读预检。配置目标颜色与优先级，按 F8 开始，看到“寻色已就绪”后进入染色。已经打开染色时也可开始。初次准备和活动色板识别可能需十多秒，浮窗会分别显示阶段，请保持游戏在前台。F7 重试、F9 停止；工具不会自动开启、套用或取消染色。
+支持台服；韩服与日服仍在测试中。
 
-不要求固定 1280×960，窗口尺寸和 Windows 缩放按本次窗口测量。请先调整游戏窗口再开始；运行中移动或调整窗口后需要按 F8 重新识别，避免继续使用旧坐标。服务选择与窗口标题用于定位，精准流程仍核对 GameAssembly、metadata 与 UnityPlayer 的完整指纹；客户端更新后若版本不匹配，提供日志以更新适配。
+1. 在主界面选择服务器，再自动检测或手动选择对应游戏窗口。
+2. 先调整好窗口位置与大小，再按 F8 开始。无需固定分辨率或额外预检脚本。
+3. 根据提示进入染色；色板已打开时也可以开始。自动操作期间保持游戏在前台。
+4. 切换服务器后重新选择窗口。运行中改变窗口后，按 F9 停止，再按 F8 重新识别。
 
-韩服上传日志已验证非标准 1376×990 客户区的拖动、双向滚轮及旋转，并得到经过复核的妥协结果。日服按独立指纹、地址与已比对的核心方法接入同一操作流程；实际日服染色响应尚未完成验收。韩服实测不能代替日服实测，也不保证多色精准命中。服务器适配详情见开发仓库同目录下的分析报告。
+寻色方式选择截图寻色或精准寻色；每个区域的精准 HEX／相似颜色另行设置。客户端更新后提示版本不支持时，请附本次日志反馈。
 
-繁體中文：執行一般 `ColorStudio.exe`，在遊戲視窗按鈕旁選取台服、韓服或日服，再自動偵測或選取對應視窗。選擇會自動儲存，切換伺服器會清除舊視窗綁定。預設使用截圖尋色，無需額外啟動器或唯讀預檢。設定目標與優先順序，按 F8 開始，看到「尋色已就緒」後進入染色；已開啟染色時也可開始。初次準備及色板識別可能需十多秒，浮窗會分別顯示階段。保持遊戲在前景；F7 重試、F9 停止，不會自動開啟、套用或取消染色。
+[返回使用说明](../../README.md)
 
-無需固定 1280×960，依本次視窗及 Windows 縮放測量。先調整視窗再開始；執行中移動或調整尺寸後，按 F8 重新識別。視窗標題用於定位，精準流程仍核對三個客戶端檔案指紋。韓服已有 1376×990 的操作及實際色碼紀錄；日服已接入共用流程，但實機染色驗收仍待完成。多色精準無法保證成功。
+## 繁體中文
 
-English: Run the normal `ColorStudio.exe`. Select Taiwan, Korea or Japan beside the game-window button, then detect or select the corresponding window. The server choice is saved; switching it clears the old window binding. Screenshot Search is the default. No separate launcher or read-only preflight is required. Set colors and priorities, press F8, and enter dyeing after the ready message. Starting with dyeing already open is also supported. Initial preparation and active-palette identification can take more than ten seconds; the overlay shows each stage. Keep the game in the foreground. F7 retries and F9 stops. Dyeing is never opened, applied or cancelled automatically.
+支援台服；韓服與日服仍在測試中。
 
-No fixed 1280×960 resolution is required. Coordinates follow the measured client and Windows scaling. Set the window size before starting; after moving or resizing it during a run, press F8 to identify the current geometry. Window titles guide discovery; Precise Search also verifies the registered GameAssembly, metadata and UnityPlayer fingerprints. Korean records demonstrate drag, zoom, rotation and verified compromise colors at 1376×990. Japan uses its own fingerprint and addresses with the shared workflow; Japanese live dyeing verification remains pending. Multiple exact matches are not guaranteed.
+1. 在主畫面選擇伺服器，再自動偵測或手動選取對應遊戲視窗。
+2. 先調整好視窗位置與大小，再按 F8 開始。不必固定解析度或使用額外預檢腳本。
+3. 依提示進入染色；色板已開啟時也可以開始。自動操作時保持遊戲在前景。
+4. 切換伺服器後重新選擇視窗。執行中改變視窗後，按 F9 停止，再按 F8 重新辨識。
 
-日本語：ゲームウィンドウの横で台湾・韓国・日本のサーバーを選択します。韓国版と日本版の対応はテスト中です。専用の起動スクリプトや事前チェックは不要です。F8 で開始、F7 で再検索（テスト用）、F9 で停止します。結果の適用はゲーム内で手動で行ってください。
+尋色方式可選截圖尋色或精準尋色；每個區域的精準 HEX／相似顏色另行設定。遊戲更新後若提示版本不支援，請附本次紀錄回報。
 
-한국어: 게임 창 선택 옆에서 대만·한국·일본 서버를 선택하세요. 한국 및 일본 서버 지원은 테스트 중입니다. 별도 실행 스크립트나 사전 점검은 필요하지 않습니다. F8은 시작, F7은 다시 검색(테스트용), F9는 중지입니다. 결과 적용은 게임 내에서 직접 결정하세요.
+[返回使用說明](../../README.zh-TW.md)
 
-截图寻色不读取游戏内存，风险相对较低。精准寻色会读取游戏进程内存，风险较高，仅在主动选择后运行。截图与自动鼠标操作也不保证账号安全。
+## English
 
-截圖尋色不讀取遊戲記憶體，風險相對較低；精準尋色讀取記憶體，風險較高。Screenshot Search avoids game memory access and carries relatively lower risk; Precise Search reads memory and carries higher risk. Neither guarantees account safety.
+Taiwan is supported; Korea and Japan are in testing.
 
-スクリーンショット検索はメモリを読み取らず比較的リスクが低い方式です。精密検索はメモリを読み取るためリスクが高くなります。どちらもアカウントの安全は保証できません。
+1. Select the server, then auto-detect or manually choose its game window.
+2. Adjust the window before pressing F8. No fixed resolution or separate preflight script is needed.
+3. Follow the prompt to open dyeing, or start with the palette already open. Keep the game in front during automatic input.
+4. Select a new window after switching servers. If the window changes during a run, stop with F9 and detect it again with F8.
 
-스크린샷 검색은 메모리를 읽지 않아 상대적으로 위험도가 낮습니다. 정밀 검색은 메모리를 읽으므로 위험도가 높습니다. 어느 방식도 계정 안전을 보장하지 않습니다.
+Choose Screenshot Search or Precise Search as the search method. Exact HEX or Similar is a separate requirement for each region. If a client update is unsupported, report it with the session log.
+
+[Back to the guide](../../README.en.md)
+
+## 日本語
+
+台湾版に対応しています。韓国版・日本版はテスト中です。
+
+1. サーバーを選び、自動検出または手動で対応するゲームウィンドウを指定します。
+2. ウィンドウの位置とサイズを調整してからF8で開始します。解像度の指定や別の事前確認スクリプトは不要です。
+3. 案内に従って染色画面を開くか、パレットを開いた状態から開始します。自動操作中はゲームを最前面に保ってください。
+4. サーバーを切り替えたらウィンドウを選び直します。実行中にウィンドウを変更した場合はF9で停止し、F8で認識し直してください。
+
+検索方式はスクリーンショット検索または精密検索です。部位ごとの完全一致（HEX）・近似色は別の設定です。ゲーム更新後に未対応と表示された場合は、今回のログを添えて報告してください。
+
+[使い方に戻る](../../README.ja.md)
+
+## 한국어
+
+대만 서버를 지원하며 한국·일본 서버는 테스트 중입니다.
+
+1. 서버를 고르고 자동 감지 또는 수동 선택으로 해당 게임 창을 지정하세요.
+2. 창 위치와 크기를 조정한 뒤 F8로 시작하세요. 고정 해상도나 별도 사전 검사 스크립트는 필요하지 않습니다.
+3. 안내에 따라 염색 화면을 열거나 팔레트가 열린 상태에서 시작하세요. 자동 조작 중에는 게임을 맨 앞에 두세요.
+4. 서버를 바꾸면 창을 다시 선택하세요. 실행 중 창을 변경했다면 F9로 중지하고 F8로 다시 인식하세요.
+
+검색 방식은 스크린샷 검색 또는 정밀 검색입니다. 영역별 완전 일치(HEX)·유사 색상은 별도 설정입니다. 게임 업데이트 후 지원하지 않는 버전으로 표시되면 이번 로그를 첨부해 제보해 주세요.
+
+[사용 안내로 돌아가기](../../README.ko.md)

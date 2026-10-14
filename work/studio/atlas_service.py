@@ -444,7 +444,7 @@ class AtlasService:
         if selected is None or selected==default['id']:
             if getattr(owner,'stop',None) is not None and owner.stop.is_set():
                 if batch is not None:batch.invalidate()
-                emit('interrupted',message='已停止，保留自动最佳方案。')
+                emit('interrupted',message='自动操作已停止。请查看游戏当前颜色。')
                 return result
             if batch is not None:batch.invalidate()
             emit('atlas_selection_expired',message='未选择其他方案，保持自动最佳方案。')

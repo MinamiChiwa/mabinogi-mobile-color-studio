@@ -27,9 +27,12 @@ def _prepare(pid,folder,check,hwnd=None):
     def save():
         (folder/'native-preparation.json').write_text(json.dumps(diagnostic,indent=2,ensure_ascii=False),encoding='utf8')
     try:
-        configure_ocr(strict=True);timer=prepare_timer_assets();glyphs=prepare_hex_assets()
-        diagnostic['stage']='game_build';save()
-        backend=CurrentBuildBackend(pid,output_root=folder/'native-captures')
+        save();check()
+        configure_ocr(strict=True,check=check);check()
+        timer=prepare_timer_assets();check();glyphs=prepare_hex_assets();check()
+        diagnostic['stage']='game_build';save();check()
+        backend=CurrentBuildBackend(pid,output_root=folder/'native-captures',check=check)
+        check()
         files=getattr(backend,'build_files',{})
         if isinstance(files,dict):diagnostic['build_files']={k:str(v) for k,v in files.items()}
         diagnostic['build_hashes']={k:v for k in ('version','metadata_version','unityplayer_version')
@@ -65,9 +68,9 @@ def _prepare(pid,folder,check,hwnd=None):
         if isinstance(failed,dict):diagnostic['window_context']=failed
         try:save()
         except Exception as write_error:
-            if not isinstance(exc,ProcessReadDenied):raise
-            exc.diagnostic['preparation_write_error']=dict(error_type=type(write_error).__name__,
-                win_error=getattr(write_error,'winerror',None),errno=getattr(write_error,'errno',None))
+            if isinstance(exc,ProcessReadDenied):
+                exc.diagnostic['preparation_write_error']=dict(error_type=type(write_error).__name__,
+                    win_error=getattr(write_error,'winerror',None),errno=getattr(write_error,'errno',None))
         if backend is not None:backend.close()
         raise
 
@@ -109,8 +112,12 @@ def run_native_search(owner,rules,*,mode='search',target=None,activate=False,ser
     result['requested_rules']=copy.deepcopy(rules)
     u.GetAsyncKeyState.argtypes=[ctypes.c_int];u.GetAsyncKeyState.restype=ctypes.c_short
     def check():
-        if owner.stop.is_set() or u.GetAsyncKeyState(0x78)&0x8000:
-            owner.stop.set();raise InterruptedError('F9')
+        if owner.stop.is_set():raise InterruptedError('Stop requested')
+        key_state=u.GetAsyncKeyState(0x78)
+        if key_state&0x8000:
+            from run_stop import request_stop
+            request_stop(owner.stop,'native_f9_poll',virtual_key=0x78,key_state=int(key_state))
+            raise InterruptedError('F9 key state detected')
     def event(row):
         name=row['event'];stage={'armed':'waiting','session_discovered':'capture','palette_captured':'native_validate',
             'initial_validation':'native_validate','process_bound':'native_validate','window_validated':'native_validate',
@@ -133,10 +140,11 @@ def run_native_search(owner,rules,*,mode='search',target=None,activate=False,ser
             # Legacy diagnostic events never create predicted native choices.
             return
         message={'native_validate':'正在检查当前游戏与取色数据。','search':'正在计算可执行的目标方案。',
-            'discovery':'正在准备寻色，暂时不要进入染色界面；等提示就绪后再开始。F9 可停止。',
+            'discovery':'正在准备寻色，请保持游戏窗口可见。F9 可停止。',
             'position':'正在调整色板。','verify':'正在核对当前游戏色码。'}.get(stage)
         if name=='armed' or name=='discovery_progress' and row.get('phase')=='waiting':
             stage='waiting';message='寻色已就绪，请进入染色界面；工具正在等待活动色板。F9 可停止。'
+        if name=='initial_visual_wait':message='已检测到本局色板，正在重新识别色卡与取色点；请保持染色画面可见。F9 可停止。'
         if name=='discovery_progress' and row.get('discovery',{}).get('eligible_addresses'):
             stage='binding';message='已检测到活动色板，正在完成本局识别；请保持游戏窗口前台。F9 可停止。'
         if name=='compromise_selected':message='未找到精准方案，正在定位并复核色差较小的妥协方案。'
@@ -152,13 +160,13 @@ def run_native_search(owner,rules,*,mode='search',target=None,activate=False,ser
             owner.event('native_progress',stage=stage,message=message,**payload)
     try:
         if mode!='search':raise ValueError('Native strategy only supports user color search')
-        check();selected=resolve_target(target,server=server)
+        check();selected=resolve_target(target,server=server,check=check)
         owner.event('window_bound',title=selected.title,pid=selected.pid,hwnd=selected.hwnd)
         owner.event('native_progress',stage='native_validate',message='正在检查当前游戏与取色数据。')
         if activate:
             from window_target import activate_target_window
             check()
-            if not activate_target_window(selected):raise InterruptedError('无法激活游戏。请点击游戏后按 F8。')
+            if not activate_target_window(selected,check=check):raise InterruptedError('无法激活游戏。请点击游戏后按 F8。')
         backend,prepared=_prepare(selected.pid,folder,check,selected.hwnd)
         result['preflight']=prepared
         if server is not None:
@@ -176,7 +184,9 @@ def run_native_search(owner,rules,*,mode='search',target=None,activate=False,ser
         require_input_capability(backend)
         baseline=collect_validation_session(backend,wait_seconds=300.,session_seconds=SESSION_MAX_SECONDS,check=check,event=event)
         (folder/'native-baseline.json').write_text(json.dumps(baseline,indent=2),encoding='utf-8')
-        if baseline['stop_reason']!='passive_baseline_collected':result['stop_reason']=baseline['stop_reason']
+        if baseline['stop_reason']!='passive_baseline_collected':
+            result['stop_reason']=baseline['stop_reason']
+            if 'error' in baseline:result['error']=baseline['error']
         else:
             check();session=load_session(baseline['capture']['capture_folder'])
             count=session_region_count(session)
@@ -212,12 +222,13 @@ def run_native_search(owner,rules,*,mode='search',target=None,activate=False,ser
             except Exception as exc:result['release_error']=str(exc)
         if backend is not None:backend.close()
     if result['stop_reason']=='interrupted':
-        error=result.get('error','')
-        result['interruption_reason']=('focus_lost' if '游戏失去焦点' in error else
-            'window_changed' if '窗口位置或尺寸' in error else 'activation_failed' if '无法激活游戏' in error else 'user_stop')
+        from run_stop import interruption_reason,stop_diagnostic
+        result['stop_diagnostic']=stop_diagnostic(owner.stop)
+        result['interruption_reason']=interruption_reason(result.get('error',''),result['stop_diagnostic'])
     values=[v for v in result['actual_deltas'] if v is not None]
     result.update(maximum=max(values) if values else None,average=sum(values)/len(values) if values else None,
-        outcome='matched' if result['accepted'] else 'compromise' if result['stop_reason'] in ('compromise_observed','user_candidate_observed')
+        outcome='matched' if result['accepted'] else 'compromise' if (result['stop_reason'] in ('compromise_observed','user_candidate_observed')
+            or result.get('failure_recovery',{}).get('verified') is True)
             and result['verified'] else 'not_found' if result['stop_reason']=='not_found_in_budget' else 'stopped')
     (folder/'native-result.json').write_text(json.dumps(result,indent=2,ensure_ascii=False),encoding='utf-8')
     # The full result is already persisted on disk. Keep the UI event small so
@@ -228,8 +239,8 @@ def run_native_search(owner,rules,*,mode='search',target=None,activate=False,ser
         'actual_colors','actual_deltas','best_actual_colors',
         'actual_input_attempts','maximum','average','restored','best_current','screenshot_verified',
         'server_confirmation_verified','enabled_regions','rules','region_count','available_regions',
-        'selected_server',
-        'refinement_stop','unavailable_reason','session_stop_reason','interruption_reason',
+        'selected_server','failure_recovery',
+        'refinement_stop','unavailable_reason','session_stop_reason','interruption_reason','stop_diagnostic',
         'last_verified_colors','last_verified_deltas','last_verified_captured_monotonic',
         'last_verified_screenshot')})
     return result

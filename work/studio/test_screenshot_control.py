@@ -4,6 +4,122 @@ from types import SimpleNamespace
 import numpy as np
 
 class ScreenshotControlTests(unittest.TestCase):
+    def test_optional_sampling_yields_before_best_return_reserve(self):
+        from screenshot_control import Budget,TimeEnded
+        from screenshot_live import _sampling_check
+        c=SimpleNamespace(check=lambda:None,owner=SimpleNamespace(consume_retry_request=lambda:False),
+            budget=Budget(5,.02),return_cost=lambda:6.)
+        with self.assertRaises(TimeEnded):_sampling_check(c)
+    def test_release_error_cannot_turn_terminal_interruption_into_recovery(self):
+        from screenshot_control import Controller,Budget
+        from platform_win import Interrupted
+        from unittest.mock import Mock
+        owner=SimpleNamespace(stop=threading.Event(),consume_retry_request=lambda:False,
+            event=lambda *a,**k:None,folder=Path(tempfile.gettempdir()))
+        game=Mock();game.release.side_effect=RuntimeError('cleanup failed')
+        c=Controller(owner,game,SimpleNamespace(board=(0,0,20,20),cards=[],markers=[]),[],Budget(120,.4))
+        c.frame=np.zeros((20,20,3),np.uint8);c.best=dict(matrix=np.eye(3))
+        def failed():raise Interrupted('lost focus')
+        with __import__('unittest').mock.patch('screenshot_control.u.GetAsyncKeyState',return_value=0):
+            with self.assertRaises(RuntimeError):c.act('interrupted',failed)
+            game.release.side_effect=None
+            recovery=c.safe_restore('processing_error')
+        self.assertFalse(recovery['attempted']);game.capture.assert_not_called()
+    def test_terminal_focus_loss_never_recovers_even_if_focus_returns(self):
+        from screenshot_control import Controller,Budget
+        from platform_win import Interrupted
+        from unittest.mock import Mock
+        owner=SimpleNamespace(stop=threading.Event(),event=lambda *a,**k:None,folder=Path(tempfile.gettempdir()))
+        game=Mock();c=Controller(owner,game,SimpleNamespace(board=(0,0,20,20),cards=[],markers=[]),[],Budget(120,.4))
+        c.best=dict(matrix=np.eye(3));c.check=lambda:None
+        result=c.safe_restore('interrupted',interruption=Interrupted('lost focus'))
+        self.assertEqual(result['blocked'],'terminal_interruption')
+        game.capture.assert_not_called();game.move_to.assert_not_called()
+    def test_capture_retries_one_flash_without_input(self):
+        from screenshot_control import Controller,Budget
+        from unittest.mock import Mock,patch
+        scene=SimpleNamespace(board=(0,0,20,20),cards=[],markers=[])
+        owner=SimpleNamespace(stop=threading.Event(),event=lambda *a,**k:None,folder=Path(tempfile.gettempdir()))
+        game=Mock();game.capture.return_value=np.zeros((20,20,3),np.uint8)
+        c=Controller(owner,game,scene,[],Budget(120,.4));c.check=lambda:None
+        try:
+            with patch('screenshot_control.recognize',side_effect=[ValueError('flash'),scene]):c.capture('flash')
+            self.assertEqual(game.capture.call_count,2)
+            self.assertEqual(c.failed_board_frames,0)
+            game.move_to.assert_not_called()
+        finally:c.close()
+
+    def test_capture_confirmed_closed_board_requires_three_failures(self):
+        from screenshot_control import Controller,Budget,PaletteEnded
+        from unittest.mock import Mock,patch
+        scene=SimpleNamespace(board=(0,0,20,20),cards=[],markers=[])
+        owner=SimpleNamespace(stop=threading.Event(),event=lambda *a,**k:None,folder=Path(tempfile.gettempdir()))
+        game=Mock();game.capture.return_value=np.zeros((20,20,3),np.uint8)
+        c=Controller(owner,game,scene,[],Budget(120,.4));c.check=lambda:None
+        with patch('screenshot_control.recognize',side_effect=ValueError('closed')):
+            with self.assertRaises(PaletteEnded):c.capture('closed')
+        self.assertEqual(game.capture.call_count,3)
+
+    def test_cost_estimates_include_compute_and_do_not_change_actual_deadline(self):
+        from screenshot_control import Budget
+        budget=Budget(120,.5,now=100)
+        for seconds in (1.,1.1,1.2,20.):budget.record_cost('registration',seconds)
+        self.assertLess(budget.estimate('registration'),2.)
+        self.assertGreater(budget.estimate('registration'),1.)
+        self.assertEqual(budget.deadline,220)
+
+    def test_high_timer_short_bar_restricts_work_but_reserves_actual_recovery(self):
+        from screenshot_control import Budget
+        budget=Budget(119,.07,now=100)
+        self.assertLess(budget.work_remaining(100),30)
+        self.assertFalse(budget.can_input(30,now=100))
+        self.assertTrue(budget.can_input(30,now=100,recovery=True))
+        self.assertGreater(budget.remaining(100),30)
+
+    def test_initial_uncertainty_accepts_consistent_late_text_during_grace(self):
+        from screenshot_control import Budget
+        budget=Budget(None,.08,now=100)
+        budget.observe(18,.075,now=101);budget.observe(17,.071,now=102)
+        self.assertLessEqual(budget.remaining(102),17)
+
+    def test_failed_gesture_clears_in_progress_and_invalidates_pose(self):
+        from screenshot_control import Controller,Budget
+        from unittest.mock import Mock
+        owner=SimpleNamespace(stop=threading.Event(),consume_retry_request=lambda:False,
+            event=lambda *a,**k:None,folder=Path(tempfile.gettempdir()))
+        game=Mock();c=Controller(owner,game,SimpleNamespace(board=(0,0,20,20),cards=[],markers=[]),[],Budget(120,.4))
+        c.check=lambda:None;c.frame=np.zeros((20,20,3),np.uint8)
+        def fail():raise OSError('partial gesture')
+        with self.assertRaises(OSError):c.act('failed',fail)
+        self.assertFalse(c.input_in_progress)
+        self.assertFalse(c.pose_known)
+        self.assertTrue(c.input_uncertain)
+        game.release.assert_called_once()
+
+    def test_failed_release_also_clears_in_progress(self):
+        from screenshot_control import Controller,Budget
+        from unittest.mock import Mock
+        owner=SimpleNamespace(stop=threading.Event(),consume_retry_request=lambda:False,
+            event=lambda *a,**k:None,folder=Path(tempfile.gettempdir()))
+        game=Mock();game.release.side_effect=OSError('release failed')
+        c=Controller(owner,game,SimpleNamespace(board=(0,0,20,20),cards=[],markers=[]),[],Budget(120,.4))
+        c.check=lambda:None;c.frame=np.zeros((20,20,3),np.uint8)
+        with self.assertRaises(OSError):c.act('failed',lambda:None)
+        self.assertFalse(c.input_in_progress)
+        self.assertFalse(c.pose_known)
+
+    def test_polled_f9_sets_stop_before_unwinding_period_or_recovery(self):
+        from screenshot_control import Controller,Budget
+        from platform_win import Interrupted
+        from run_stop import StopEvent
+        from unittest.mock import patch
+        owner=SimpleNamespace(stop=StopEvent(),event=lambda *args,**kwargs:None,folder=Path(tempfile.gettempdir()))
+        c=Controller(owner,SimpleNamespace(check=lambda:None),SimpleNamespace(board=(0,0,20,20),cards=[],markers=[]),[],Budget(120,.4))
+        with patch('screenshot_control.u.GetAsyncKeyState',return_value=-32768):
+            with self.assertRaises(Interrupted):c.check()
+        self.assertTrue(owner.stop.is_set(),'Polled F9 must suppress unexpected interruption dialogs')
+        self.assertEqual(owner.stop.diagnostic()['source'],'screenshot_f9_poll')
+
     def test_best_with_unknown_pose_has_no_assumed_free_return(self):
         from screenshot_control import Controller,Budget
         owner=SimpleNamespace(stop=threading.Event(),event=lambda *a,**k:None,folder=Path(tempfile.gettempdir()))
@@ -83,6 +199,7 @@ class ScreenshotControlTests(unittest.TestCase):
         owner=SimpleNamespace(stop=threading.Event(),event=lambda *a,**k:None,folder=Path(tempfile.gettempdir()))
         c=Controller(owner,None,SimpleNamespace(board=(0,0,20,20),cards=[],markers=[]),[],Budget(120,.4))
         c.pose_known=False;c.frame=np.zeros((20,20,3),np.uint8)
+        c.check=lambda:None
         c.best=dict(matrix=np.eye(3),frame=c.frame.copy(),rank=(1,0),verified=True)
         direct=np.eye(3);direct[0,2]=10
         poses=[]
@@ -140,6 +257,7 @@ class ScreenshotControlTests(unittest.TestCase):
         owner=SimpleNamespace(stop=threading.Event(),event=lambda *a,**k:None,folder=Path(tempfile.gettempdir()))
         c=Controller(owner,None,SimpleNamespace(board=(0,0,20,20),cards=[],markers=[]),[],Budget(120,.4))
         c.frame=np.zeros((20,20,3),np.uint8)
+        c.check=lambda:None
         c.best=dict(matrix=np.eye(3),frame=c.frame.copy(),rank=(1,0),verified=True)
         def move(desired,*a,**kw):c.pose=np.asarray(desired);return True
         c.move_to=move

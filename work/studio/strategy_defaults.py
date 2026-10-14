@@ -26,9 +26,13 @@ def migrate_strategy_defaults(directory,*,persist=True):
                         profile=row['profile']
                         if isinstance(profile,list):profile=dict(schema=1,regions=profile);row['profile']=profile
                         if not isinstance(profile,dict):raise ValueError('Invalid preset profile')
-                        profile['search_strategy']='atlas'
-                else:value['search_strategy']='atlas'
+                        profile['search_strategy']='screenshot'
+                else:value['search_strategy']='screenshot'
                 value[MIGRATION_KEY]=MIGRATION_REVISION
+            if name=='presets.json':
+                for row in value.get('presets',[]):
+                    if row['profile'].get('search_strategy')=='atlas':row['profile']['search_strategy']='screenshot'
+            elif value.get('search_strategy')=='atlas':value['search_strategy']='screenshot'
             if name=='settings.json':result['settings']=value
             elif name=='profile.json':result['profile']=value
             if persist and value!=raw:_write(path,value)
@@ -36,5 +40,5 @@ def migrate_strategy_defaults(directory,*,persist=True):
             result['errors'].append(dict(file=name,error=str(exc)))
     # A damaged settings file is preserved; the current launch still uses the
     # screenshot default. Each valid file records migration independently.
-    result['settings'].setdefault('search_strategy','atlas')
+    result['settings'].setdefault('search_strategy','screenshot')
     return result

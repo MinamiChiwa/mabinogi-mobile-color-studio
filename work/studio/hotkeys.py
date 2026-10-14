@@ -30,11 +30,11 @@ def run_hotkeys(user,ctypes,types,stop,emit,keys):
         while not stop.is_set():
             while user.PeekMessageW(ctypes.byref(msg),None,0x312,0x312,1):
                 key=int(msg.wParam)
-                if key in registered and edges.accept(key,time.monotonic()):emit('hotkey',{'id':key})
+                if key in registered and edges.accept(key,time.monotonic()):emit('hotkey',{'id':key,'source':'message'})
             # Keep an emergency stop even if another utility owns F9.
             for key,vk in keys:
                 if key not in registered and vk != 0x78:continue
-                if edges.poll(key,bool(user.GetAsyncKeyState(vk)&0x8000),time.monotonic()):emit('hotkey',{'id':key})
+                if edges.poll(key,bool(user.GetAsyncKeyState(vk)&0x8000),time.monotonic()):emit('hotkey',{'id':key,'source':'poll'})
             stop.wait(.025)
     except Exception as exc:
         emit('hotkey_status',{'available':[],'failed':[key for key,vk in keys],'error':str(exc)})

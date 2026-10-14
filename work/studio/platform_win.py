@@ -33,14 +33,18 @@ class Input(C.Structure):
     _anonymous_=('p',); _fields_=[('type',W.DWORD),('p',Payload)]
 u.SendInput.argtypes=[W.UINT,C.POINTER(Input),C.c_int]; u.SendInput.restype=W.UINT
 
-class Interrupted(Exception):pass
+class Interrupted(Exception):
+    def __init__(self,message,*,recoverable=None,reason=None):
+        super().__init__(message);self.reason=reason
+        self.recoverable=(reason in ('capture_unstable','observation_unstable','decoder_timeout')
+            if recoverable is None else bool(recoverable))
 
 class Game:
     def __init__(self,stop,target=None):
         self.stop=stop;self.manual_target=target;self.target=resolve_target(target);self.hwnd=self.target.hwnd
         self.initial=None if u.IsIconic(self.hwnd) else self.geometry()
     def geometry(self):
-        if not valid_target(self.target):raise Interrupted('所选窗口已关闭，请重新选择游戏窗口。')
+        if not valid_target(self.target):raise Interrupted('所选窗口已关闭，请重新选择游戏窗口。',reason='window_closed')
         if u.IsIconic(self.hwnd):raise RuntimeError('游戏窗口已最小化，请恢复后重试。')
         with target_pixel_context(self.hwnd):
             r=W.RECT(); p=W.POINT(0,0)
@@ -60,9 +64,9 @@ class Game:
         u.SetForegroundWindow(self.hwnd); time.sleep(.18)
         if u.GetForegroundWindow()!=self.hwnd:raise RuntimeError('无法激活游戏。请点击游戏后按 F8。')
     def check(self):
-        if self.stop.is_set():raise Interrupted('已停止，鼠标已释放。')
-        if u.GetForegroundWindow()!=self.hwnd:raise Interrupted('已暂停：游戏失去焦点。返回游戏后按 F8 重新开始。')
-        if self.geometry()!=self.initial:raise Interrupted('窗口位置或尺寸已变化。已停止，请按 F8 重新识别。')
+        if self.stop.is_set():raise Interrupted('已停止，鼠标已释放。',reason='user_stop')
+        if u.GetForegroundWindow()!=self.hwnd:raise Interrupted('已暂停：游戏失去焦点。返回游戏后按 F8 重新开始。',reason='focus_lost')
+        if self.geometry()!=self.initial:raise Interrupted('窗口位置或尺寸已变化。已停止，请按 F8 重新识别。',reason='binding_changed')
     def capture(self):
         with physical_pixel_context():
             self.check(); x,y,w,h=self.geometry()

@@ -89,10 +89,12 @@ class ProjectClosedLoopIO(ProjectProbeIO):
         try:return super().frames(label,deadline,read_colors=read_colors)
         except SessionStatusError:raise
         except ValueError as exc:
-            retryable=str(exc) in (*INITIAL_LAYOUT_ERRORS,'Screenshot and checkpoint HEX disagree')
+            retryable=isinstance(exc,VisualNotReady) or str(exc) in (*INITIAL_LAYOUT_ERRORS,'Screenshot and checkpoint HEX disagree')
             (self.folder/(label+'.visual_failure.json')).write_text(json.dumps(dict(
                 error=type(exc).__name__+': '+str(exc),retryable_observation=bool(retryable),
+                layout_diagnostic=getattr(exc,'layout_diagnostic',None),
                 observed_monotonic=time.monotonic(),inputs_sent=self.input_attempts),indent=2),encoding='utf-8')
+            if isinstance(exc,VisualNotReady):raise
             if retryable:raise VisualNotReady(str(exc)) from exc
             raise
     def perform_candidate(self,record,label,deadline):
@@ -135,7 +137,7 @@ class ProjectClosedLoopIO(ProjectProbeIO):
         first=self.input_backend(self.deadline)
         fresh=self.backend.observe_motion(self.reference['instance_address'],self.deadline,self._input_guard,
             include_geometry=True,include_window=True)
-        self._check_observed_session(fresh,'pre_input',expected=self.last_observation,full_binding=True)
+        fresh=self._check_observed_session(fresh,'pre_input',expected=self.last_observation,full_binding=True)
         if (fresh.get('active') is not True or _binding(fresh)!=_binding(self.last_observation)
             or fresh['motion']['pose']!=self.last_observation['motion']['pose']
             or fresh['geometry_diagnostic']!=self.last_observation['geometry_diagnostic']

@@ -21,7 +21,7 @@ class NativeRetryUITests(unittest.TestCase):
         self.addCleanup(self.helper.doCleanups)
         self.ui=self.helper.ui;self.requests=[]
         self.ui.busy=True;self.ui.search_strategy.set('native')
-        self.ui.runner=SimpleNamespace(stop=threading.Event(),request_retry=lambda:self.requests.append(True))
+        self.ui.runner=SimpleNamespace(stop=threading.Event(),request_retry=lambda:self.requests.append(True),run_token='retry-test')
         self.ui.overlay=SearchOverlay(self.ui,self.ui.stop,self.ui.select_candidate)
         self.ui.overlay.begin(copy.deepcopy(RULES),passive=True)
         self.helper.pump(.02)
@@ -134,7 +134,7 @@ class NativeRetryUITests(unittest.TestCase):
             self.emit('native_progress',dict(stage='position'))
             self.assertNotIn('当前配色 · 游戏实测',str(overlay.copy.cget('text')))
             self.assertFalse(overlay._refinement_status)
-        self.ui.handle_event('hotkey',dict(id=2))
+        self.ui.handle_event('hotkey',dict(id=2,target_run_token=self.ui.runner.run_token,source='message'))
         self.assertTrue(self.ui.runner.stop.is_set())
         self.assertEqual(overlay.state(),'withdrawn')
         self.assertEqual(self.helper.errors,[])

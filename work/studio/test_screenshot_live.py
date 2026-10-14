@@ -7,6 +7,87 @@ import numpy as np
 from engine import Runner
 
 class ScreenshotLiveTests(unittest.TestCase):
+    def processing_error_case(self,*,cancel=False,partial_input=False,fallback_stop=False,failure_kind=None):
+        from screenshot_live import run_screenshot_search
+        from screenshot_control import Controller
+        from vision import Scene
+        scene=Scene(cards=[(0,0,10,10),(20,0,10,10)],markers=[(5,15),(25,20)],
+            board=(0,10,30,40),colors=[None,None],seconds=120,button=None)
+        baseline=['#222222','#333333'];bad=['#DDDDDD','#EEEEEE'];moves=[]
+        class Game:
+            target=SimpleNamespace(title='fixture',hwnd=1,pid=2);hwnd=1
+            def __init__(self,*args,**kwargs):self.colors=list(baseline)
+            def check(self):pass
+            def release(self):pass
+            def geometry(self):return (0,0,100,100)
+            def capture(self):return np.full((100,100,3),255,np.uint8)
+            capture_waiting=capture
+        def failed(c,*args):
+            c.game.colors=list(bad);c.pose[0,2]=10.;c.current=None
+            if cancel:c.owner.stop.set()
+            if partial_input:
+                def rejected():raise OSError('Fixture input completion unknown')
+                c.act('input-failure',rejected)
+            if failure_kind is not None:
+                from platform_win import Interrupted
+                if failure_kind is Interrupted:raise Interrupted('transient fixture interruption',reason='observation_unstable')
+                raise failure_kind('transient fixture interruption',reason='layout_unreadable')
+            raise ValueError('Fixture period processing error')
+        def move(c,desired,*args,**kwargs):
+            moves.append(np.asarray(desired).copy());c.pose=np.asarray(desired).copy()
+            c.game.colors=list(baseline);c.actions.append(dict(name='return-fixture'));return True
+        direct=np.eye(3);direct[0,2]=-10
+        with tempfile.TemporaryDirectory() as folder:
+            owner=Runner(lambda *args:None,folder)
+            def registration(*args):
+                if fallback_stop:
+                    owner.stop.set();raise ValueError('Fixture recovery registration failed')
+                return direct,{}
+            rules=[dict(enabled=True,colors=['#000000'],exact=True,tolerance=8,priority=i+1) for i in range(2)]
+            current=[None]
+            def capture(owner,*args,**kwargs):current[0]=Game(owner);return current[0]
+            with patch('screenshot_live.recognize',return_value=scene),patch('screenshot_control.recognize',return_value=scene), \
+                 patch('screenshot_control.read_visible',side_effect=lambda *args,**kwargs:(list(current[0].colors),[])), \
+                 patch('screenshot_live.read_timer',return_value=120),patch('screenshot_control.read_timer',return_value=120), \
+                 patch('screenshot_control.u.GetAsyncKeyState',return_value=0), \
+                 patch('screenshot_live._collect',side_effect=failed),patch.object(Controller,'register',side_effect=registration), \
+                 patch.object(Controller,'move_to',new=move):
+                result=run_screenshot_search(owner,rules,game_factory=capture,wait_for_retry=False)
+        return result,moves
+
+    def test_processing_error_restores_verified_best_before_reporting_compromise(self):
+        result,moves=self.processing_error_case()
+        self.assertEqual(len(moves),1)
+        self.assertEqual(result['actual_colors'],['#222222','#333333'])
+        self.assertTrue(result['best_current']);self.assertTrue(result['verified'])
+        self.assertEqual(result['stop_reason'],'processing_error')
+
+    def test_processing_error_never_restores_after_f9(self):
+        result,moves=self.processing_error_case(cancel=True)
+        self.assertEqual(moves,[])
+        self.assertFalse(result['accepted'])
+
+    def test_failed_gesture_can_restore_after_fresh_bound_image_registration(self):
+        result,moves=self.processing_error_case(partial_input=True)
+        self.assertEqual(len(moves),1)
+        self.assertTrue(result['best_current'])
+
+    def test_transient_palette_or_interruption_recovers_only_in_active_bound_game(self):
+        from screenshot_control import PaletteEnded
+        from platform_win import Interrupted
+        for kind in (PaletteEnded,Interrupted):
+            with self.subTest(kind=kind):
+                try:result,moves=self.processing_error_case(failure_kind=kind)
+                except Interrupted:self.fail('Recoverable interruption must publish the measured recovered result')
+                self.assertEqual(len(moves),1)
+                self.assertTrue(result['best_current'])
+
+    def test_f9_during_failed_recovery_keeps_interruption_reason(self):
+        result,moves=self.processing_error_case(fallback_stop=True)
+        self.assertEqual(moves,[])
+        self.assertEqual(result['stop_reason'],'interrupted')
+        self.assertFalse(result['verified'])
+
     def test_fine_translation_drift_does_not_spend_best_return_time(self):
         from screenshot_live import _refine
         from screenshot_control import Controller,Budget

@@ -7,13 +7,75 @@ from unittest.mock import MagicMock,patch
 
 
 class NativeLiveServiceTests(unittest.TestCase):
+    def test_failed_cancel_diagnostic_cannot_hide_f9_or_leak_the_backend(self):
+        m=self.module();closed=[];writes=[]
+        def cancel(*args):raise InterruptedError('F9 fixture')
+        backend=SimpleNamespace(build_files={},adapter=TW_ADAPTER,observe_window_context=cancel,close=lambda:closed.append(True))
+        original=Path.write_text
+        def write(path,*args,**kwargs):
+            if path.name=='native-preparation.json':
+                writes.append(True)
+                if len(writes)==4:raise OSError('Diagnostic disk fixture failure')
+            return original(path,*args,**kwargs)
+        with tempfile.TemporaryDirectory() as tmp,patch.object(m,'configure_ocr'), \
+             patch.object(m,'prepare_timer_assets',return_value={}),patch.object(m,'prepare_hex_assets',return_value={}), \
+             patch.object(m,'CurrentBuildBackend',return_value=backend),patch.object(Path,'write_text',new=write):
+            with self.assertRaisesRegex(InterruptedError,'F9 fixture'):m._prepare(123,Path(tmp),lambda:None,20)
+            self.assertEqual(closed,[True])
+
+    def test_cancelled_preparation_does_not_start_ocr_or_open_game(self):
+        m=self.module()
+        def cancelled():raise InterruptedError('Stop requested')
+        prepared=SimpleNamespace(build_files={},adapter=TW_ADAPTER,close=lambda:None,
+            observe_window_context=lambda *args:dict(extent_one_to_one=True,window=dict(client_size_physical=[1280,960])))
+        with tempfile.TemporaryDirectory() as tmp,patch.object(m,'configure_ocr') as ocr, \
+             patch.object(m,'prepare_timer_assets',return_value={}),patch.object(m,'prepare_hex_assets',return_value={}), \
+             patch.object(m,'read_input_backend',return_value={}),patch.object(m,'CurrentBuildBackend',return_value=prepared) as backend:
+            with self.assertRaises(InterruptedError):m._prepare(123,Path(tmp),cancelled,20)
+            ocr.assert_not_called();backend.assert_not_called()
+
+    def test_detected_f9_is_recorded_as_key_signal_without_claiming_a_button_click(self):
+        from run_stop import StopEvent
+        from window_target import WindowTarget
+        m=self.module();backend=MagicMock();backend.adapter=TW_ADAPTER
+        with tempfile.TemporaryDirectory() as tmp:
+            owner=SimpleNamespace(folder=Path(tmp),stop=StopEvent(),event=MagicMock())
+            def collect(*args,**kwargs):
+                with patch.object(m.u,'GetAsyncKeyState',return_value=-32768):
+                    try:kwargs['check']()
+                    except InterruptedError as exc:return dict(stop_reason='interrupted',error=str(exc))
+                self.fail('A detected F9 signal did not stop preparation')
+            with patch.object(m,'resolve_target',return_value=WindowTarget(20,123,'Game','MabinogiMobile.exe')), \
+                 patch.object(m,'_prepare',return_value=(backend,{})),patch.object(m,'collect_validation_session',side_effect=collect), \
+                 patch.object(m.u,'GetAsyncKeyState',return_value=0):
+                result=m.run_native_search(owner,[dict(enabled=True,exact=True,colors=['#FFFFFF'],tolerance=0)]*3)
+            self.assertEqual(result['interruption_reason'],'stop_key_detected')
+            self.assertEqual(result['stop_diagnostic']['source'],'native_f9_poll')
+            self.assertEqual(result['stop_diagnostic']['key_state'],-32768)
+            saved=__import__('json').loads((Path(tmp)/'native-result.json').read_text(encoding='utf-8'))
+            self.assertEqual(saved['stop_diagnostic'],result['stop_diagnostic'])
+
+    def test_preparation_interrupt_error_survives_final_result_without_assuming_user_stop(self):
+        m=self.module();backend=MagicMock();backend.adapter=TW_ADAPTER
+        from window_target import WindowTarget
+        for error,want in [('internal cancellation','unknown_interruption'),
+                           ('已暂停：游戏失去焦点。返回游戏后按 F8 重新开始。','focus_lost')]:
+            with self.subTest(error=error),tempfile.TemporaryDirectory() as tmp:
+                owner=SimpleNamespace(folder=Path(tmp),stop=threading.Event(),event=MagicMock())
+                with patch.object(m,'resolve_target',return_value=WindowTarget(20,123,'Game','MabinogiMobile.exe')), \
+                     patch.object(m,'_prepare',return_value=(backend,{})), \
+                     patch.object(m,'collect_validation_session',return_value=dict(stop_reason='interrupted',error=error)):
+                    result=m.run_native_search(owner,[dict(enabled=True,exact=True,colors=['#FFFFFF'],tolerance=0)]*3)
+                self.assertEqual(result.get('error'),error)
+                self.assertEqual(result.get('interruption_reason'),want)
+
     def test_start_button_activation_is_used_before_waiting_for_the_board(self):
         m=self.module();backend=MagicMock();backend.adapter=TW_ADAPTER
         from window_target import WindowTarget
         target=WindowTarget(20,123,'Game','MabinogiMobile.exe');order=[]
         with tempfile.TemporaryDirectory() as tmp:
             owner=SimpleNamespace(folder=Path(tmp),stop=threading.Event(),event=MagicMock())
-            def activate(selected):order.append('activate');self.assertEqual(selected,target);return True
+            def activate(selected,**kwargs):kwargs['check']();order.append('activate');self.assertEqual(selected,target);return True
             def collect(*a,**k):order.append('collect');return dict(stop_reason='no_active_palette_timeout')
             with patch.object(m,'resolve_target',return_value=target),patch.object(m,'_prepare',return_value=(backend,{})), \
                 patch('window_target.activate_target_window',side_effect=activate),patch.object(m,'collect_validation_session',side_effect=collect):
@@ -25,7 +87,7 @@ class NativeLiveServiceTests(unittest.TestCase):
         m=self.module();backend=MagicMock();backend.adapter=TW_ADAPTER
         from window_target import WindowTarget
         target=WindowTarget(20,123,'Game','MabinogiMobile.exe');visible=[False]
-        def activate(selected):visible[0]=True;return True
+        def activate(selected,**kwargs):kwargs['check']();visible[0]=True;return True
         def prepare(*args):
             if not visible[0]:raise ValueError('Invalid target-context client bounds')
             return backend,{}
