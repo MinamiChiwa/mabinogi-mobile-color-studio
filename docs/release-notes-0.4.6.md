@@ -9,9 +9,9 @@
 
 **更新方法**
 
-已安装用户可在工具内检查更新，下载后选择安装并重启；设置、方案与记录保留。也可导入 `UPDATE-ONLY-ColorStudio-0.4.6-win-x64.zip`，或选择与旧版本匹配的 0.4.4／0.4.5 增量更新包。差异包不匹配时使用完整离线更新包。
-
-首次安装下载 `ColorStudio-v0.4.6-Windows-x64.zip`。**UPDATE-ONLY 不能用于首次安装或直接运行。** [更新指南](automatic-updates.md)
+- 已安装用户：在工具内检查更新，下载后选择安装并重启；设置、方案与记录保留。
+- 离线更新：导入 `UPDATE-ONLY-ColorStudio-0.4.6-win-x64.zip`，或选择与旧版本匹配的 0.4.4／0.4.5 增量包。差异包不匹配时使用完整离线更新包。
+- 首次安装：下载 `ColorStudio-v0.4.6-Windows-x64.zip`。**UPDATE-ONLY 不能用于首次安装或直接运行。** [更新指南](automatic-updates.md)
 
 ## 繁體中文
 
@@ -20,9 +20,9 @@
 
 **更新方式**
 
-已安裝的使用者可在工具內檢查更新，下載後選擇安裝並重新啟動；設定、方案與紀錄會保留。也可匯入 `UPDATE-ONLY-ColorStudio-0.4.6-win-x64.zip`，或選擇與舊版本相符的 0.4.4／0.4.5 差異更新套件。差異套件不相符時，請使用完整離線更新套件。
-
-首次安裝下載 `ColorStudio-v0.4.6-Windows-x64.zip`。**UPDATE-ONLY 不能用於首次安裝或直接執行。** [更新指南](automatic-updates.zh-TW.md)
+- 已安裝的使用者：在工具內檢查更新，下載後選擇安裝並重新啟動；設定、方案與紀錄會保留。
+- 離線更新：匯入 `UPDATE-ONLY-ColorStudio-0.4.6-win-x64.zip`，或選擇與舊版本相符的 0.4.4／0.4.5 差異套件。不相符時請使用完整離線更新套件。
+- 首次安裝：下載 `ColorStudio-v0.4.6-Windows-x64.zip`。**UPDATE-ONLY 不能用於首次安裝或直接執行。** [更新指南](automatic-updates.zh-TW.md)
 
 ## English
 
@@ -31,9 +31,9 @@
 
 **How to update**
 
-Existing users can check for updates in the app, download, then install and restart. Settings, presets and records are kept. You can also import `UPDATE-ONLY-ColorStudio-0.4.6-win-x64.zip`, or a delta package matching your 0.4.4 or 0.4.5 installation. If the delta does not match, use the full offline update package.
-
-For a first install, download `ColorStudio-v0.4.6-Windows-x64.zip`. **UPDATE-ONLY packages are not for first installs and cannot be run directly.** [Update guide](automatic-updates.en.md)
+- Existing users: check for updates in the app, download, then install and restart. Settings, presets and records are kept.
+- Offline updates: import `UPDATE-ONLY-ColorStudio-0.4.6-win-x64.zip`, or a delta package matching your 0.4.4 or 0.4.5 installation. If the delta does not match, use the full offline update package.
+- First install: download `ColorStudio-v0.4.6-Windows-x64.zip`. **UPDATE-ONLY packages are not for first installs and cannot be run directly.** [Update guide](automatic-updates.en.md)
 
 ## 日本語
 
@@ -42,9 +42,9 @@ For a first install, download `ColorStudio-v0.4.6-Windows-x64.zip`. **UPDATE-ONL
 
 **更新方法**
 
-インストール済みの場合は、ツール内で更新を確認・ダウンロードし、インストールして再起動します。設定・プリセット・履歴は保持されます。`UPDATE-ONLY-ColorStudio-0.4.6-win-x64.zip`、またはお使いの 0.4.4／0.4.5 に対応する差分パッケージを読み込むこともできます。差分が一致しない場合は完全オフライン更新を使ってください。
-
-初回は `ColorStudio-v0.4.6-Windows-x64.zip` をダウンロードしてください。**UPDATE-ONLY は初回インストール用ではなく、直接実行することもできません。** [更新ガイド](automatic-updates.ja.md)
+- インストール済みの場合：ツール内で更新を確認・ダウンロードし、インストールして再起動します。設定・プリセット・履歴は保持されます。
+- オフライン更新：`UPDATE-ONLY-ColorStudio-0.4.6-win-x64.zip`、またはお使いの 0.4.4／0.4.5 に対応する差分パッケージを読み込みます。差分が一致しない場合は完全オフライン更新を使ってください。
+- 初回インストール：`ColorStudio-v0.4.6-Windows-x64.zip` をダウンロードしてください。**UPDATE-ONLY は初回インストール用ではなく、直接実行することもできません。** [更新ガイド](automatic-updates.ja.md)
 
 ## 한국어
 
@@ -53,6 +53,6 @@ For a first install, download `ColorStudio-v0.4.6-Windows-x64.zip`. **UPDATE-ONL
 
 **업데이트 방법**
 
-기존 사용자는 도구에서 업데이트를 확인·다운로드한 뒤 설치하고 재시작하세요. 설정·프리셋·기록은 유지됩니다. `UPDATE-ONLY-ColorStudio-0.4.6-win-x64.zip` 또는 기존 0.4.4／0.4.5 설치에 맞는 차등 패키지를 가져올 수도 있습니다. 차등 패키지가 맞지 않으면 전체 오프라인 업데이트를 사용하세요.
-
-첫 설치는 `ColorStudio-v0.4.6-Windows-x64.zip`을 다운로드하세요. **UPDATE-ONLY는 첫 설치용이 아니며 직접 실행할 수도 없습니다.** [업데이트 안내](automatic-updates.ko.md)
+- 기존 사용자: 도구에서 업데이트를 확인·다운로드한 뒤 설치하고 재시작하세요. 설정·프리셋·기록은 유지됩니다.
+- 오프라인 업데이트: `UPDATE-ONLY-ColorStudio-0.4.6-win-x64.zip` 또는 기존 0.4.4／0.4.5 설치에 맞는 차등 패키지를 가져오세요. 차등 패키지가 맞지 않으면 전체 오프라인 업데이트를 사용하세요.
+- 첫 설치: `ColorStudio-v0.4.6-Windows-x64.zip`을 다운로드하세요. **UPDATE-ONLY는 첫 설치용이 아니며 직접 실행할 수도 없습니다.** [업데이트 안내](automatic-updates.ko.md)
