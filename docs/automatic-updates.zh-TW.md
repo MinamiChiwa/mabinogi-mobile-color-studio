@@ -6,9 +6,10 @@
 
 | 用途 | 檔案 | 操作 |
 |---|---|---|
-| 首次安裝或手動升級 | `ColorStudio-v0.4.5-Windows-x64.zip` | 完整解壓縮後執行 |
-| 完整離線更新 | `UPDATE-ONLY-ColorStudio-0.4.5-win-x64.zip` | 在已安裝的工具內匯入 |
-| 從官方 0.4.4 更新 | `UPDATE-ONLY-ColorStudio-from-0.4.4-to-0.4.5-win-x64.zip` | 僅適用於檔案相符的官方最終修訂版 0.4.4 |
+| 首次安裝或手動升級 | `ColorStudio-v0.4.6-Windows-x64.zip` | 完整解壓縮後執行 |
+| 完整離線更新 | `UPDATE-ONLY-ColorStudio-0.4.6-win-x64.zip` | 在已安裝的工具內匯入 |
+| 從官方 0.4.5 更新 | `UPDATE-ONLY-ColorStudio-from-0.4.5-to-0.4.6-win-x64.zip` | 僅適用於檔案相符的官方 0.4.5 |
+| 從官方 0.4.4 更新 | `UPDATE-ONLY-ColorStudio-from-0.4.4-to-0.4.6-win-x64.zip` | 僅適用於檔案相符的官方最終修訂版 0.4.4 |
 
 **UPDATE-ONLY 不能用於首次安裝，也不能直接解壓縮執行。** 小型差異套件不適用時，請用完整離線更新套件。不必手動下載發布頁的 `blob-` 檔案。
 
@@ -43,4 +44,4 @@
 
 安裝失敗時先確認目前版本及更新紀錄；需要協助可在 [GitHub Issues](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/issues) 附上紀錄。
 
-[返回使用說明](../README.zh-TW.md) · [0.4.5 更新內容](release-notes-0.4.5.md)
+[返回使用說明](../README.zh-TW.md) · [0.4.6 更新內容](release-notes-0.4.6.md)

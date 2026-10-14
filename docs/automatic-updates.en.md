@@ -6,9 +6,10 @@
 
 | Purpose | File | How to use it |
 |---|---|---|
-| First install or manual upgrade | `ColorStudio-v0.4.5-Windows-x64.zip` | Extract the entire package and run the app |
-| Full offline update | `UPDATE-ONLY-ColorStudio-0.4.5-win-x64.zip` | Import in an existing installation |
-| Update from official 0.4.4 | `UPDATE-ONLY-ColorStudio-from-0.4.4-to-0.4.5-win-x64.zip` | Only for matching files from the final corrected official 0.4.4 |
+| First install or manual upgrade | `ColorStudio-v0.4.6-Windows-x64.zip` | Extract the entire package and run the app |
+| Full offline update | `UPDATE-ONLY-ColorStudio-0.4.6-win-x64.zip` | Import in an existing installation |
+| Update from official 0.4.5 | `UPDATE-ONLY-ColorStudio-from-0.4.5-to-0.4.6-win-x64.zip` | Only for matching files from official 0.4.5 |
+| Update from official 0.4.4 | `UPDATE-ONLY-ColorStudio-from-0.4.4-to-0.4.6-win-x64.zip` | Only for matching files from the final corrected official 0.4.4 |
 
 **UPDATE-ONLY packages are not for first installs and cannot be extracted and run directly.** If the smaller delta does not match, use the full offline update. You do not need to download individual `blob-` files from the release page.
 
@@ -43,4 +44,4 @@ Keep the old folder until the new app starts and your settings are correct. Do n
 
 Check the current version and update records after a failed installation. Attach logs to [GitHub Issues](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/issues) if you need help.
 
-[Back to the user guide](../README.en.md) · [What's new in 0.4.5](release-notes-0.4.5.md)
+[Back to the user guide](../README.en.md) · [What's new in 0.4.6](release-notes-0.4.6.md)
