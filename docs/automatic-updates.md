@@ -6,14 +6,16 @@
 
 | 用途 | 文件 | 操作 |
 |---|---|---|
-| 首次安装或手动升级 | `ColorStudio-v0.4.6-Windows-x64.zip` | 完整解压后运行 |
-| 完整离线更新 | `UPDATE-ONLY-ColorStudio-0.4.6-win-x64.zip` | 在已安装工具内导入 |
-| 从官方 0.4.5 更新 | `UPDATE-ONLY-ColorStudio-from-0.4.5-to-0.4.6-win-x64.zip` | 仅用于文件匹配的官方 0.4.5 |
-| 从官方 0.4.4 更新 | `UPDATE-ONLY-ColorStudio-from-0.4.4-to-0.4.6-win-x64.zip` | 仅用于文件匹配的官方最终修订版 0.4.4 |
+| 首次安装或手动升级 | `ColorStudio-v0.4.8-Windows-x64.zip` | 完整解压后运行 |
+| 完整离线更新 | `UPDATE-ONLY-ColorStudio-0.4.8-win-x64.zip` | 在已安装工具内导入 |
+| 从官方 0.4.7 更新 | `UPDATE-ONLY-ColorStudio-from-0.4.7-to-0.4.8-win-x64.zip` | 仅用于文件匹配的官方 0.4.7 |
+| 从官方 0.4.4 更新 | `UPDATE-ONLY-ColorStudio-from-0.4.4-to-0.4.8-win-x64.zip` | 仅用于文件匹配的官方最终修订版 0.4.4 |
 
 **UPDATE-ONLY 不能用于首次安装，也不能直接解压运行。** 小差异包不适用时，使用完整离线更新包。无需手动下载发布页的 `blob-` 文件。
 
 ## 在线更新
+
+> 稳定版检查会先读取 GitHub Releases 的官方 latest/download 清单和签名，不占用 GitHub API 配额；只有直链不可用时才尝试 API。
 
 1. 在主界面点击**检查更新**。检查本身不会下载或安装。
 2. 发现新版本后点击**下载更新**。工具只下载需要替换或补充的文件。
@@ -40,8 +42,8 @@
 - **差异包不匹配**：改用完整离线更新包。
 - **文件被占用或权限不足**：退出同目录的工具副本；必要时把完整包解压到可写本地目录。
 - **更新验证失败**：重新获取官方包；保留日志，不要手动修改签名或程序文件。
-- **0.4.3 或早期 0.4.4 安装超时**：旧更新器可能误判程序仍在运行。若已下载且尚未替换文件，可使用 [0.4.4 发布页](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/releases/tag/v0.4.4) 的 `ColorStudio-Update-Recovery-v0.4.4.zip`，关闭工具后运行 `Recover-Update.cmd` 并选择原安装目录。无适用更新记录时，使用完整包手动升级并保留数据。
+- **旧版 安装超时**：旧更新器可能误判程序仍在运行。若已下载且尚未替换文件，可使用 [0.4.4 发布页](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/releases/tag/v0.4.4) 的 `ColorStudio-Update-Recovery-v0.4.4.zip`，关闭工具后运行 `Recover-Update.cmd` 并选择原安装目录。无适用更新记录时，使用完整包手动升级并保留数据。
 
 安装失败时先查看当前版本和更新记录；需要协助可在 [GitHub Issues](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/issues) 附日志。
 
-[返回使用说明](../README.md) · [0.4.6 更新内容](release-notes-0.4.6.md)
+[返回使用说明](../README.md) · [0.4.8 更新内容](release-notes-0.4.8.md)

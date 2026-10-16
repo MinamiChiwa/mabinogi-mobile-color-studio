@@ -6,14 +6,16 @@
 
 | 용도 | 파일 | 사용 방법 |
 |---|---|---|
-| 첫 설치 또는 수동 업그레이드 | `ColorStudio-v0.4.6-Windows-x64.zip` | 전체 압축을 풀어 실행 |
-| 전체 오프라인 업데이트 | `UPDATE-ONLY-ColorStudio-0.4.6-win-x64.zip` | 기존 도구에서 가져오기 |
-| 공식 0.4.5에서 업데이트 | `UPDATE-ONLY-ColorStudio-from-0.4.5-to-0.4.6-win-x64.zip` | 파일이 일치하는 공식 0.4.5만 사용 가능 |
-| 공식 0.4.4에서 업데이트 | `UPDATE-ONLY-ColorStudio-from-0.4.4-to-0.4.6-win-x64.zip` | 파일이 일치하는 공식 0.4.4 최종 수정판만 사용 가능 |
+| 첫 설치 또는 수동 업그레이드 | `ColorStudio-v0.4.8-Windows-x64.zip` | 전체 압축을 풀어 실행 |
+| 전체 오프라인 업데이트 | `UPDATE-ONLY-ColorStudio-0.4.8-win-x64.zip` | 기존 도구에서 가져오기 |
+| 공식 0.4.7에서 업데이트 | `UPDATE-ONLY-ColorStudio-from-0.4.7-to-0.4.8-win-x64.zip` | 파일이 일치하는 공식 0.4.7만 사용 가능 |
+| 공식 0.4.4에서 업데이트 | `UPDATE-ONLY-ColorStudio-from-0.4.4-to-0.4.8-win-x64.zip` | 파일이 일치하는 공식 0.4.4 최종 수정판만 사용 가능 |
 
 **UPDATE-ONLY는 첫 설치용이 아니며 압축을 풀어 직접 실행할 수도 없습니다.** 작은 증분 패키지가 맞지 않으면 전체 오프라인 업데이트를 사용하세요. 릴리스 페이지의 `blob-` 파일을 따로 받을 필요는 없습니다.
 
 ## 온라인 업데이트
+
+> stable 채널은 먼저 GitHub Releases 공식 latest/download 주소에서 서명된 매니페스트와 서명을 읽으므로 GitHub API 할당량을 사용하지 않습니다. 다운로드 주소를 사용할 수 없을 때만 API를 시도합니다.
 
 1. 메인 화면에서 **업데이트 확인**을 누르세요. 확인만으로는 다운로드나 설치를 하지 않습니다.
 2. 새 버전이 있으면 **업데이트 다운로드**를 선택하세요. 변경되거나 부족한 파일만 받습니다.
@@ -40,8 +42,8 @@ GitHub에 접속할 수 없으면 다른 컴퓨터에서 전체 오프라인 업
 - **증분 패키지 불일치**: 전체 오프라인 업데이트로 바꾸세요.
 - **파일 사용 중 또는 권한 부족**: 같은 폴더에서 실행 중인 다른 도구를 닫거나 전체 패키지를 쓰기 가능한 로컬 폴더에 푸세요.
 - **검증 실패**: 공식 패키지를 다시 받고 로그를 보관하세요. 서명이나 프로그램 파일을 직접 수정하지 마세요.
-- **0.4.3 또는 초기 0.4.4 설치 시간 초과**: 기존 업데이트 프로그램이 종료된 도구를 실행 중으로 판단할 수 있습니다. 다운로드가 끝났고 파일 교체 전이라면 [0.4.4 릴리스](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/releases/tag/v0.4.4)의 `ColorStudio-Update-Recovery-v0.4.4.zip`을 사용할 수 있습니다. 도구를 닫고 `Recover-Update.cmd`를 실행해 원래 설치 폴더를 선택하세요. 적용 가능한 업데이트 기록이 없으면 전체 패키지로 수동 업그레이드하고 데이터를 유지하세요.
+- **구버전 설치 시간 초과**: 기존 업데이트 프로그램이 종료된 도구를 실행 중으로 판단할 수 있습니다. 다운로드가 끝났고 파일 교체 전이라면 [0.4.4 릴리스](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/releases/tag/v0.4.4)의 `ColorStudio-Update-Recovery-v0.4.4.zip`을 사용할 수 있습니다. 도구를 닫고 `Recover-Update.cmd`를 실행해 원래 설치 폴더를 선택하세요. 적용 가능한 업데이트 기록이 없으면 전체 패키지로 수동 업그레이드하고 데이터를 유지하세요.
 
 실패 후에는 현재 버전과 업데이트 기록을 먼저 확인하세요. 도움이 필요하면 [GitHub Issues](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/issues)에 로그를 첨부하세요.
 
-[사용 안내로 돌아가기](../README.ko.md) · [0.4.6 변경 내용](release-notes-0.4.6.md)
+[사용 안내로 돌아가기](../README.ko.md) · [0.4.8 변경 내용](release-notes-0.4.8.md)

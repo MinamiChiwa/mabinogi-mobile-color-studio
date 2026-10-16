@@ -2,7 +2,7 @@
 
 用户使用说明以仓库根目录五语 README 为准：[简体中文](../README.md)、[繁體中文](../README.zh-TW.md)、[English](../README.en.md)、[日本語](../README.ja.md)、[한국어](../README.ko.md)。
 
-- 发布准备：[0.4.4 变更](release-notes-0.4.4.md)（用户要求暂缓上传）；正式版本仍为[0.4.3](release-notes-0.4.3.md)、[自动更新](automatic-updates.md)、[服务器选择](server-adaptation/server-selection.md)。
+- 正式版本：[0.4.8 更新内容](release-notes-0.4.8.md)；[自动更新指南](automatic-updates.md)（稳定版优先读取 GitHub 官方下载直链，API 仅作备用）；[服务器选择](server-adaptation/server-selection.md)。
 - 开发验证：[测试集合](../TESTING.md)、[当前验证范围](../work/studio/VERIFICATION.md)。
 - 截图验证：[联合搜索与实际端点](research/screenshot-mixed-precision.md)。
 - 当前策略：[多区域优先级与妥协搜索](research/2026-10-13-priority-compromise-search.md)、[游戏字体色码与倒计时识别](research/2026-10-12-game-font-hex-countdown.md)。
