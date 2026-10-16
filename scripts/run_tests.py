@@ -20,13 +20,15 @@ test_screenshot_search test_screenshot_control test_screenshot_live test_screens
 test_strategy_defaults test_strategy_default_ui
 test_screenshot_endpoint test_screenshot_single
 test_screenshot_performance
+test_refinement_retention
+test_refinement_recovery
 test_rc5_alignment
 test_app_data test_build_info test_core test_dpi_layout test_display_geometry
 test_hotkeys test_run_stop test_input_gestures test_window_target test_platform_dpi
 test_lossless_scoring
 test_screen_mapping
 test_runtime_i18n_coverage test_ui_i18n test_release_localization test_ui_performance
-test_native_ui_completion test_native_ui_hit_testing test_responsive_geometry
+test_native_ui_completion test_native_ui_hit_testing test_live_color_ui test_responsive_geometry
 test_resize_surface
 test_resize_surface_faults
 test_native_retry_ui test_native_retry_bridge test_native_session_status_ui
@@ -68,6 +70,7 @@ test_app_shutdown
 # New modules are reported as unclassified and run by research/full until they
 # are deliberately assigned to a product profile.
 EXTRA_CURRENT_MODULES = frozenset(('test_profile_store', 'test_profile_ui',
+                                   'test_color_matching',
                                    'test_region_priority', 'test_priority_search_paths',
                                    'test_native_frame_budget_recovery'))
 

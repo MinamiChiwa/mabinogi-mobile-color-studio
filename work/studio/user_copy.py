@@ -2,6 +2,69 @@
 
 # Each row: English, Traditional Chinese, Japanese, Korean.
 ROWS = {
+  "实测颜色  —": ["Measured color  —", "實測顏色  —", "実測色  —", "실측 색상  —"],
+  "实测颜色  本局不可用": ["Measured color  Unavailable this round", "實測顏色  本局無法使用", "実測色  今回は使用不可", "실측 색상  이번 염색에서 사용 불가"],
+  "妥协选色": ["Compromise colors", "折衷選色", "妥協案の選色", "절충 색상 선택"],
+  "未全部达标时，按区域优先级兼顾整体色差、色相与饱和度；黑白灰沿用原有色差。精准 HEX 与相似颜色的达标条件不变。": [
+    "When not all targets are met, selection follows region priorities and considers overall difference, hue and saturation. Black, white and gray retain the original color comparison. Exact HEX and Similar acceptance requirements stay the same.",
+    "未全部達標時，依區域優先順序兼顧整體色差、色相與飽和度；黑白灰沿用原有色差。精準 HEX 與相似顏色的達標條件不變。",
+    "すべての目標を満たせない場合は、部位の優先順位に従い、全体の色差・色相・彩度を考慮して選びます。黒・白・グレーは従来の色差で比較します。完全一致（HEX）と近似色の達成条件は変わりません。",
+    "모든 목표를 충족하지 못하면 영역 우선순위에 따라 전체 색차, 색상 계열, 채도를 함께 고려합니다. 검정·흰색·회색은 기존 색차로 비교합니다. 완전 일치(HEX)와 유사 색상의 충족 조건은 바뀌지 않습니다."
+  ],
+  "本轮未命中全部目标。妥协选色兼顾色相与饱和度，色差仍按原有 ΔE 显示；请在游戏内决定是否套用。": [
+    "Not all targets were met. Compromise selection considers hue and saturation; the displayed difference still uses the original Delta E. Decide whether to apply in the game.",
+    "本輪未命中全部目標。折衷選色兼顧色相與飽和度，色差仍依原有 ΔE 顯示；請在遊戲內決定是否套用。",
+    "すべての目標は満たしていません。妥協案では色相と彩度も考慮します。表示する色差は従来どおりの ΔE です。適用するかはゲーム内で判断してください。",
+    "모든 목표를 충족하지는 못했습니다. 절충 색상은 색상 계열과 채도를 함께 고려하며, 표시되는 색차는 기존 ΔE 기준입니다. 적용 여부는 게임에서 결정하세요."
+  ],
+  "当前妥协配色已经复核。选色兼顾色相与饱和度，色差仍按原有 ΔE 显示；请在游戏内手动确认是否套用。": [
+    "The current compromise colors have been verified. Selection considers hue and saturation; the displayed difference still uses the original Delta E. Decide whether to apply in the game.",
+    "目前折衷配色已完成核對。選色兼顧色相與飽和度，色差仍依原有 ΔE 顯示；請在遊戲內決定是否套用。",
+    "現在の妥協案の色を確認しました。選色では色相と彩度も考慮します。表示する色差は従来どおりの ΔE です。適用するかはゲーム内で判断してください。",
+    "현재 절충 배색을 확인했습니다. 색상 계열과 채도를 함께 고려해 선택하며, 표시되는 색차는 기존 ΔE 기준입니다. 적용 여부는 게임에서 결정하세요."
+  ],
+  "按 F9 会立即停止操作；请以游戏当前颜色为准。": [
+    "F9 stops input immediately. Check the colors currently shown in the game.",
+    "按 F9 會立即停止操作；請以遊戲目前顏色為準。",
+    "F9 を押すと操作をすぐに停止します。ゲーム内の現在の色を確認してください。",
+    "F9를 누르면 조작이 즉시 중지됩니다. 게임에 표시된 현재 색상을 확인하세요."
+  ],
+  "返回出现偏差，正在重新定位并修正配色。": [
+    "The return missed the retained colors. Rechecking the position and correcting the colors.",
+    "返回時出現偏差，正在重新定位並修正配色。",
+    "保持した配色への復帰にずれがあったため、位置を確認して配色を調整しています。",
+    "보존한 배색으로 돌아가는 과정에 오차가 있어 위치를 다시 확인하고 색상을 조정하고 있습니다."
+  ],
+  "当前颜色符合目标要求，但未回到此前保留的配色；请以游戏当前颜色为准。": [
+    "The current colors meet your targets, but the previously retained colors were not restored. Check the colors currently shown in the game.",
+    "目前顏色符合目標要求，但未回到先前保留的配色；請以遊戲目前顏色為準。",
+    "現在の色は指定した条件を満たしていますが、保持していた配色には戻っていません。ゲーム内の現在の色を確認してください。",
+    "현재 색상은 목표 조건을 충족하지만 이전에 보존한 배색으로 돌아가지 못했습니다. 게임에 표시된 현재 색상을 확인하세요."
+  ],
+  "当前试探 · 游戏实测": [
+    "Trial colors · Measured in game", "目前試探 · 遊戲實測", "試行中の色 · ゲーム内実測", "시험 중인 색상 · 게임 내 실측"
+  ],
+  "已保留配色 · 游戏实测": [
+    "Retained colors · Measured in game", "已保留配色 · 遊戲實測", "保持した配色 · ゲーム内実測", "보존한 배색 · 게임 내 실측"
+  ],
+  "正在核对微调结果；尚未替换已保留配色。": [
+    "Checking the trial. The retained colors have not been replaced.",
+    "正在核對微調結果；尚未替換已保留配色。",
+    "微調整の結果を確認しています。保持中の配色はまだ更新していません。",
+    "미세 조정 결과를 확인하고 있습니다. 보존한 배색은 아직 교체하지 않았습니다."
+  ],
+  "本次微调没有改善，正在尝试返回已保留配色。": [
+    "The trial did not improve the colors. Trying to return to the retained result.",
+    "本次微調沒有改善，正在嘗試返回已保留配色。",
+    "今回の微調整では改善しなかったため、保持した配色に戻そうとしています。",
+    "이번 미세 조정으로 개선되지 않아 보존한 배색으로 돌아가고 있습니다."
+  ],
+  "微调已改善，已保留本次实测配色。": [
+    "The trial improved the colors. This measured result has been retained.",
+    "微調已改善，已保留本次實測配色。",
+    "微調整で改善が確認できたため、今回の実測配色を保持しました。",
+    "미세 조정으로 개선된 이번 실측 배색을 보존했습니다."
+  ],
   "自动操作已停止": [
     "Automatic input stopped",
     "自動操作已停止",
