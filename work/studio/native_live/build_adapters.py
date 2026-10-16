@@ -53,13 +53,21 @@ KR_ADAPTER=BuildAdapter('kr-20261012-research-candidate',KR_BUILD,KR_METADATA,0x
     palette_uninitialized_marker=0x20036bfb,input_class_rva=0x10d7e580,input_class_uninitialized_marker=0x20043315,
     mouse_getter_cache_rva=0x11694ce8,capability='diagnostic_only',
     managed_layout_evidence_sha256='ae9f8974b2b3a54c9cf49832cea394824fe43408905bc71f81a66744138fd90a')
+KR_20261016_ADAPTER=BuildAdapter('kr-20261016-static-candidate',
+    '6bd11b074630ffd718301ba7ccb65af9c4505b6034aea0b1f6b2004b86f3f409',
+    '3fa44401ae69c9e782081e10eab7ce5f7e156e2ec5a86dc42847084550f0939c',
+    0x1117f2e8,'legacy-mouse-v1',palette_uninitialized_marker=0x20038007,
+    input_class_rva=0x1121ebd0,input_class_uninitialized_marker=0x20044b51,
+    mouse_getter_cache_rva=0x11d68be0,capability='diagnostic_only',
+    managed_layout_evidence_sha256='8019a8e0ab4cf4dc163659db88bd934d8752b36e0b5a9aaf47fb4f497650f1ab')
 JP_ADAPTER=BuildAdapter('jp-20261012-research-candidate',JP_BUILD,JP_METADATA,0x10909e58,'legacy-mouse-v1',
     palette_uninitialized_marker=0x20035ba5,input_class_rva=0x10959120,input_class_uninitialized_marker=0x20042105,
     mouse_getter_cache_rva=0x11308df8,capability='diagnostic_only',
     managed_layout_evidence_sha256='c149e7844a9be83eebf3038f342f5905d180ea344cb6a60689b2100816d2a2cd')
-KNOWN=(TW_ADAPTER,KR_ADAPTER,JP_ADAPTER)
-VALIDATION_ADAPTERS=(KR_ADAPTER,JP_ADAPTER)
+KNOWN=(TW_ADAPTER,KR_ADAPTER,KR_20261016_ADAPTER,JP_ADAPTER)
+VALIDATION_ADAPTERS=(KR_ADAPTER,KR_20261016_ADAPTER,JP_ADAPTER)
 SERVER_ADAPTERS=dict(tw=TW_ADAPTER,kr=KR_ADAPTER,jp=JP_ADAPTER)
+SERVER_BUILD_ADAPTERS=dict(tw=(TW_ADAPTER,),kr=(KR_ADAPTER,KR_20261016_ADAPTER),jp=(JP_ADAPTER,))
 
 class BuildUnsupported(ValueError):
     def __init__(self,hashes):
@@ -93,7 +101,7 @@ def enable_known_validation_input(backend,adapter_id):
 
 def enable_selected_server_input(backend,server):
     """Use the selected server's exact registered build with shared input logic."""
-    expected=SERVER_ADAPTERS.get(server)
-    if expected is None or getattr(backend,'adapter',None)!=expected:
+    expected=getattr(backend,'adapter',None)
+    if expected not in SERVER_BUILD_ADAPTERS.get(server,()):
         raise ValueError('所选服务器与客户端版本不匹配，请检查服务器和游戏窗口。')
     if not expected.input_verified:enable_known_validation_input(backend,expected.adapter_id)

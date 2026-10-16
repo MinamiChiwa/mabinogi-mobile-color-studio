@@ -34,7 +34,11 @@ class ServerSelectionTests(unittest.TestCase):
 
     def test_ui_selection_enables_only_its_exact_registered_build(self):
         rules=[dict(enabled=True,exact=True,colors=['#FFFFFF'],tolerance=8)]*3
-        for server,adapter in zip(('tw','kr','jp'),builds.KNOWN):
+        # Explicit contract: two KR builds share a server, not registry order.
+        servers=(('tw',(builds.TW_ADAPTER,)),
+                 ('kr',(builds.KR_ADAPTER,builds.KR_20261016_ADAPTER)),
+                 ('jp',(builds.JP_ADAPTER,)))
+        for server,adapters in servers:
             for actual in builds.KNOWN:
                 with self.subTest(server=server,actual=actual.adapter_id),tempfile.TemporaryDirectory() as folder:
                     owner=SimpleNamespace(folder=Path(folder),stop=threading.Event(),event=Mock())
@@ -43,9 +47,9 @@ class ServerSelectionTests(unittest.TestCase):
                         patch.object(service,'_prepare',return_value=(backend,{})), \
                         patch.object(service,'collect_validation_session',return_value={'stop_reason':'no_active_palette_timeout'}) as collect:
                         result=service.run_native_search(owner,rules,server=server)
-                    self.assertEqual(bool(collect.call_count),actual==adapter)
+                    self.assertEqual(bool(collect.call_count),actual in adapters)
                     self.assertEqual(result['actual_input_attempts'],0)
-                    if actual==adapter:self.assertEqual(result['selected_server'],server)
+                    if actual in adapters:self.assertEqual(result['selected_server'],server)
 
     def test_unregistered_or_modified_build_cannot_be_enabled_by_ui(self):
         from dataclasses import replace
