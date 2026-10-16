@@ -6,14 +6,16 @@
 
 | Purpose | File | How to use it |
 |---|---|---|
-| First install or manual upgrade | `ColorStudio-v0.4.6-Windows-x64.zip` | Extract the entire package and run the app |
-| Full offline update | `UPDATE-ONLY-ColorStudio-0.4.6-win-x64.zip` | Import in an existing installation |
-| Update from official 0.4.5 | `UPDATE-ONLY-ColorStudio-from-0.4.5-to-0.4.6-win-x64.zip` | Only for matching files from official 0.4.5 |
-| Update from official 0.4.4 | `UPDATE-ONLY-ColorStudio-from-0.4.4-to-0.4.6-win-x64.zip` | Only for matching files from the final corrected official 0.4.4 |
+| First install or manual upgrade | `ColorStudio-v0.4.8-Windows-x64.zip` | Extract the entire package and run the app |
+| Full offline update | `UPDATE-ONLY-ColorStudio-0.4.8-win-x64.zip` | Import in an existing installation |
+| Update from official 0.4.7 | `UPDATE-ONLY-ColorStudio-from-0.4.7-to-0.4.8-win-x64.zip` | Only for matching files from official 0.4.7 |
+| Update from official 0.4.4 | `UPDATE-ONLY-ColorStudio-from-0.4.4-to-0.4.8-win-x64.zip` | Only for matching files from the final corrected official 0.4.4 |
 
 **UPDATE-ONLY packages are not for first installs and cannot be extracted and run directly.** If the smaller delta does not match, use the full offline update. You do not need to download individual `blob-` files from the release page.
 
 ## Online update
+
+> Stable checks first read the signed manifest and signature from GitHub Releases official latest/download URLs, so they do not use the GitHub API quota; the API is tried only when the download endpoint is unavailable.
 
 1. Choose **Check for updates** in the main window. Checking does not download or install anything.
 2. Choose **Download update** when a new version is available. Only needed replacement or missing files are downloaded.
@@ -40,8 +42,8 @@ Keep the old folder until the new app starts and your settings are correct. Do n
 - **Delta package does not match:** use a full offline update.
 - **Files in use or access denied:** close other copies from the same folder, or extract the full package to a writable local folder.
 - **Verification failed:** obtain the official package again and keep the logs. Do not edit signatures or program files manually.
-- **Installation times out on 0.4.3 or early 0.4.4:** the old updater may think the app is still running. If the update was downloaded but files have not been replaced, use `ColorStudio-Update-Recovery-v0.4.4.zip` from the [0.4.4 release](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/releases/tag/v0.4.4). Close the app, run `Recover-Update.cmd` and select the original installation folder. If there is no suitable pending update, upgrade manually with the full package and keep your data.
+- **Installation times out on older versions:** the old updater may think the app is still running. If the update was downloaded but files have not been replaced, use `ColorStudio-Update-Recovery-v0.4.4.zip` from the [0.4.4 release](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/releases/tag/v0.4.4). Close the app, run `Recover-Update.cmd` and select the original installation folder. If there is no suitable pending update, upgrade manually with the full package and keep your data.
 
 Check the current version and update records after a failed installation. Attach logs to [GitHub Issues](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/issues) if you need help.
 
-[Back to the user guide](../README.en.md) · [What's new in 0.4.6](release-notes-0.4.6.md)
+[Back to the user guide](../README.en.md) · [What's new in 0.4.8](release-notes-0.4.8.md)
