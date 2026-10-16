@@ -93,11 +93,12 @@ def result_text(data):
     if reason=='no_available_regions':return ('本局没有已启用的可用区域','本局没有已启用的可用区域，请启用区域 1 或 2。')
     if data.get('verified') and data.get('accepted') and reason=='target_observed':
         return ('目标 HEX 已精确匹配' if data.get('target_exact') else '目标颜色已在容差内匹配',
+                '当前颜色符合目标要求，但未回到此前保留的配色；请以游戏当前颜色为准。' if data.get('best_current') is False else
                 '游戏色码已复核，请在游戏内手动确认是否套用。')
     if reason=='compromise_observed' and data.get('verified'):
         if data.get('best_current') is False:
             return ('未命中目标 · 当前妥协结果','当前颜色已复核，但未恢复此前更好的实测结果，请在游戏内手动确认是否采用。')
-        detail='已复核本轮色差较小的方案，请查看实测色差，在游戏内手动确认是否采用。'
+        detail='当前妥协配色已经复核。选色兼顾色相与饱和度，色差仍按原有 ΔE 显示；请在游戏内手动确认是否套用。'
         refinement=data.get('refinement_stop')
         if refinement in ('local_search_budget','local_search_timeout'):
             detail+=' 本轮细化搜索时间已用完，保留当前结果；不能据此判断无解。'

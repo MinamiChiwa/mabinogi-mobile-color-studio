@@ -12,6 +12,7 @@ from native_palette_model import picker_view_uv,sample_cpu,color32,distort_uv
 from native_palette_scoring import score_native_pose,_pose
 from vision import rgb,lab
 from region_priority import priority_components, priority_indices, vector_priority_components
+from color_matching import matching_distances, matching_summary, MATCHING_POLICY
 
 
 def periodic_samples(session,index,fy,fx,*,check=lambda:None):
@@ -83,7 +84,8 @@ def search_periodic_targets(session,rules,*,minimum_scale,maximum_scale,
         sample_fractions=list(fractions),site_scan_complete=False,pair_lattice_complete=False,
         continuous_complete=False,stop_reason='not_started',pair_proposals=0,cpu_evaluations=0,
         cpu_pool_complete=False,peak_pair_block_size=0,
-        execution_verified=False,coverage='All matching sites on finite subpixel lattice; continuous regions not exhausted')
+        execution_verified=False,matching_policy=MATCHING_POLICY,
+        coverage='All matching sites on finite subpixel lattice; continuous regions not exhausted')
     enabled_regions=[i for i,r in enumerate(rules) if r['enabled']]
     prioritized=priority_indices(rules)
     result['enabled_regions']=enabled_regions
@@ -98,8 +100,7 @@ def search_periodic_targets(session,rules,*,minimum_scale,maximum_scale,
         if prioritized is None:return (row['model_cost'],)
         prediction=row['prediction']
         ordered=priority_components(prediction['colors'],rules,prediction['deltas'])
-        values=[prediction['deltas'][i] for i in enabled_regions]
-        return (not prediction['predicted_accepted'],*ordered,max(values),sum(values)/len(values),row['model_cost'])
+        return (not prediction['predicted_accepted'],*ordered,*matching_summary(prediction['colors'],rules),row['model_cost'])
     def offer(anchor,z,scale,angle):
         nonlocal nearest,nearest_key
         guard()
@@ -121,7 +122,7 @@ def search_periodic_targets(session,rules,*,minimum_scale,maximum_scale,
                        for i in enabled_regions if rules[i]['exact'])
         ordered=priority_components(prediction['colors'],rules,prediction['deltas'])
         quality=((*((not prediction['predicted_accepted'],*ordered) if ordered is not None else ()),
-                  max(values,default=float('inf')),sum(values)/len(values) if values else float('inf'),-exact_hits,cost))
+                  *matching_summary(prediction['colors'],rules),-exact_hits,cost))
         row=dict(native_pose=pose,prediction=prediction,model_cost=cost,
                  source='joint_periodic_nearest',execution_verified=False,input_reachability='unverified')
         nearest_rows[key]=(quality,row)
@@ -152,7 +153,8 @@ def search_periodic_targets(session,rules,*,minimum_scale,maximum_scale,
                     if rule['exact']:mask|=np.all(colors==target_rgb,axis=1)
                     else:mask|=delta<=rule['tolerance']
                 matched.append(inverse_periodic_uv(uv[mask])%1.)
-                sampled_uv.append(uv);sampled_losses.append(losses)
+                sampled_uv.append(uv)
+                sampled_losses.append(matching_distances(colors,rule,color_lab=color_lab))
             guard();sites[i]=np.unique(np.concatenate(matched),axis=0)
             result['target_sites_per_region'][i]=len(sites[i])
             if not len(sites[i]):
@@ -273,7 +275,7 @@ def search_periodic_targets(session,rules,*,minimum_scale,maximum_scale,
                                 # Preserve low-error nonexact targets as route
                                 # seeds, instead of exporting them only as logs.
                                 if prioritized is None:
-                                    near_quality=losses+costs*1e-6
+                                    near_quality=matching_distances(colors,rule)+costs*1e-6
                                     indices=np.flatnonzero(near_quality < -near_proposals[0][0]) if len(near_proposals)==top_k else np.arange(len(costs))
                                     if len(indices)>top_k:
                                         indices=indices[np.argpartition(near_quality[indices],top_k-1)[:top_k]]
@@ -282,7 +284,7 @@ def search_periodic_targets(session,rules,*,minimum_scale,maximum_scale,
                                     # Screen every material before pruning this
                                     # nearest pool. A low-priority third loss
                                     # must not discard a higher-priority hit.
-                                    all_colors=[None]*count;all_losses=[None]*count
+                                    all_colors=[None]*count;all_losses=[None]*count;all_scores=[None]*count
                                     for region in enabled:
                                         guard()
                                         ratio=complex(*(np.asarray(session['picker_uv'][region])-session['picker_uv'][a]))/complex(*delta)
@@ -292,11 +294,13 @@ def search_periodic_targets(session,rules,*,minimum_scale,maximum_scale,
                                             session['color_preserve_ratio'])/np.float32(255))
                                         targets=np.asarray([rgb(code) for code in rules[region]['colors']])
                                         all_colors[region]=vals
-                                        all_losses[region]=np.min(np.linalg.norm(lab(vals)[:,None,:]-lab(targets)[None,:,:],axis=2),axis=1)
-                                    priority=vector_priority_components(all_colors,all_losses,rules)
+                                        color_lab=lab(vals)
+                                        all_losses[region]=np.min(np.linalg.norm(color_lab[:,None,:]-lab(targets)[None,:,:],axis=2),axis=1)
+                                        all_scores[region]=matching_distances(vals,rules[region],color_lab=color_lab)
+                                    priority=vector_priority_components(all_colors,all_losses,rules,scores=all_scores)
                                     accepted=np.all(priority[:,::2]==0,axis=1)
-                                    maximum=np.maximum.reduce([all_losses[i] for i in enabled])
-                                    average=np.mean([all_losses[i] for i in enabled],axis=0)
+                                    maximum=np.maximum.reduce([all_scores[i] for i in enabled])
+                                    average=np.mean([all_scores[i] for i in enabled],axis=0)
                                     quality=np.column_stack((~accepted,priority,maximum,average,costs))
                                     indices=np.lexsort(tuple(quality[:,j] for j in range(quality.shape[1]-1,-1,-1)))[:top_k]
                                     for slot in indices:offer_heap(near_proposals,tuple(quality[slot]),slot,qa,scales,angles,top_k)

@@ -2,6 +2,7 @@
 import cv2,numpy as np
 from atlas_masks import material_masks
 from screenshot_samples import distances
+from color_matching import matching_distances
 
 
 def candidates(c,*,matched_only=True):
@@ -13,6 +14,7 @@ def candidates(c,*,matched_only=True):
     y,x=np.where(mask)
     if not len(x):return []
     colors=image[y,x];delta=distances(colors,rule)
+    quality=matching_distances(colors,rule)
     matched=delta<=(0 if rule['exact'] else rule['tolerance'])
     ids=np.flatnonzero(matched) if matched_only else np.arange(len(x))
     if not len(ids):return []
@@ -22,7 +24,7 @@ def candidates(c,*,matched_only=True):
     points=np.column_stack((x[ids],y[ids]));travel=np.linalg.norm(points-marker,axis=1)
     # Interior exact-color pixels tolerate positioning better; tied points use
     # the shortest translation. Similar colors respect the original tolerance.
-    order=np.lexsort((travel,delta[ids],-margin)) if matched_only else np.lexsort((travel,delta[ids]))
+    order=np.lexsort((travel,delta[ids],-margin)) if matched_only else np.lexsort((travel,quality[ids]))
     inverse=np.linalg.inv(c.pose);seen=getattr(c,'single_seen',set())
     for n in order:
         point=points[n];source=point@inverse[:2,:2].T+inverse[:2,2]
@@ -32,6 +34,7 @@ def candidates(c,*,matched_only=True):
         matrix=c.pose.copy();matrix[:2,2]+=marker-point
         return [dict(matrix=matrix,point=point,source=source,signature=signature,
             region=i,observed_rgb=colors[ids[n]].tolist(),delta=float(delta[ids[n]]),
+            match_score=float(quality[ids[n]]),
             margin=float(margin[n]),proposal_only=True)]
     return []
 
@@ -62,7 +65,7 @@ def search(c):
             if read_match('single-visible-actual',True):return True,True
         rows=candidates(c);c.single_candidates=[]
         close=candidates(c,matched_only=False)
-        if close and (nearest is None or close[0]['delta']<nearest['delta']):nearest=close[0]
+        if close and (nearest is None or close[0]['match_score']<nearest['match_score']):nearest=close[0]
         if not rows:return False,True
         matched=attempt(rows[0])
         return matched,c.relocalize()

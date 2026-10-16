@@ -11,6 +11,7 @@ from screenshot_registration import period_from_image
 from screenshot_samples import RawSamples
 from screenshot_search import solve,actual_result
 from screenshot_refinement import local_candidates
+from refinement_policy import compare_refinement
 from screenshot_prediction import VisibleColorField,ObservedColorField
 from screenshot_text import read_timer,timer_bar_signal
 
@@ -141,42 +142,64 @@ def _collect(c,samples=None):
     except OSError:pass
     return samples
 
+def _settle_refinement(c,value,anchor):
+    """Keep a componentwise gain, otherwise return to the actual anchor."""
+    decision=compare_refinement(value['actual_colors'],anchor['actual_colors'],c.rules)
+    if value.get('verified') and decision['not_worse']:
+        if decision['improved']:
+            c.refinement_anchor=c.best
+        return True
+    # Observation must not have promoted a trade. Preserve the snapshot even
+    # when an adapter failed between observing and committing its best result.
+    c.best=anchor;c.refinement_anchor=anchor
+    c.progress('refinement',refinement_status='restoring',
+        current_colors=value['actual_colors'],current_deltas=value['actual_deltas'],
+        verified=value.get('verified',False),screenshot_verified=value.get('verified',False),
+        retained_colors=anchor['actual_colors'],retained_deltas=anchor['actual_deltas'])
+    recovered=c.restore()
+    return bool(recovered and recovered.get('verified') and compare_refinement(
+        recovered['actual_colors'],anchor['actual_colors'],c.rules)['not_worse'])
+
+
 def _refine_visible(c):
-    center=c.preview();best_preview=center;offset=np.zeros(2)
-    protected=c.best
-    for point in ((0,.4),(0,-.4),(.4,0),(-.4,0),(1,0),(-1,0),(0,1),(0,-1)):
-        shift=np.asarray(point)-offset;count=fine_pair_count(c.scene.board,shift)
+    for shift in ((0,.4),(0,-.4),(.4,0),(-.4,0),(1,0),(-1,0),(0,1),(0,-1)):
+        count=fine_pair_count(c.scene.board,shift)
         predicted=c.pose.copy();predicted[:2]*=.9999**count
-        if not c.budget.can_input(c.return_cost(protected,from_matrix=predicted)+count*.8+3.5):break
-        c.fine_shift(shift,'refine-translate');offset=np.asarray(point)
-        value=c.preview()
-        # Read improved previews immediately so a later probe cannot erase an
-        # unrecorded real result as happened in the research round five.
-        if value['rank']<best_preview['rank']:
-            best_preview=value;c.observe('refine-actual')
-            if c.current['accepted']:return
+        if not c.budget.can_input(c.return_cost(c.best,from_matrix=predicted)+count*.8+
+                max(3.5,c.budget.estimate('verify',1.5))):break
+        reference=c.best;c.fine_shift(shift,'refine-translate')
+        value=c.observe('refine-actual')
+        improved=compare_refinement(value['actual_colors'],reference['actual_colors'],c.rules)['improved']
         c.progress('refinement','正在微调颜色，并保留已经实测的较好结果。',
-            current_colors=(c.current or c.best or {}).get('actual_colors'),
-            current_deltas=(c.current or c.best or {}).get('actual_deltas'),
-            verified=c.current is not None and c.current.get('verified',False),
-            screenshot_verified=c.current is not None and c.current.get('verified',False))
-    if c.budget.can_input(c.return_cost()+3.5):
-        c.move_to(best_preview['matrix'],'local-return',local=True);c.observe('local-return-actual')
+            current_colors=value['actual_colors'],current_deltas=value['actual_deltas'],
+            verified=value['verified'],screenshot_verified=value['verified'],
+            refinement_status='retained' if improved else 'trial',
+            retained_colors=c.best['actual_colors'],retained_deltas=c.best['actual_deltas'])
+        if not _settle_refinement(c,value,reference):return
+        if c.current['accepted']:return
     if not c.current or c.current['accepted']:return
     anchor_index=min((i for i,r in enumerate(c.rules) if r['enabled']),
-        key=lambda i:c.current['actual_deltas'][i] if c.current['actual_deltas'][i] is not None else float('inf'))
+        key=lambda i:c.rules[i].get('priority',i+1))
     anchor=np.rint(c.scene.markers[anchor_index]).astype(int)
-    for angle in (.35,-.70,.35):
+    # Each unsuccessful probe now returns to its measured anchor, so probe
+    # opposite offsets directly instead of replaying an accumulated sequence.
+    for angle in (.35,-.35):
         if not c.budget.can_input(c.return_cost()+4.2):break
-        c.rotate(angle,'refine-rotation',anchor);value=c.observe('rotation-actual')
-        if value['accepted']:return
-    for steps in (1,-2,1):
+        reference=c.best;c.rotate(angle,'refine-rotation',anchor);value=c.observe('rotation-actual')
+        if not _settle_refinement(c,value,reference):return
+        if c.current and c.current['accepted']:return
+    for steps in (1,-1):
         predicted=c.pose.copy();predicted[:2]*=1.01**steps if steps>0 else .99**-steps
         if not c.budget.can_input(c.return_cost(from_matrix=predicted)+abs(steps)*.045+4.2):break
-        c.wheel(steps,'refine-scale',anchor);value=c.observe('scale-actual')
-        if value['accepted']:return
+        reference=c.best;c.wheel(steps,'refine-scale',anchor);value=c.observe('scale-actual')
+        if not _settle_refinement(c,value,reference):return
+        if c.current and c.current['accepted']:return
 
 def _refine(c,max_rounds=None):
+    if not c.current or not c.current.get('verified') or not c.best:return
+    c.refinement_anchor=c.best
+    if not compare_refinement(c.current['actual_colors'],c.best['actual_colors'],c.rules)['not_worse']:
+        if not _settle_refinement(c,c.current,c.best):return
     if c.samples is None:return _refine_visible(c)
     attempted=set();step=.4;unchanged=0;rows=[]
     markers=np.asarray(c.scene.markers)-c.scene.board[:2]
@@ -188,7 +211,7 @@ def _refine(c,max_rounds=None):
         if not c.relocalize():break
         reference=c.best
         candidates=local_candidates(c.samples,markers,c.rules,c.pose,step=step,
-            exclude=attempted,check=lambda:_sampling_check(c))
+            exclude=attempted,check=lambda:_sampling_check(c),baseline=reference['actual_colors'])
         candidate=None
         for row in candidates:
             cost=c.return_cost(dict(matrix=row['matrix']))
@@ -196,26 +219,27 @@ def _refine(c,max_rounds=None):
             if c.budget.can_input(cost+recovery+1.5):candidate=row;break
         if candidate is None:break
         attempted.add(candidate.get('signature',tuple(np.round(candidate['matrix'][:2].ravel(),5))))
-        before=dict(c.current or {});measured=c.pose.copy()
+        measured=c.pose.copy()
         if not c.move_to(candidate['matrix'],'refine-measured',local=True):break
         value=c.observe('refine-measured-actual',reuse_frame=True)
-        improved=value['verified'] and (not before.get('verified') or value['rank']<before['rank'])
+        decision=compare_refinement(value['actual_colors'],reference['actual_colors'],c.rules)
+        improved=value['verified'] and decision['improved']
         rows.append(dict(round=round_number,reference=measured,desired=candidate['matrix'],
             measured=c.pose.copy(),kind=candidate['kind'],improved=improved,
-            actual_colors=value['actual_colors'],actual_deltas=value['actual_deltas']))
+            actual_colors=value['actual_colors'],actual_deltas=value['actual_deltas'],comparison=decision))
         c.write('refinement.json',rows)
         c.progress('refinement','正在微调颜色，并保留已经实测的较好结果。',
             current_colors=value['actual_colors'],current_deltas=value['actual_deltas'],
-            verified=value['verified'],screenshot_verified=value['verified'])
-        if value['accepted']:return
-        if reference is not None and (not value['verified'] or value['rank']>reference['rank']):
-            recovered=c.restore()
-            if not recovered or not recovered.get('verified') or recovered['rank']>reference['rank']:
-                break
+            verified=value['verified'],screenshot_verified=value['verified'],
+            refinement_status='retained' if improved else 'trial',
+            retained_colors=c.best['actual_colors'],retained_deltas=c.best['actual_deltas'])
+        if not _settle_refinement(c,value,reference):break
+        if c.current and c.current['accepted']:return
         unchanged=0 if improved else unchanged+1
         if unchanged>=4:
             step=step/2 if step>.08 else .8;unchanged=0
-    if c.best and (c.current is None or c.current['rank']>c.best['rank']):c.restore()
+    if c.best and (c.current is None or not compare_refinement(
+            c.current['actual_colors'],c.best['actual_colors'],c.rules)['not_worse']):c.restore()
 
 
 def _search(c,samples):
@@ -261,6 +285,9 @@ def _search(c,samples):
         if c.owner.consume_retry_request():raise RetryRequested()
         estimate=c.return_cost(dict(matrix=candidate['matrix']))
         if c.budget.remaining()<estimate+c.return_cost(from_matrix=candidate['matrix'])+5:continue
+        # A new global candidate may make the user's priority-ordered trade;
+        # final-polish retention starts afresh only after its measured landing.
+        c.refinement_anchor=None
         positioned=c.move_to(candidate['matrix']);result=c.observe('candidate-actual')
         if not positioned:
             c.progress('observe','当前位置尚未完成图像定位，正在保留游戏实际颜色。')
@@ -269,17 +296,29 @@ def _search(c,samples):
             confirm=c.observe('match-confirmation')
             if confirm['accepted']:break
         _refine(c)
-        if c.current and c.current['accepted']:
-            if c.observe('refinement-confirmation')['accepted']:break
+        if (c.current and c.current['accepted'] and
+                (c.refinement_anchor is None or c.at_least_best(c.current,c.best))):
+            confirmed=c.observe('refinement-confirmation')
+            if confirmed['accepted'] and (c.refinement_anchor is None or c.at_least_best(confirmed,c.best)):break
         recovered=c.restore()
-        if c.best and (not recovered or not recovered.get('verified') or recovered['rank']>c.best['rank']):
-            break
+        if c.best:
+            retained=bool(recovered and recovered.get('verified'))
+            if retained:
+                retained=(compare_refinement(recovered['actual_colors'],c.best['actual_colors'],c.rules)['not_worse']
+                    if getattr(c,'refinement_anchor',None) is not None else recovered['rank']<=c.best['rank'])
+            if not retained:break
         if c.budget.remaining()<c.return_cost()+7:break
     return samples
 
 def _publish(c,reason=None):
     if c.current and c.current.get('accepted') and not c.current.get('confirmed'):
-        try:c.observe('final-match-confirmation')
+        try:
+            c.observe('final-match-confirmation')
+            if (getattr(c,'refinement_anchor',None) is not None and c.best and
+                    not c.at_least_best(c.current,c.best)):
+                settled=_settle_refinement(c,c.current,c.best)
+                if settled and c.current and c.current.get('accepted') and not c.current.get('confirmed'):
+                    c.observe('returned-match-confirmation')
         except (PaletteEnded,Interrupted) as exc:
             c.current=None
             reason=reason or ('palette_ended' if isinstance(exc,PaletteEnded) else 'stopped')
@@ -295,7 +334,9 @@ def _publish(c,reason=None):
     historical=c.best or {}
     result.update(region_count=len(c.rules),rules=c.rules,
         best_actual_colors=historical.get('actual_colors'),
-        best_current=bool(result.get('verified') and historical and result['rank']<=historical['rank']),
+        best_current=bool(result.get('verified') and historical and (
+            compare_refinement(result['actual_colors'],historical['actual_colors'],c.rules)['not_worse']
+            if getattr(c,'refinement_anchor',None) is not None else result['rank']<=historical['rank'])),
         stop_reason=reason,backend='screenshot',actions=len(c.actions),actual_reads=len(c.observations),
         no_apply=True,no_game_memory=True,remaining_seconds=c.budget.remaining())
     result['outcome']='matched' if result['accepted'] else 'compromise' if result['verified'] else 'unverified'

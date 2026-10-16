@@ -6,6 +6,8 @@ from native_input_response import InputGeometry,replay_native_route
 from native_palette_search import PoseGrid
 from native_palette_scoring import score_native_pose
 from hex_refinement import score_codes
+from color_matching import MATCHING_POLICY
+from refinement_policy import RefinementPolicy,compare_refinement,recovery_rank
 from .same_session_dye_planner import (normalize_target_rules,bind_planning_context,assess_feedback,
     plan_from_checkpoint,validate_plan_reference,assess_native_feedback,_frames,EARLY_TIMER_GRACE_SECONDS,EXECUTION_RESERVE_SECONDS,
     audit_candidate_endpoint,observation_reference_fingerprint,_fresh)
@@ -13,7 +15,7 @@ from .read_dye_input_backend import input_backend_binding
 from .project_closed_loop_io import validate_research_gesture,validate_retry_reset_route,InputNotStarted
 from .dye_visual_readiness import VisualNotReady
 from .compromise import rebase_compromise_plan,observed_quality,predicted_quality,quality_fields
-from .refinement import find_refinement,find_recovery
+from .refinement import find_refinement,find_recovery,_endpoint_checkpoint
 from native_input_route_search import _needed
 from dye_regions import session_region_count,bind_region_rules
 from .candidate_selection import (candidate_id,candidate_observation,present_candidates,
@@ -58,11 +60,19 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
     initial_engineering_deadline=engineering_deadline
     qualified_timer_frame=None;qualified_timer_checkpoint=None;timer_shortening_observed=False
     backend_binding=None;previous_timer=None;current=None;context=None;last_verified_observation=None
-    result=dict(rules=rules,region_count=count,stop_reason='not_started',accepted=False,target_exact=False,verified=False,
+    result=dict(rules=rules,matching_policy=MATCHING_POLICY,region_count=count,
+        stop_reason='not_started',accepted=False,target_exact=False,verified=False,
         planning_rounds=[],steps=[],observations=[],actual_input_attempts=0,
         server_confirmation_verified=False,initial_visual_retries=0,observation_retries=0,compromise_selected=False,
         retry_epochs=0,retries=[],retry_budget_checks=[])
     compromise_route=None;compromise_template=None;best_observed=None
+    refinement_floor=None
+    def retained_not_worse(codes,target):
+        if refinement_floor is not None:return compare_refinement(codes,target,rules)['not_worse']
+        return observed_quality(codes,rules)<=observed_quality(target,rules)
+    def retained_better(codes,target):
+        if refinement_floor is not None:return compare_refinement(codes,target,rules)['improved']
+        return observed_quality(codes,rules)<observed_quality(target,rules)
     target_route=None;target_template=None
     candidate_rows=[];candidate_observations={};batch_id='native-'+str(time.monotonic_ns())
     if candidate_choice is not None and not callable(candidate_choice):raise ValueError('Invalid candidate choice callback')
@@ -286,7 +296,7 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
         emit('native_observed',colors=cp['client_hex'],label=label,screenshot_verified=False)
         guard(phase_deadline);costs['native'].append(max(0.,clock()-began));return cp
 
-    def recover_best_failure(reason):
+    def recover_best_failure(reason,*,alternatives=()):
         """A local phase failure yields to a fresh measured return, never F9."""
         nonlocal cp,frames,current,retry_suppressed,best_observed
         recovery=dict(reason=reason,attempted=False,verified=False)
@@ -300,28 +310,115 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
             if getattr(io,'_performing_input',False):return False
             recovery['attempted']=True
             anchor=best_observed['checkpoint']
-            for attempt in range(2):
-                guard();fresh=observe_native('failure_return_'+str(attempt)+'_reference',end)
-                if observed_quality(fresh['client_hex'],rules)<=observed_quality(anchor['client_hex'],rules):
-                    cp,frames=observe_resilient('failure_return_current',end)
+            nearest=None;nearest_key=None
+            def keep_landing(observation):
+                nonlocal nearest,nearest_key
+                if (refinement_floor is None or observation is None or not complete_screenshot(
+                        observation['checkpoint'],observation.get('frames'))):return
+                codes=observation['checkpoint']['client_hex']
+                if retained_not_worse(codes,anchor['client_hex']):return
+                key=recovery_rank(codes,anchor['client_hex'],rules)
+                if nearest_key is None or key<nearest_key:
+                    nearest=copy.deepcopy(observation);nearest_key=key
+            for observation in (*alternatives,current):keep_landing(observation)
+            def return_read(label,*,visual=False):
+                while True:
+                    try:
+                        return observe_resilient(label,end) if visual else observe_native(label,end)
+                    except (TimeoutError,VisualNotReady):
+                        # Retry only the observation. A completed return must
+                        # never be sent a second time because its HEX read timed out.
+                        guard()
+                        emit('refinement_return',refinement_status='recovering',
+                            retained_colors=list(anchor['client_hex']),
+                            retained_deltas=score_codes(anchor['client_hex'],rules)['deltas'])
+            attempt=0
+            while True:
+                attempt+=1
+                guard();fresh=return_read('failure_return_'+str(attempt)+'_reference')
+                if refinement_floor is not None:
+                    emit('refinement_return',refinement_status='recovering',
+                        retained_colors=list(anchor['client_hex']),
+                        retained_deltas=score_codes(anchor['client_hex'],rules)['deltas'])
+                if retained_not_worse(fresh['client_hex'],anchor['client_hex']):
+                    cp,frames=return_read('failure_return_current',visual=True)
                 else:
                     native,visual,preparation=phase_allowances(costs)
                     available=end-clock()-visual-preparation-3.
-                    if available<=0:break
+                    if available<=0:
+                        cp,frames=return_read('failure_return_final_current',visual=True)
+                        break
+                    admit=lambda candidate:len(candidate['input_route'])<=max_actions-result['actual_input_attempts'] \
+                        and clock()+route_allowance(candidate)[0]<end
+                    fallback=None;fallback_selected=False;budget_blocked=False
+                    if nearest is not None:
+                        fallback=prepare_retry_recovery(context,fresh,nearest['checkpoint'],rules,
+                            deadline=min(end-visual-preparation-3.,clock()+min(2.,available*.2)),
+                            clock=clock,check=planning_guard,preserve_regions=True,admit=admit)
+                    fallback_allowance=route_allowance(fallback)[0]+native+preparation if fallback is not None else 0.
+                    search_until=min(end-visual-preparation-3.,end-fallback_allowance,
+                        clock()+min(4.,available*.35))
+                    def protected_admit(candidate):
+                        nonlocal budget_blocked
+                        if not admit(candidate):budget_blocked=True;return False
+                        if nearest is None:return True
+                        predicted=_endpoint_checkpoint(context,fresh,candidate['final_pose'],planning_guard)
+                        back_started=clock()
+                        back=prepare_retry_recovery(context,predicted,nearest['checkpoint'],rules,
+                            deadline=min(search_until,clock()+min(2.,available*.2)),
+                            clock=clock,check=planning_guard,preserve_regions=True)
+                        if back is None:return False
+                        # A model can predict an exact anchor and still miss in
+                        # game. Keep one correction plus measured return/read cost.
+                        return_actions=max(1,len(back['input_route']),
+                            len(fallback['input_route']) if fallback is not None else 0)
+                        return_seconds=max(route_allowance(back)[0],
+                            route_allowance(fallback)[0] if fallback is not None else 0.)
+                        fits=(len(candidate['input_route'])+return_actions<=max_actions-result['actual_input_attempts']
+                            and clock()+route_allowance(candidate)[0]+return_seconds+native+preparation+
+                                max(.25,clock()-back_started)<end)
+                        if not fits:budget_blocked=True
+                        return fits
                     row=prepare_retry_recovery(context,fresh,anchor,rules,
-                        deadline=min(end-visual-preparation-3.,clock()+min(4.,available*.35)),
-                        clock=clock,check=planning_guard)
-                    if row is None:break
+                        deadline=search_until,
+                        clock=clock,check=planning_guard,preserve_regions=refinement_floor is not None,
+                        admit=protected_admit)
+                    if row is None and fallback is not None:
+                        row=fallback;fallback_selected=True
+                        recovery['nearest_colors']=list(nearest['checkpoint']['client_hex'])
+                    if row is None:
+                        # A failed local model/route is not a finished round.
+                        # Rebind the actual pose and use the remaining live time.
+                        if refinement_floor is not None:
+                            emit('refinement_return',refinement_status='recovering',
+                                retained_colors=list(anchor['client_hex']),
+                                retained_deltas=score_codes(anchor['client_hex'],rules)['deltas'])
+                            continue
+                        break
                     reserve_route(row,'restore_best',include_revalidation=False)
                     reference=fresh;route=row['input_route']
                     for index,gesture in enumerate(route):
-                        cp,frames,_=submit(gesture,'failure_return_'+str(attempt)+'_step_'+str(index),
-                            reference,'restore_best',visual_required=index==len(route)-1,phase_deadline=end)
+                        before_inputs=result['actual_input_attempts']
+                        try:
+                            cp,frames,_=submit(gesture,'failure_return_'+str(attempt)+'_step_'+str(index),
+                                reference,'restore_best',visual_required=index==len(route)-1,phase_deadline=end)
+                        except (TimeoutError,VisualNotReady,GoalStop) as exc:
+                            if isinstance(exc,GoalStop) and str(exc)!='target_visual_unconfirmed':raise
+                            guard()
+                            if (not isinstance(exc,InputNotStarted) and result['actual_input_attempts']>before_inputs
+                                    and not result['steps'][-1].get('receipt',{}).get('completed')):
+                                raise GoalStop('input_outcome_unknown')
+                            cp,frames=return_read('failure_return_completed_input',visual=True)
+                            break
                         reference=cp
-                    if not route:cp,frames=observe_resilient('failure_return_current',end)
-                if (complete_screenshot(cp,frames) and observed_quality(cp['client_hex'],rules)<=
-                        observed_quality(anchor['client_hex'],rules)):
-                    if observed_quality(cp['client_hex'],rules)<observed_quality(anchor['client_hex'],rules):
+                    if not route:cp,frames=return_read('failure_return_current',visual=True)
+                    if (fallback_selected and complete_screenshot(cp,frames) and
+                            retained_not_worse(cp['client_hex'],nearest['checkpoint']['client_hex'])):
+                        recovery.update(status='nearest_measured',actual_colors=list(cp['client_hex']))
+                        if budget_blocked:return False
+                keep_landing(current)
+                if (complete_screenshot(cp,frames) and retained_not_worse(cp['client_hex'],anchor['client_hex'])):
+                    if retained_better(cp['client_hex'],anchor['client_hex']):
                         best_observed=copy.deepcopy(current)
                     recovery.update(verified=True,actual_colors=list(cp['client_hex']))
                     return True
@@ -413,7 +510,7 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
             measured['stop_reason']='replan_required'
         return after,after_frames,measured
 
-    def retain_superior_prefix(checkpoint,visual_frames,feedback,suffix,baseline_quality,label,phase_deadline=None):
+    def retain_superior_prefix(checkpoint,visual_frames,feedback,suffix,baseline_quality,label,phase_deadline=None,*,anchor_colors=None):
         """Keep a better intermediate landing before a worse remaining route.
 
         Native feedback triggers a visual check only when this landing beats
@@ -422,6 +519,16 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
         merely because it occurred before the planned endpoint.
         """
         def better_than_suffix(reference):
+            if anchor_colors is not None:
+                if not compare_refinement(reference['client_hex'],anchor_colors,rules)['improved']:return False
+                guard(phase_deadline)
+                replay=replay_native_route(reference['pose'],suffix,geometry,settings,
+                    wheel_delta_per_step=1.,sample_policy='all_recorded_points')
+                prediction=score_native_pose(session,replay['final_pose'],rules)
+                # A newly measured gain becomes the floor before another
+                # gesture can trade it away. Equal endpoints need no more input.
+                return not RefinementPolicy(rules,reference['client_hex']).assess(
+                    prediction['colors'],deltas=prediction['deltas'])['improved']
             actual=observed_quality(reference['client_hex'],rules)
             if actual>=baseline_quality:return False
             guard(phase_deadline)
@@ -916,7 +1023,8 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
 
     def protected_refinement():
         """Spend only time left after reserving a measured, audited return."""
-        nonlocal cp,frames,current,best_observed
+        nonlocal cp,frames,current,best_observed,refinement_floor
+        refinement_floor=copy.deepcopy(best_observed)
         result['refinement_attempts']=[];result['refinement_searches']=[]
         result['refinement_budget_decisions']=[];excluded=[];excluded_keys=set()
         def exclude(route):
@@ -952,6 +1060,10 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                 context,anchor['checkpoint'],anchor['frames'],rules)['screenshot_verified']:
                 stop('anchor_not_visually_verified');return
             baseline=anchor['checkpoint'];quality=observed_quality(baseline['client_hex'],rules)
+            policy=RefinementPolicy(rules,baseline['client_hex'])
+            if best_observed is not None and not retained_not_worse(
+                    baseline['client_hex'],best_observed['checkpoint']['client_hex']):
+                stop('anchor_not_retained');return
             native,visual,action=limits()
             # First admit the shortest useful trial, one checked return and an
             # actual reference/correction search. A longer selected candidate
@@ -993,6 +1105,9 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
             if row is None:
                 stop('local_family_exhausted' if stats.get('family_exhausted') else
                     'local_search_budget' if stats.get('deadline_reached') else 'no_safe_improvement');return
+            # Independently gate the handoff from CPU planning to live input.
+            if not policy.assess(row['prediction']['colors'],deltas=row['prediction']['deltas'])['improved']:
+                stop('no_safe_improvement');return
             route=row.get('input_route',[]);returns=row.get('prefix_recoveries',[])
             if json.dumps(route,sort_keys=True) in excluded_keys:
                 stop('no_safe_improvement');return
@@ -1000,14 +1115,14 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
             # Reproduce both outward and every prefix return against this
             # session. A candidate's own advertised quality is insufficient.
             row=reaudited(baseline,route)
-            if predicted_quality(row['prediction'],rules)>=quality:
+            if not policy.assess(row['prediction']['colors'],deltas=row['prediction']['deltas'])['improved']:
                 stop('no_safe_improvement');return
             longest=0;return_cost=0.
             for index,recovery in enumerate(returns):
                 prefix=reaudited(baseline,route[:index+1])
                 endpoint=endpoint_checkpoint(baseline,prefix)
                 recovery=reaudited(endpoint,recovery['input_route'])
-                if predicted_quality(recovery['prediction'],rules)>quality:
+                if not policy.assess(recovery['prediction']['colors'],deltas=recovery['prediction']['deltas'])['not_worse']:
                     stop('recovery_not_proven');return
                 longest=max(longest,len(recovery['input_route']))
                 return_cost=max(return_cost,route_cost(recovery['input_route'],native,visual,action))
@@ -1052,7 +1167,8 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                     completed_prefix=index+1;reference=cp
                     if feedback['observed_target_accepted']:break
                     cp,frames,feedback,retained=retain_superior_prefix(cp,frames,feedback,
-                        route[index+1:],quality,'refine_'+str(len(result['refinement_attempts'])-1),phase_end)
+                        route[index+1:],quality,'refine_'+str(len(result['refinement_attempts'])-1),phase_end,
+                        anchor_colors=baseline['client_hex'])
                     reference=cp
                     if retained:
                         transaction['retained_prefix_length']=completed_prefix
@@ -1062,22 +1178,33 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                         transaction.setdefault('prefix_return_audits',[]).append(measured_return)
                         # Measured feedback, rather than error magnitude, decides
                         # whether the next trial input still has a proven return.
-                        if predicted_quality(measured_return['prediction'],rules)>quality:
+                        if not policy.assess(measured_return['prediction']['colors'],
+                                deltas=measured_return['prediction']['deltas'])['not_worse']:
                             failure='actual_return_requires_revalidation';break
                         for future in range(index+1,len(route)):
                             suffix=reaudited(cp,route[index+1:future+1])
                             endpoint=endpoint_checkpoint(cp,suffix)
                             future_return=reaudited(endpoint,returns[future]['input_route'])
                             transaction.setdefault('remaining_return_audits',[]).append(future_return)
-                            if predicted_quality(future_return['prediction'],rules)>quality:
+                            if not policy.assess(future_return['prediction']['colors'],
+                                    deltas=future_return['prediction']['deltas'])['not_worse']:
                                 failure='remaining_return_requires_revalidation';break
                         if failure:break
                 if current and current.get('frames') and assess_feedback(context,cp,frames,rules)['screenshot_verified']:
-                    actual_quality=observed_quality(cp['client_hex'],rules)
-                    if actual_quality<=quality:
-                        transaction.update(status='promoted' if actual_quality<quality else 'retained',actual_colors=cp['client_hex'])
-                        if actual_quality<observed_quality(best_observed['checkpoint']['client_hex'],rules):
+                    comparison=policy.assess(cp['client_hex'])
+                    transaction['comparison']=comparison
+                    emit('refinement_trial',current_colors=list(cp['client_hex']),
+                        current_deltas=score_codes(cp['client_hex'],rules)['deltas'],
+                        retained_colors=list(baseline['client_hex']),retained_deltas=policy.baseline['deltas'],
+                        verified=True,screenshot_verified=True,refinement_status='trial')
+                    if comparison['not_worse']:
+                        transaction.update(status='promoted' if comparison['improved'] else 'retained',actual_colors=cp['client_hex'])
+                        if retained_better(cp['client_hex'],best_observed['checkpoint']['client_hex']):
                             best_observed=copy.deepcopy(current)
+                        if comparison['improved']:
+                            emit('refinement_retained',current_colors=list(cp['client_hex']),
+                                current_deltas=score_codes(cp['client_hex'],rules)['deltas'],
+                                verified=True,screenshot_verified=True,refinement_status='retained')
                         if feedback['observed_target_accepted']:
                             result.update(accepted=True,stop_reason='target_observed');stop('target_observed');return
                         exclude(route)
@@ -1094,10 +1221,13 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                 else:completed_prefix=index+1
             if not dirty:current=anchor;stop('trial_not_started');return
             transaction['trial_failure']=failure
+            emit('refinement_return',retained_colors=list(baseline['client_hex']),
+                retained_deltas=policy.baseline['deltas'],refinement_status='restoring')
             # Never improvise a full global search in this reserved phase.
             restore_end=end
+            trial_landing=copy.deepcopy(current)
             cp=observe_native('refinement_return_reference',restore_end-corrected_return_cost)
-            pending_returns=[]
+            pending_returns=[];recovery_landings=[trial_landing]
             restored=False
             for recovery_index in range(recovery_limit):
                 guard()
@@ -1106,17 +1236,17 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                 candidate=None
                 if recovery_index==0 and 0<completed_prefix<=len(returns):
                     prepared=reaudited(cp,returns[completed_prefix-1]['input_route'])
-                    if predicted_quality(prepared['prediction'],rules)<=quality:candidate=prepared
+                    if policy.assess(prepared['prediction']['colors'],deltas=prepared['prediction']['deltas'])['not_worse']:candidate=prepared
                 if candidate is None:
                     try:
                         candidate=find_recovery(context,cp,baseline,rules,deadline=search_until,clock=clock,
                             check=lambda:planning_guard(search_until),
-                            preferred_routes=(*pending_returns,*(r['input_route'] for r in reversed(returns))))
+                            preferred_routes=(*pending_returns,*(r['input_route'] for r in reversed(returns))),preserve_regions=True)
                     except TimeoutError as exc:
                         transaction.setdefault('recovery_search_errors',[]).append(str(exc));continue
                 if candidate is None:break
                 candidate=reaudited(cp,candidate['input_route'])
-                if predicted_quality(candidate['prediction'],rules)>quality:break
+                if not policy.assess(candidate['prediction']['colors'],deltas=candidate['prediction']['deltas'])['not_worse']:break
                 recovery_route=candidate['input_route']
                 if (len(recovery_route)>maximum_return_actions or
                     len(recovery_route)>max_actions-result['actual_input_attempts']):break
@@ -1132,10 +1262,11 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                             reference,'restore_refinement',visual_required=index==len(recovery_route)-1,phase_deadline=until)
                         reference=cp
                     if not recovery_route:cp,frames=observe_resilient('refinement_return_current',until)
+                    if current and complete_screenshot(cp,frames):recovery_landings.append(copy.deepcopy(current))
                     if (current and current.get('frames') and assess_feedback(context,cp,frames,rules)['screenshot_verified'] and
-                        observed_quality(cp['client_hex'],rules)<=quality):
+                        policy.assess(cp['client_hex'])['not_worse']):
                         transaction.update(status='restored',actual_colors=cp['client_hex'])
-                        if observed_quality(cp['client_hex'],rules)<observed_quality(best_observed['checkpoint']['client_hex'],rules):
+                        if retained_better(cp['client_hex'],best_observed['checkpoint']['client_hex']):
                             best_observed=copy.deepcopy(current)
                         if score_codes(cp['client_hex'],rules)['accepted']:
                             result.update(accepted=True,stop_reason='target_observed')
@@ -1153,11 +1284,23 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                     for s in result['steps'][recovery_step_start:])
                 pending_returns=[recovery_route[finished:]] if finished<len(recovery_route) else []
             if restored:continue
+            # A missed short inverse enters the measured geometric recovery
+            # planner; it must not turn an otherwise active round into a stop.
+            if recover_best_failure('refinement_return_replan',alternatives=recovery_landings):
+                transaction.update(status='restored',actual_colors=list(cp['client_hex']),
+                    expanded_recovery=True)
+                exclude(route)
+                continue
+            if current and complete_screenshot(current['checkpoint'],current.get('frames')):
+                transaction.update(status='recovery_time_used',actual_colors=list(cp['client_hex']))
+                stop('recovery_time_used');return
+            if result.get('stop_reason')=='interrupted':raise InterruptedError(result.get('error','F9'))
             transaction['status']='recovery_unconfirmed'
             raise GoalStop('refinement_recovery_unconfirmed')
         stop('insufficient_protected_actions')
     def execute_search():
-        nonlocal cp,frames,current,end,best_observed,planning_count
+        nonlocal cp,frames,current,end,best_observed,planning_count,refinement_floor
+        refinement_floor=None
         nonlocal target_route,target_template,compromise_route,compromise_template
         def planner_search_budget():
             # A search keeps the actual fresh plan-reference observation and
@@ -1499,8 +1642,8 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
         # An incomplete gesture or unconfirmed button release is terminal.
         # Re-reading a pose must not authorize another gesture after that fault.
         if reason in ('insufficient_time','not_found_in_budget','round_limit','insufficient_route_actions'):
-            if best_observed is not None and (current is None or observed_quality(current['checkpoint']['client_hex'],rules)>
-                    observed_quality(best_observed['checkpoint']['client_hex'],rules)):
+            if best_observed is not None and (current is None or not retained_not_worse(
+                    current['checkpoint']['client_hex'],best_observed['checkpoint']['client_hex'])):
                 recover_best_failure(reason)
     except InterruptedError as exc:
         invalidate_current();result.update(stop_reason='interrupted',error=str(exc))
@@ -1534,7 +1677,7 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                 if row['actual_colors']==current['checkpoint']['client_hex']),None)
         if best_observed is not None:
             result.update(best_actual_colors=best_observed['checkpoint']['client_hex'],
-                best_current=observed_quality(score['colors'],rules)<=observed_quality(best_observed['checkpoint']['client_hex'],rules))
+                best_current=retained_not_worse(score['colors'],best_observed['checkpoint']['client_hex']))
             result['restored']=(bool(result['best_current'] and result['screenshot_verified'])
                 if result.get('restoration_rounds') or result.get('retry_recovered') else None)
     else:

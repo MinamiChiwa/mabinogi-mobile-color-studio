@@ -5,6 +5,7 @@ from vision import accepted,error
 from best_result import ranking
 from screenshot_samples import distances,select_site_indices
 from screenshot_geometry import solve_joint
+from color_matching import matching_distances, MATCHING_POLICY, matching_score
 
 def _residual_tolerances(rules,indices,anchor_exact=False):
     fixed=anchor_exact and len(indices)==3 and sum(bool(rules[i]['exact']) for i in indices)==2
@@ -14,6 +15,7 @@ def proposal_rank(observed,rules,indices,residuals,cost,*,anchor_exact=False):
     residuals=np.broadcast_to(residuals,(len(indices),))
     codes=['#'+''.join(f'{int(v):02X}' for v in value) for value in observed]
     deltas=[error(code,rules[i]['colors'],False) for code,i in zip(codes,indices)]
+    scores=[matching_score(code,rules[i]) for code,i in zip(codes,indices)]
     tolerances=_residual_tolerances(rules,indices,anchor_exact)
     hits=[bool(accepted([code,code],[rules[i],dict(rules[i],enabled=False)])) and residuals[n]<tolerances[n]
         for n,(code,i) in enumerate(zip(codes,indices))]
@@ -22,20 +24,21 @@ def proposal_rank(observed,rules,indices,residuals,cost,*,anchor_exact=False):
     # does not earn a predicted hit even when its original sample matched.
     if any('priority' in rule for rule in rules):
         from region_priority import PRIORITY_DELTA_E_BIN
-        losses=[float(deltas[n]+residuals[n]*3) for n in range(len(indices))]
+        losses=[float(scores[n]+residuals[n]*3) for n in range(len(indices))]
         ordered=[]
         for n in order:
             ordered.extend((int(not hits[n]),0 if hits[n] else math.floor(losses[n]/PRIORITY_DELTA_E_BIN)))
         return (int(not all(hits)),*ordered,max(losses,default=0),
             float(np.mean(losses)) if losses else 0.,float(max(residuals,default=0)),float(cost))
     return (int(not all(hits)),*[int(not hits[n]) for n in order],
-        *[float(deltas[n]+residuals[n]*3) for n in order],float(max(residuals,default=0)),float(cost))
+        *[float(scores[n]+residuals[n]*3) for n in order],float(max(residuals,default=0)),float(cost))
 
 def actual_result(colors,rules):
     complete=len(colors)==len(rules) and all(not r['enabled'] or c is not None for c,r in zip(colors,rules))
     return dict(actual_colors=list(colors),actual_deltas=[error(c,r['colors'],False) if r['enabled'] and c else None for c,r in zip(colors,rules)],
         verified=bool(complete),screenshot_verified=bool(complete),accepted=bool(complete and accepted(colors,rules)),
-        rank=ranking(colors,rules))
+        rank=ranking(colors,rules),matching_policy=MATCHING_POLICY,
+        match_scores=[matching_score(c,r) if r['enabled'] and c else None for c,r in zip(colors,rules)])
 
 
 def _quality_function(rgb,rules,indices,*,anchor_exact=False):
@@ -43,6 +46,7 @@ def _quality_function(rgb,rules,indices,*,anchor_exact=False):
     from region_priority import PRIORITY_DELTA_E_BIN
     colors=[np.asarray(values) for values in rgb]
     deltas=[distances(values,dict(rules[i],exact=False)) for values,i in zip(colors,indices)]
+    scores=[matching_distances(values,rules[i]) for values,i in zip(colors,indices)]
     base_hits=[]
     for values,delta,i in zip(colors,deltas,indices):
         if rules[i]['exact']:
@@ -53,7 +57,7 @@ def _quality_function(rgb,rules,indices,*,anchor_exact=False):
     order=sorted(range(len(indices)),key=lambda n:rules[indices[n]].get('priority',indices[n]+1))
     prioritized=any('priority' in rule for rule in rules)
     def quality(ids,residuals,cost):
-        losses=np.column_stack([deltas[n][ids[:,n]] for n in range(len(indices))])+residuals*3
+        losses=np.column_stack([scores[n][ids[:,n]] for n in range(len(indices))])+residuals*3
         hits=np.column_stack([base_hits[n][ids[:,n]] for n in range(len(indices))])&(residuals<_residual_tolerances(rules,indices,anchor_exact))
         parts=[~np.all(hits,axis=1)]
         if prioritized:

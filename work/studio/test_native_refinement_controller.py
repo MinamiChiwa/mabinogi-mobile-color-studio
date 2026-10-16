@@ -66,10 +66,13 @@ class ProtectedRefinementControllerTests(unittest.TestCase):
     def refine(self,context,cp,rules,**kw):
         self.refiner_calls+=1
         if self.refiner_calls>1:return None
-        drag=native_drag_gesture(self.io.geometry,self.io.settings,5,0).record()
+        # This route improves all three raw Delta-E values. The old five-pixel
+        # fixture traded one region away and no longer exercises admission.
+        drag=native_drag_gesture(self.io.geometry,self.io.settings,2,0).record()
         row=self.candidate(context,cp,[drag])
-        endpoint=copy.deepcopy(cp);endpoint.update(pose=row['final_pose'],client_hex=row['prediction']['colors'])
-        back=native_drag_gesture(self.io.geometry,self.io.settings,-5,0).record()
+        from native_live.refinement import _endpoint_checkpoint
+        endpoint=_endpoint_checkpoint(context,cp,row['final_pose'],lambda:None)
+        back=native_drag_gesture(self.io.geometry,self.io.settings,-2,0).record()
         recovery=self.candidate(context,endpoint,[back])
         row.update(recovery_route=[back],recovery_candidate=recovery,prefix_recoveries=[recovery])
         return row
@@ -257,7 +260,7 @@ class ProtectedRefinementControllerTests(unittest.TestCase):
         def refine(context,cp,rules,**kw):
             seen.append(copy.deepcopy(kw['excluded']))
             if len(seen)>2:return None
-            dx=4+len(seen)
+            dx=len(seen)
             route=[native_drag_gesture(self.io.geometry,self.io.settings,dx,0).record()]
             row=self.candidate(context,cp,route)
             endpoint=dict(cp,pose=row['final_pose'],client_hex=row['prediction']['colors'])

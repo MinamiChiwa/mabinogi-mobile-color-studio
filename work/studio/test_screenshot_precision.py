@@ -233,7 +233,7 @@ class ScreenshotMeasuredRefinementTests(unittest.TestCase):
         from screenshot_control import Budget
         with tempfile.TemporaryDirectory() as folder:
             rules=mixed_rules();original=np.eye(3);samples=object()
-            current=actual_result(['#FFFFFF','#010101','#828282'],rules)
+            current=actual_result(['#FFFFFF','#010101','#B0B0B0'],rules)
             center=np.eye(3);center[0,2]=.2
             later=np.eye(3);later[0,2]=.55
             tested=[];bases=[];restored=[]
@@ -248,6 +248,7 @@ class ScreenshotMeasuredRefinementTests(unittest.TestCase):
             def move(matrix,*a,**kw):
                 tested.append(np.asarray(matrix).copy());c.pose=np.asarray(matrix).copy();c.pose[0,2]+=.05
                 return True
+            # A valid final-polish gain cannot worsen the similar third region.
             readings=iter([actual_result(['#FFFFFF','#000000','#B0B0B0'],rules),
                            actual_result(['#CCCCCC','#404040','#828282'],rules)])
             def observe(*a,**kw):

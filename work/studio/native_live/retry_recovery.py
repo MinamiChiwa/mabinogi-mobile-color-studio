@@ -7,10 +7,11 @@ from native_input_response import InputGeometry,InputSettings,replay_native_rout
 from native_input_route_search import _needed
 from native_palette_scoring import score_native_pose
 from .compromise import observed_quality,predicted_quality
+from refinement_policy import RefinementPolicy
 
 
 def prepare_retry_recovery(context,checkpoint,anchor,rules,*,deadline,clock=time.monotonic,
-        check=lambda:None,preferred_routes=()):
+        check=lambda:None,preferred_routes=(),preserve_regions=False,admit=None):
     """Replay bounded scale corrections; original colours remain authoritative.
 
     A downward reset is not inverted by the same number of upward notches.
@@ -27,6 +28,7 @@ def prepare_retry_recovery(context,checkpoint,anchor,rules,*,deadline,clock=time
     settings=InputSettings(**context['settings']);l,t,r,b=geometry.board
     centre=(round((l+r)/2),round((t+b)/2))
     wanted=observed_quality(anchor['client_hex'],rules)
+    policy=RefinementPolicy(rules,anchor['client_hex']) if preserve_regions else None
     seen=set()
     def evaluate(route):
         guard()
@@ -37,10 +39,12 @@ def prepare_retry_recovery(context,checkpoint,anchor,rules,*,deadline,clock=time
         pose=replay_native_route(checkpoint['pose'],route,geometry,settings,
             wheel_delta_per_step=context['wheel_delta_per_step'],sample_policy='all_recorded_points',check=guard)['final_pose']
         prediction=score_native_pose(context['session'],pose,rules,check=guard)
-        if predicted_quality(prediction,rules)>wanted:return None
+        if (not policy.assess(prediction['colors'],deltas=prediction['deltas'])['not_worse']
+                if policy is not None else predicted_quality(prediction,rules)>wanted):return None
         row=dict(input_route=copy.deepcopy(route),final_pose=pose,prediction=prediction,
             needed=_needed(route,3.,.5),source='measured_retry_return')
-        return audit_candidate_endpoint(context,checkpoint,rules,row,check=guard)
+        row=audit_candidate_endpoint(context,checkpoint,rules,row,check=guard)
+        return row if admit is None or admit(row) else None
     def wheel_route(up,down):
         route=[]
         for sign,count in ((1,up),(-1,down)):

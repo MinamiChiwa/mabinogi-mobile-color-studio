@@ -1,6 +1,7 @@
 """Preserve observed whole RGB samples and their periodic fractional phase."""
 import cv2,numpy as np
 from vision import rgb,lab
+from color_matching import matching_distances,has_chromatic_target
 
 SAMPLE_DTYPE=np.dtype([('key','i8'),('point','f8',(2,)),('rgb','u1',(3,)),('score','f8'),('margin','f4')])
 SAMPLE_CHUNK=65536
@@ -19,10 +20,29 @@ def distances(values,rule):
     return result
 
 
+def sample_metrics(values,rule):
+    """Share Lab conversion; acceptance never consumes preference scores."""
+    values=np.asarray(values).reshape(-1,3)
+    if not len(values):return np.empty(0),np.empty(0)
+    actual=lab(values)
+    if rule['exact']:
+        targets=np.array([rgb(c) for c in rule['colors']],np.int16)
+        delta=np.full(len(values),np.inf)
+        for target in targets:delta=np.minimum(delta,np.max(np.abs(values.astype(np.int16)-target),axis=1))
+    else:
+        delta=np.full(len(values),np.inf)
+        for target in lab([rgb(c) for c in rule['colors']]):delta=np.minimum(delta,np.linalg.norm(actual-target,axis=1))
+    quality=(matching_distances(values,rule,color_lab=actual,
+                              base_distances=None if rule['exact'] else delta)
+             if has_chromatic_target(rule) else delta)
+    return delta,quality
+
+
 def select_site_indices(points,colors,rule,period,limit,*,matched=False):
     """Explore different phases before dense tied scan lines; never erase sites."""
-    points=np.asarray(points);values=distances(colors,rule)
-    order=np.argsort(values,kind='stable')
+    points=np.asarray(points);values,quality=sample_metrics(colors,rule)
+    hits=values<=(0 if rule['exact'] else rule['tolerance'])
+    order=np.lexsort((quality,~hits))
     if matched:order=order[values[order]<=(0 if rule['exact'] else rule['tolerance'])]
     if limit is None or len(order)<=limit:return order
     # Input order breaks equal-color ties using measured plateau interior.
@@ -68,15 +88,20 @@ class RawSamples:
             # It changes traversal only, never RGB or acceptance rules.
             interior=cv2.distanceTransform(np.uint8(target_pixels & mask),cv2.DIST_L2,5)
             scale=max(1e-12,float(np.hypot(pose[0,0],pose[1,0])))
-            chunks=[];minimum=float('inf');flat_mask=mask.reshape(-1)
+            chunks=[];minimum=float('inf');raw_minimum=float('inf');flat_mask=mask.reshape(-1)
             for start in range(0,len(flat_mask),SAMPLE_CHUNK):
                 check()
                 pixels=np.flatnonzero(flat_mask[start:start+SAMPLE_CHUNK])+start
                 if not len(pixels):continue
-                values=flat_image[pixels];score=distances(values,rule)
+                values=flat_image[pixels];raw,quality=sample_metrics(values,rule)
+                # A valid target survives preference pruning even with a wide
+                # user tolerance. Other sites use the shared hue-aware score.
+                hit=raw<=(0 if rule['exact'] else rule['tolerance'])
+                score=np.where(hit,0.,quality)
                 if not len(score):continue
                 minimum=min(minimum,float(score.min()))
-                selected=score<=max(minimum+24,16)
+                raw_minimum=min(raw_minimum,float(raw.min()))
+                selected=(score<=max(minimum+24,16)) | (raw<=max(raw_minimum+24,16))
                 pixels,values,score=pixels[selected],values[selected],score[selected]
                 points=np.mod(np.column_stack((pixels%width,pixels//width))@inverse[:2,:2].T+inverse[:2,2],self.period)
                 keys=np.floor(points*4).astype(np.int64)
@@ -88,7 +113,9 @@ class RawSamples:
             if not chunks:continue
             check()
             fresh=np.concatenate(chunks)
-            fresh=fresh[fresh['score']<=max(minimum+24,16)]
+            # Both the traditional and identity-aware seeds remain available.
+            # The complete original-color field below retains all observed
+            # sites for endpoint scoring; this is not an exhaustion filter.
             # Compact arrays retain whole observed RGB and all distinct phases.
             # Sorting keeps the closest raw observation per phase; ties keep
             # the older observation, with no channel mixing or point thinning.

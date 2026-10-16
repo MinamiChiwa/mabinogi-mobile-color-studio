@@ -7,6 +7,7 @@ from native_palette_scoring import score_native_pose
 from native_input_response import InputGeometry,InputSettings,replay_native_route
 from native_input_route_search import _needed
 from region_priority import priority_fields
+from color_matching import matching_score, has_chromatic_target
 
 
 def quality_fields(prediction,rules,*,landing_maximum=None,verified=False):
@@ -16,7 +17,11 @@ def quality_fields(prediction,rules,*,landing_maximum=None,verified=False):
     exact=[i for i,r in enumerate(rules) if r['enabled'] and r['exact']]
     hits=sum(prediction['colors'][i] in rules[i]['colors'] for i in exact)
     worst=max(values);mean=sum(values)/len(values)
+    scores=[matching_score(prediction['colors'][i],r) if has_chromatic_target(r) else prediction['deltas'][i]
+            for i,r in enumerate(rules) if r['enabled']]
+    match_maximum,match_average=max(scores),sum(scores)/len(scores)
     return dict(maximum=worst,average=mean,landing_maximum=worst if landing_maximum is None else landing_maximum,
+        match_maximum=match_maximum,match_average=match_average,
         accepted=prediction.get('predicted_accepted',prediction.get('accepted',False)),verified=verified,
         exact_matches=hits,exact_total=len(exact),exact_maximum=max((prediction['deltas'][i] for i in exact),default=0.),
         exact_average=sum(prediction['deltas'][i] for i in exact)/len(exact) if exact else 0.,

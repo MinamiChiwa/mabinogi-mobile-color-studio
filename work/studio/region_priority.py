@@ -3,6 +3,7 @@ import math
 import numpy as np
 from vision import error, normalize_hex, rgb
 from dye_regions import rule_region_count
+from color_matching import matching_score, matching_distances, has_chromatic_target
 
 PRIORITY_DELTA_E_BIN = .5
 
@@ -19,7 +20,7 @@ def priority_indices(rules):
 
 
 def priority_components(codes, rules, deltas=None):
-    """Interleave satisfaction and half-Delta-E bins in user region order.
+    """Interleave acceptance and half-point preference bins in user order.
 
     All-region acceptance remains outside this tuple. A satisfied Similar
     region releases its error priority to later regions. Bins rank only;
@@ -37,12 +38,13 @@ def priority_components(codes, rules, deltas=None):
         valid = valid and math.isfinite(delta)
         hit = (normalize_hex(color) in [normalize_hex(c) for c in rule['colors']] if valid and rule['exact']
                else valid and delta <= float(rule['tolerance']))
-        bucket = 0 if hit else math.floor(delta / PRIORITY_DELTA_E_BIN) if math.isfinite(delta) else math.inf
+        score = (matching_score(color, rule) if has_chromatic_target(rule) else delta) if valid else math.inf
+        bucket = 0 if hit else math.floor(score / PRIORITY_DELTA_E_BIN) if math.isfinite(score) else math.inf
         components.extend((int(not hit), bucket))
     return tuple(components)
 
 
-def vector_priority_components(colors, distances, rules):
+def vector_priority_components(colors, distances, rules, *, scores=None):
     order = priority_indices(rules)
     if order is None:
         return None
@@ -55,7 +57,10 @@ def vector_priority_components(colors, distances, rules):
             hit = np.isfinite(values) & np.any(np.all(np.asarray(colors[i])[:, None, :] == targets, axis=-1), axis=1)
         else:
             hit = values <= float(rules[i]['tolerance'])
-        components.extend((~hit, np.where(hit, 0., np.floor(values / PRIORITY_DELTA_E_BIN))))
+        preference = ((matching_distances(colors[i], rules[i]) if has_chromatic_target(rules[i]) else values)
+                      if scores is None else np.asarray(scores[i], float))
+        preference = np.where(np.isfinite(values) & np.isfinite(preference) & (preference >= 0), preference, np.inf)
+        components.extend((~hit, np.where(hit, 0., np.floor(preference / PRIORITY_DELTA_E_BIN))))
     return np.stack(components, axis=1)
 
 
