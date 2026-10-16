@@ -19,12 +19,29 @@ class ScreenshotUITests(unittest.TestCase):
         self.helper.pump(.02)
     def emit(self,kind,data):
         self.ui.overlay.handle(kind,data);self.ui.handle_event(kind,data);self.helper.pump(.02)
+    def test_next_run_clears_previous_actual_and_color_strips_before_reading(self):
+        from result_history import describe_result
+        old=['#FA8B28','#A9685B','#69B55B']
+        self.ui.display_best(describe_result(old,self.ui.active_rules))
+        for card,color in zip(self.ui.cards,old):card.current.configure(text='当前颜色  '+color)
+        self.ui.finish_run()
+        with patch.object(app,'build_runner',return_value=SimpleNamespace(launch=lambda *a,**kw:None)), \
+                patch.object(app.threading,'Thread'):
+            self.ui.go()
+        for card,color in zip(self.ui.cards,old):
+            self.assertNotIn(color,str(card.current.cget('text')))
+            self.assertNotIn(color,str(card.best_label.cget('text')))
+            self.assertEqual(card.best_label.cget('fg_color'),'#28364A')
+        self.assertIsNone(self.ui.best_summary)
+        self.assertEqual(self.helper.errors,[])
     def test_real_card_labels_follow_repeated_native_readbacks_while_busy(self):
         self.ui.search_strategy.set('native')
         for colors in (['#112233','#445566','#778899'],['#AABBCC','#DDEEFF','#334455'],['#000000','#FFFFFF','#FF0000']):
             self.emit('native_colors',dict(colors=colors,screenshot_verified=False))
             for card,color in zip(self.ui.cards,colors):
                 self.assertIn(color,str(card.current.cget('text')))
+                self.assertIn(color,str(card.best_label.cget('text')))
+                self.assertEqual(card.best_label.cget('fg_color'),color)
         self.assertTrue(self.ui.busy)
         self.assertEqual(self.helper.errors,[])
     def test_preview_retry_can_be_used_twice_and_finished_releases_controls(self):

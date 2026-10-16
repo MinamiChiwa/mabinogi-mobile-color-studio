@@ -15,7 +15,8 @@ def ranking(colors,rules):
     """Feasible combinations first, then minimax actual Delta E and mean."""
     from region_priority import priority_components
     ordered=priority_components(colors,rules)
-    return (0 if accepted(colors,rules) else 1,*(ordered or ()),*proximity(colors,rules))
+    from color_matching import matching_summary
+    return (0 if accepted(colors,rules) else 1,*(ordered or ()),*matching_summary(colors,rules))
 
 
 def global_matrix(motion):

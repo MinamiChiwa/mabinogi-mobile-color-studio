@@ -2,11 +2,11 @@
 
 [简体中文](README.md) · [繁體中文](README.zh-TW.md) · [English](README.en.md) · [日本語](README.ja.md) · [한국어](README.ko.md)
 
-**ColorStudio 0.4.6** is a Windows color search tool for the Taiwan server of Mabinogi Mobile. Korean and Japanese support is in testing. It adjusts the palette for your selected targets; you decide whether to apply the result in the game.
+**ColorStudio 0.4.7** is a Windows color search tool for the Taiwan server of Mabinogi Mobile. Korean and Japanese support is in testing. It adjusts the palette for your selected targets; you decide whether to apply the result in the game.
 
 ## 1. Install
 
-Download **`ColorStudio-v0.4.6-Windows-x64.zip`** from [GitHub Releases](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/releases), extract the whole archive, and run `ColorStudio.exe`. Keep `_internal` beside the executable. No separate Python or Tesseract installation is needed.
+Download **`ColorStudio-v0.4.7-Windows-x64.zip`** from [GitHub Releases](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/releases), extract the whole archive, and run `ColorStudio.exe`. Keep `_internal` beside the executable. No separate Python or Tesseract installation is needed.
 
 **`UPDATE-ONLY` packages are for updating an existing installation. They are not first-install packages and cannot be extracted and run directly.** See Updates below.
 
@@ -36,6 +36,8 @@ The tool first looks for a combination that meets all enabled targets. Otherwise
 - **Not all targets met:** review current colors and each region's difference, then adjust, retry or use the result.
 - **Last measured colors (current state unconfirmed):** these are earlier readings; check the current game view.
 
+When not all targets are met, compromise selection follows your region priorities and considers overall color difference, hue and saturation to better preserve the character of your target colors. Displayed differences, Similar tolerances and Exact HEX requirements remain unchanged.
+
 The palette may remain still during calculation. The overlay shows the current stage and colors already read.
 
 Colors, matching requirements and priorities save automatically. **Save preset** stores named settings that you can edit, load or delete. Load an edited preset to use it for the current search. Search history and presets are stored separately.
@@ -51,9 +53,9 @@ The tool does not open dyeing, confirm, apply or cancel a result automatically.
 
 Choose **Check for updates** in the main window, then **Download update** when a new version is available. Once downloaded, choose **Install and restart**. Settings, presets and records are kept.
 
-If you cannot reach GitHub, obtain `UPDATE-ONLY-ColorStudio-0.4.6-win-x64.zip` and choose **Import offline update** in the app. Use the full installation package for a first install.
+If you cannot reach GitHub, obtain `UPDATE-ONLY-ColorStudio-0.4.7-win-x64.zip` and choose **Import offline update** in the app. Use the full installation package for a first install.
 
-[Online, offline and manual updates](docs/automatic-updates.en.md) · [What's new in 0.4.6](docs/release-notes-0.4.6.md)
+[Online, offline and manual updates](docs/automatic-updates.en.md) · [What's new in 0.4.7](docs/release-notes-0.4.7.md)
 
 ## Help and feedback
 

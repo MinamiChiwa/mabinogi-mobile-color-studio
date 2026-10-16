@@ -125,6 +125,7 @@ class Controller:
         self.feature_cache=[]
         self._completed_restore=None
         self.input_in_progress=False
+        self.refinement_anchor=None
         self.input_uncertain=False
         self.terminal_interruption=None
         self.evidence_writer=None
@@ -415,10 +416,17 @@ class Controller:
             and previous.get('accepted'))
         result.update(label=label,matrix=self.pose.copy() if self.pose_known else None,
             elapsed=time.monotonic()-self.budget.started,text=diagnostics)
+        anchor=self.refinement_anchor
+        if anchor is not None:
+            from refinement_policy import compare_refinement
+            result['refinement_comparison']=compare_refinement(colors,anchor['actual_colors'],self.rules)
         self.current=result;self.observations.append(result);self.write('actual-hex.json',self.observations)
         self.owner.event('scene',colors=colors,seconds=int(self.budget.remaining()))
-        if result['verified'] and (self.best is None or result['rank']<self.best['rank']):
+        improved=(result['refinement_comparison']['improved'] if anchor is not None
+                  else self.best is None or result['rank']<self.best['rank'])
+        if improved and result['verified']:
             self.best=dict(result);self.best['frame']=self.frame.copy()
+            if anchor is not None:self.refinement_anchor=self.best
             self.owner.event('best',colors=colors,delta=max(v for v in result['actual_deltas'] if v is not None))
         return result
 
@@ -444,8 +452,9 @@ class Controller:
             self.capture('recovery-reanchor')
             self.pose_known=False
         target=self.best
-        if self.current is not None and self.current['verified'] and self.current['rank']<=target['rank']:
+        if self.current is not None and self.current['verified'] and self.at_least_best(self.current,target):
             return self.current
+        polishing=self.refinement_anchor is not None
         previous=self._completed_restore
         if previous is not None:
             best,best_matrix,current,frame,actions,pose,known=previous
@@ -455,8 +464,26 @@ class Controller:
                 # Nested callers share one completed recovery. A new frame,
                 # input, retry or best target automatically invalidates it.
                 self.check()
-                return self.current
-        for _ in range(3):
+                if not polishing:return self.current
+                # A held, measured fallback may be revisited by nested finish
+                # callers. Resume only if another complete outward-and-return
+                # can fit; an ordinary failed read never creates this hold.
+                required=self.return_cost(target)+self.return_cost(self.current,from_matrix=target.get('matrix'))
+                if not self.budget.can_input(required):return self.current
+        attempt=0;corrections=0;motionless=False;result=self.current
+        nearest=None;nearest_rank=None
+        def retain_return_landing(value):
+            nonlocal nearest,nearest_rank
+            if not polishing or not value or not value.get('verified') or value.get('matrix') is None:return
+            from refinement_policy import recovery_rank
+            rank=recovery_rank(value['actual_colors'],target['actual_colors'],self.rules)
+            if nearest_rank is None or rank<nearest_rank:
+                nearest=dict(value,frame=self.frame.copy());nearest_rank=rank
+        retain_return_landing(self.current)
+        while self.budget.can_input(.6):
+            self.check()
+            if not polishing and attempt>=3:break
+            attempt+=1
             # Reanchor every correction to the measured best image, including
             # when a previous read was incomplete. Do not probe away from it.
             direct,_=self.register(self.frame,target['frame'])
@@ -464,23 +491,69 @@ class Controller:
                 self.pose=np.linalg.inv(direct)@np.asarray(target['matrix']);self.pose_known=True
                 self.input_uncertain=False
             if not self.pose_known:
-                return self.observe('return-unknown-pose-actual')
+                result=self.observe('return-unknown-pose-actual')
+                if result['verified'] and self.at_least_best(result,target):return result
+                if not polishing:return result
+                retain_return_landing(result)
+                self.capture('return-remeasure',save=False)
+                continue
             desired=direct@self.pose if direct is not None and self.pose_known else target.get('matrix')
+            if polishing and motionless and desired is not None:
+                # Geometric closeness is not colour equality at a tiny target.
+                # Probe distinct subpixel offsets around the measured anchor,
+                # instead of caching an unchanged failed HEX read as completion.
+                directions=((1,0),(-1,0),(0,1),(0,-1),(1,1),(-1,-1),(1,-1),(-1,1))
+                radius=.04*2**min(10,corrections//len(directions))
+                shift=np.asarray(directions[corrections%len(directions)],float)*radius
+                desired=np.asarray(desired).copy();desired[:2,2]+=shift;corrections+=1
+                self.progress('refinement',refinement_status='recovering',
+                    retained_colors=target['actual_colors'],retained_deltas=target['actual_deltas'])
+            if polishing and attempt>1 and nearest is not None and desired is not None:
+                reserve=self.return_cost(nearest,from_matrix=desired)
+                if not self.budget.can_input(reserve+max(1.5,self.budget.estimate('verify',1.5))+.6):break
             before_actions=len(self.actions)
             if desired is not None and self.budget.can_input(.6):
-                try:self.move_to(desired,'return-best',local=True)
+                try:
+                    self.move_to(desired,'return-best',local=True)
+                    if polishing and corrections and self.pose_known:
+                        markers=np.asarray(self.scene.markers)-self.scene.board[:2]
+                        source=(markers-self.pose[:2,2])@np.linalg.inv(self.pose[:2,:2]).T
+                        residual=np.mean(source@desired[:2,:2].T+desired[:2,2]-markers,axis=0)
+                        if .005<np.linalg.norm(residual)<2.5:self.fine_shift(residual,'return-colour-correction')
                 except TimeEnded:pass
             result=self.observe('return-best-actual')
-            if result['verified'] and result['rank']<=target['rank']:return result
+            if result['verified'] and self.at_least_best(result,target):return result
+            retain_return_landing(result)
             if result['verified'] and len(self.actions)==before_actions:
+                if polishing:
+                    motionless=True
+                    continue
                 # The controller found no correction to send. Another full
                 # OCR loop cannot improve this readable, unchanged position.
                 self._completed_restore=(target,np.array(target.get('matrix'),copy=True),
                     self.current,self.frame,len(self.actions),
                     self.pose.copy(),self.pose_known)
                 break
+            if polishing:motionless=True
             if not self.budget.can_input(2):break
+        if polishing and nearest is not None and result is not None:
+            from refinement_policy import recovery_rank
+            if (nearest_rank<recovery_rank(result['actual_colors'],target['actual_colors'],self.rules)
+                    and self.budget.can_input(self.return_cost(nearest))):
+                self.check()
+                self.move_to(nearest['matrix'],'return-recovery-best',local=True)
+                result=self.observe('return-recovery-best-actual')
+                if result.get('verified') and recovery_rank(
+                        result['actual_colors'],target['actual_colors'],self.rules)<=nearest_rank:
+                    self._completed_restore=(target,np.array(target.get('matrix'),copy=True),
+                        self.current,self.frame,len(self.actions),self.pose.copy(),self.pose_known)
         return result
+
+    def at_least_best(self,result,target):
+        if self.refinement_anchor is not None:
+            from refinement_policy import compare_refinement
+            return compare_refinement(result['actual_colors'],target['actual_colors'],self.rules)['not_worse']
+        return result['rank']<=target['rank']
 
     def safe_restore(self,reason,*,interruption=None):
         """Recover only after live binding/focus/layout checks still pass."""

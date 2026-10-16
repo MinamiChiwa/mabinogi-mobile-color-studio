@@ -20,6 +20,7 @@ from native_input_response import (InputGeometry, InputSettings, replay_native_r
 from native_input_route_search import _needed
 from native_palette_scoring import score_native_pose
 from .compromise import observed_quality, predicted_quality, quality_fields
+from refinement_policy import RefinementPolicy
 
 
 class _Expired(Exception):
@@ -83,7 +84,7 @@ def _inverse(gesture, geometry, settings):
         requested_angle=-gesture['requested_angle'], arc_start=1).record()
 
 
-def _return_neighborhood(context, pose, rules, route, baseline_quality, guard):
+def _return_neighborhood(context, pose, rules, route, baseline_quality, guard, policy):
     geometry, settings = _geometry(context)
     worst = None
     samples = 0
@@ -97,9 +98,10 @@ def _return_neighborhood(context, pose, rules, route, baseline_quality, guard):
         endpoint = replay_native_route(nearby, route, geometry, settings,
             wheel_delta_per_step=context['wheel_delta_per_step'],
             sample_policy='all_recorded_points', check=guard)['final_pose']
-        quality = predicted_quality(score_native_pose(context['session'], endpoint,
-                                                      rules, check=guard), rules)
-        if quality > baseline_quality:
+        prediction = score_native_pose(context['session'], endpoint, rules, check=guard)
+        quality = predicted_quality(prediction, rules)
+        if not policy.assess(
+                prediction['colors'],deltas=prediction['deltas'])['not_worse']:
             return None
         worst = quality if worst is None else max(worst, quality)
         samples += 1
@@ -113,6 +115,9 @@ def _return_neighborhood(context, pose, rules, route, baseline_quality, guard):
 def _protect(context, checkpoint, rules, candidate, baseline_quality, guard, stats=None):
     from .same_session_dye_planner import audit_candidate_endpoint
     row = audit_candidate_endpoint(context, checkpoint, rules, candidate, check=guard)
+    policy = RefinementPolicy(rules,checkpoint['client_hex'])
+    if not policy.assess(row['prediction']['colors'],deltas=row['prediction']['deltas'])['improved']:
+        return None
     geometry, settings = _geometry(context)
     returns = []
     for index in range(1, len(row['input_route'])+1):
@@ -125,10 +130,11 @@ def _protect(context, checkpoint, rules, candidate, baseline_quality, guard, sta
         recovery = _row(context, reference, rules, route, guard, 'prepared_prefix_return')
         recovery = audit_candidate_endpoint(context, reference, rules, recovery, check=guard)
         quality = predicted_quality(recovery['prediction'], rules)
-        if quality > baseline_quality:
+        if not policy.assess(
+                recovery['prediction']['colors'],deltas=recovery['prediction']['deltas'])['not_worse']:
             return None
         neighborhood = _return_neighborhood(context, endpoint, rules, route,
-                                             baseline_quality, guard)
+                                             baseline_quality, guard, policy)
         if stats is not None:
             stats['return_checked'] += 1
         if neighborhood is None:
@@ -365,6 +371,7 @@ def find_refinement(context, checkpoint, rules, *, deadline, clock=time.monotoni
         rules = normalize_target_rules(rules)
         context = dict(context, _refinement_rules=rules)
         baseline = observed_quality(checkpoint['client_hex'], rules)
+        policy = RefinementPolicy(rules,checkpoint['client_hex'])
         if not baseline[0]:
             state.clear()
             stats.update(search_pending=False,protected_candidate_found=False,
@@ -372,7 +379,8 @@ def find_refinement(context, checkpoint, rules, *, deadline, clock=time.monotoni
             return None
         blocked = {item if isinstance(item, str) else json.dumps(item, sort_keys=True)
                    for item in excluded}
-        signature = json.dumps((context['fingerprint'],checkpoint['binding'],checkpoint['pose'],
+        from color_matching import MATCHING_POLICY
+        signature = json.dumps((MATCHING_POLICY,context['fingerprint'],checkpoint['binding'],checkpoint['pose'],
             checkpoint['client_hex'],rules,radius_pixels,sorted(blocked),deadline),sort_keys=True)
         if state.get('signature') != signature:
             state.clear()
@@ -410,9 +418,11 @@ def find_refinement(context, checkpoint, rules, *, deadline, clock=time.monotoni
             stats['checked_routes'] += 1
             prediction = score_native_pose(context['session'], endpoint, rules, check=guard)
             quality = predicted_quality(prediction, rules)
-            if quality < baseline:
+            decision = policy.assess(prediction['colors'],deltas=prediction['deltas'])
+            key = decision['rank']
+            if decision['improved']:
                 stats['predicted_improvements'] += 1
-            if quality >= baseline or (best_key is not None and quality >= best_key):
+            if not decision['improved'] or (best_key is not None and key >= best_key):
                 continue
             row = dict(input_route=route, final_pose=endpoint, prediction=prediction,
                        needed=_needed(route, 3., .5), source='protected_local_'+stage)
@@ -427,7 +437,7 @@ def find_refinement(context, checkpoint, rules, *, deadline, clock=time.monotoni
             protected = _protect(context, checkpoint, rules, row, baseline, guard, stats)
             if protected is None:
                 continue
-            best, best_key = protected, quality
+            best, best_key = protected, key
             stats.update(protected_candidate_found=True,
                          best_prediction=dict(colors=prediction['colors'],
                              predicted_accepted=prediction['predicted_accepted'],
@@ -463,7 +473,7 @@ def find_refinement(context, checkpoint, rules, *, deadline, clock=time.monotoni
 
 def find_recovery(context, actual_checkpoint, baseline_checkpoint, rules, *, deadline,
                   clock=time.monotonic, check=lambda: None, radius_pixels=8,
-                  preferred_routes=()):
+                  preferred_routes=(), preserve_regions=False):
     """Replay nearby returns from measured feedback; retain only anchor-or-better.
 
     Prepared routes are attempted first. Corrections are a bounded integer
@@ -480,6 +490,7 @@ def find_recovery(context, actual_checkpoint, baseline_checkpoint, rules, *, dea
         _checked_checkpoint(context, baseline_checkpoint)
         rules = normalize_target_rules(rules)
         baseline = observed_quality(baseline_checkpoint['client_hex'], rules)
+        policy = RefinementPolicy(rules,baseline_checkpoint['client_hex']) if preserve_regions else None
         geometry, settings = _geometry(context)
         l, t, r, b = geometry.board
         seen = set()
@@ -491,7 +502,8 @@ def find_recovery(context, actual_checkpoint, baseline_checkpoint, rules, *, dea
             seen.add(signature)
             row = _row(context, actual_checkpoint, rules, route, guard, 'measured_local_return')
             quality = predicted_quality(row['prediction'], rules)
-            if quality > baseline:
+            if (not policy.assess(row['prediction']['colors'],deltas=row['prediction']['deltas'])['not_worse']
+                    if policy is not None else quality > baseline):
                 return None
             row = audit_candidate_endpoint(context, actual_checkpoint, rules, row, check=guard)
             guard()

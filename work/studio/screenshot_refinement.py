@@ -3,6 +3,7 @@ import math
 import numpy as np
 from scipy.spatial import cKDTree
 from screenshot_search import proposal_rank
+from refinement_policy import RefinementPolicy
 
 
 def _sample_index(samples):
@@ -17,7 +18,7 @@ def _sample_index(samples):
     return result
 
 
-def local_candidates(samples,markers,rules,current,*,step=.4,limit=8,exclude=(),check=lambda:None):
+def local_candidates(samples,markers,rules,current,*,step=.4,limit=8,exclude=(),check=lambda:None,baseline=None):
     """Rank small joint adjustments using original RGB at measured phase sites."""
     markers=np.asarray(markers,float);current=np.asarray(current,float)
     indices=[i for i,r in enumerate(rules) if r['enabled']]
@@ -25,7 +26,8 @@ def local_candidates(samples,markers,rules,current,*,step=.4,limit=8,exclude=(),
     index=_sample_index(samples) if field is None else None
     if not indices or field is None and any(index[i][0] is None for i in indices):return []
     if field is not None and hasattr(field,'prepare'):field.prepare(check)
-    pivot=markers[sorted(indices,key=lambda i:(not rules[i]['exact'],rules[i].get('priority',i+1)))[0]]
+    pivot=markers[min(indices,key=lambda i:rules[i].get('priority',i+1))]
+    policy=RefinementPolicy(rules,baseline) if baseline is not None else None
     radius=max(1.,float(np.max(np.linalg.norm(markers-pivot,axis=1))))
     transforms=[]
     # The direction and size are chosen from sampled color response, then
@@ -59,6 +61,12 @@ def local_candidates(samples,markers,rules,current,*,step=.4,limit=8,exclude=(),
             margin.append(float(row['margin'][slot]) if 'margin' in row.dtype.names else 0.)
         cost=float(np.max(np.linalg.norm(markers@delta[:2,:2].T+delta[:2,2]-markers,axis=1)))
         rank=proposal_rank(observed,rules,indices,residuals,cost)
+        if policy is not None:
+            codes=[None]*len(rules)
+            for i,value in zip(indices,observed):codes[i]='#'+''.join(f'{int(v):02X}' for v in value)
+            decision=policy.assess(codes)
+            if not decision['improved']:continue
+            rank=(*decision['rank'],max(residuals,default=0.),cost)
         proposals.append(dict(matrix=pose,kind=kind,rank=rank,signature=signature,
             observed_rgb=observed,residuals_screen=residuals,margin=min(margin),proposal_only=True))
     proposals.sort(key=lambda row:(row['rank'],-row['margin']))

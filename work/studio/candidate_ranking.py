@@ -75,7 +75,8 @@ def candidate_quality(row):
               and (not neighborhood or _truth(row.get('landing_safe',False))))
     hits=_number(row.get('exact_matches',0));hits=hits if math.isfinite(hits) else 0.
     ordered=tuple(_number(v) for v in row.get('region_priority',()))
-    return (not accepted,*ordered,risk,maximum,average,-hits,
+    return (not accepted,*ordered,risk,_number(row.get('match_maximum',maximum)),
+            _number(row.get('match_average',average)),-hits,
             _number(row.get('exact_maximum',0)),_number(row.get('exact_average',0)),
             _number(row.get('family_maximum',0)),_number(row.get('family_average',0)))
 

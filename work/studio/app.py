@@ -211,7 +211,7 @@ class Card(ct.CTkFrame):
         self.slider.grid(row=8,column=0,padx=16,sticky='ew')
         self.hint=ct.CTkLabel(self,text='',font=SMALL_FONT,text_color=MUTED,height=19,wraplength=260,justify='left');self.hint.grid(row=9,column=0,padx=16,pady=(0,1),sticky='w')
         self.current=ct.CTkLabel(self,text='当前颜色  —',font=BODY_FONT,text_color=MUTED,height=17);self.current.grid(row=10,column=0,padx=16,pady=(0,1),sticky='w')
-        self.best_label=ct.CTkLabel(self,text='最佳结果  —',font=SMALL_FONT,text_color=ACCENT,height=17,corner_radius=5);self.best_label.grid(row=11,column=0,padx=16,pady=(0,1),sticky='ew')
+        self.best_label=ct.CTkLabel(self,text='实测颜色  —',font=SMALL_FONT,text_color=ACCENT,height=17,corner_radius=5);self.best_label.grid(row=11,column=0,padx=16,pady=(0,1),sticky='ew')
         self.target.trace_add('write',self.preview);self.alt.trace_add('write',self.preview); self.preview();self.change_mode()
         self.grid_propagate(False)
         self.enabled.trace_add('write',self.update_enabled)
@@ -230,10 +230,10 @@ class Card(ct.CTkFrame):
         self.session_available=available;self.update_enabled()
         if not available:
             self.current.configure(text='当前颜色  本局不可用')
-            self.best_label.configure(text='最佳结果  本局不可用',fg_color='#28364A',text_color=MUTED)
+            self.best_label.configure(text='实测颜色  本局不可用',fg_color='#28364A',text_color=MUTED)
         elif changed:
             self.current.configure(text='当前颜色  —')
-            self.best_label.configure(text='最佳结果  —',fg_color='#28364A',text_color=MUTED)
+            self.best_label.configure(text='实测颜色  —',fg_color='#28364A',text_color=MUTED)
     def select_mode(self,value):
         self.mode.set('精准 HEX' if value==tr('精准 HEX') else '相似颜色');self.change_mode()
     def refresh_language(self):
@@ -640,16 +640,27 @@ class App(ct.CTk):
     def change_language(self,value):
         i18n.set_language(value)
         if not getattr(self,'_update_health_pending',False):save_settings(DATA/'settings.json',language=value)
-    def display_best(self,row):
-        self.best_summary=row
+    def display_colors(self,row):
+        """Paint actual readings without replacing progress or saving history."""
         for index,c in enumerate(self.cards):
             if not getattr(c,'session_available',True):continue
             if index>=len(row['regions']):
-                c.best_label.configure(text='最佳结果  —',fg_color='#28364A',text_color=MUTED);continue
+                c.best_label.configure(text='实测颜色  —',fg_color='#28364A',text_color=MUTED);continue
             r=row['regions'][index]
             delta=r['delta'];color=r['color']
-            text=f'{color or "—"} · ΔE {delta:.2f}' if delta is not None else f'{color or "—"} · 未参与匹配'
+            text=(f'{color or "—"} · ΔE {delta:.2f}' if delta is not None else
+                  '实测颜色  —' if color is None and r['enabled'] else f'{color or "—"} · 未参与匹配')
             c.best_label.configure(text=text,fg_color=color or '#28364A',text_color='#17202B' if color and sum(rgb(color))>430 else 'white')
+    def display_readings(self,colors):
+        if self.active_rules:self.display_colors(describe_result(colors,self.active_rules))
+    def clear_run_readings(self):
+        self.best_summary=None
+        for card in self.cards:
+            card.current.configure(text='当前颜色  —')
+            card.best_label.configure(text='实测颜色  —',fg_color='#28364A',text_color=MUTED)
+    def display_best(self,row):
+        self.best_summary=row
+        self.display_colors(row)
         if row['maximum'] is not None:
             if row.get('outcome')=='compromise':
                 prefix='妥协方案（未达目标） · 本次结果'
@@ -811,6 +822,7 @@ class App(ct.CTk):
         try:self.runner=build_runner(lambda k,d:self.q.put((k,d)),folder,strategy)
         except (ValueError,RuntimeError) as exc:
             self.busy=False;self.start.configure(state='normal');self.status.configure(text=tr(str(exc)));return
+        self.clear_run_readings()
         if mode=='search':
             try:
                 if self.overlay is None:self.overlay=SearchOverlay(self,self.stop,self.select_candidate,settings_path=DATA/'settings.json')
@@ -915,6 +927,7 @@ class App(ct.CTk):
             for i,(c,color) in enumerate(zip(self.cards,d.get('colors',[]))):
                 inactive=self.active_rules is not None and not self.active_rules[i]['enabled']
                 c.current.configure(text='当前颜色  '+(color or ('未参与匹配' if inactive else '读取失败')))
+            self.display_readings(d.get('colors',[]))
             if k=='scene':self.status.configure(text=f'正在寻色 · 游戏剩余 {d.get("seconds") or "—"} 秒')
             elif k=='restore_action':self.status.configure(text=f'正在恢复最佳颜色 · 游戏剩余 {d.get("seconds") or "—"} 秒')
         elif k=='waiting':
@@ -927,12 +940,14 @@ class App(ct.CTk):
             if k in ('native_progress','screenshot_progress') and d.get('stage')=='refinement' and d.get('verified') and d.get('screenshot_verified'):
                 for card,color in zip(self.cards,d.get('current_colors') or []):
                     card.current.configure(text=tr('当前颜色  ')+(color or tr('读取失败')))
+                self.display_readings(d.get('current_colors') or [])
         elif k=='native_retry_available':
             from native_status import retry_reason_text
             self._retry_enabled=bool(d.get('enabled'))
             if d.get('verified') and d.get('screenshot_verified'):
                 for card,color in zip(self.cards,d.get('current_colors') or []):
                     card.current.configure(text=tr('当前颜色  ')+(color or tr('读取失败')))
+                self.display_readings(d.get('current_colors') or [])
             if d.get('waiting_for_retry'):
                 self.status.configure(text=tr('本轮寻色已完成'))
                 self.set_detail(tr('可按 F7 或点击浮窗重试；剩余时间不足时保留当前颜色。' if d.get('enabled')
@@ -963,9 +978,11 @@ class App(ct.CTk):
                     text=tr(historical['label'])+'  '+color
                     if delta is not None:text+=f' · ΔE {delta:.2f}'
                     card.current.configure(text=text)
+                self.display_readings(historical['colors'])
             else:
                 for card,color in zip(self.cards,d.get('actual_colors') or [None]*3):
                     card.current.configure(text='当前颜色  '+(color or '读取失败'))
+                self.display_readings(d.get('actual_colors') or [])
             if d.get('verified') and self.active_rules:
                 try:
                     row=save_result(DATA/'history.json',d['actual_colors'],self.active_rules,
@@ -977,6 +994,7 @@ class App(ct.CTk):
             for i,(card,color) in enumerate(zip(self.cards,d.get('actual_colors') or [None]*3)):
                 disabled=self.active_rules is not None and not self.active_rules[i]['enabled']
                 card.current.configure(text='当前颜色  '+(color or ('未参与匹配' if disabled else '读取失败')))
+            self.display_readings(d.get('actual_colors') or [])
             from ui_progress import single_result_presentation
             if k=='screenshot_result':
                 from screenshot_presentation import result_text
@@ -1000,10 +1018,12 @@ class App(ct.CTk):
         elif k in ('atlas_default_verified','atlas_verified'):
             colors=d.get('actual_colors',d.get('colors',[]))
             for card,color in zip(self.cards,colors):card.current.configure(text='当前颜色  '+(color or '读取失败'))
+            self.display_readings(colors)
             self.status.configure(text='当前结果已达到所设目标，请在游戏内手动确认。' if d.get('accepted') else '当前结果未达到全部目标；请先查看妥协方案，再在游戏内手动确认是否套用。')
         elif k=='atlas_best_not_restored':
             for card,color in zip(self.cards,d.get('actual_colors') or [None]*3):
                 card.current.configure(text='当前颜色  '+(color or '读取失败'))
+            self.display_readings(d.get('actual_colors') or [])
             self.status.configure(text=tr('未能恢复先前最佳结果，请以游戏当前颜色为准。'))
         elif k=='atlas_default_unavailable':self.status.configure(text=tr(d.get('message','剩余时间不足，未发送定位操作。')))
         elif k=='atlas_invalidated':self.status.configure(text=tr(d.get('message','颜色板质量未达标，未发布候选。')))
@@ -1024,6 +1044,7 @@ class App(ct.CTk):
             elif not d.get('popup') and getattr(self,'active_mode','search')=='search':
                 self.after(100,lambda m=d.get('message',''):messagebox.showinfo(tr('流程已中断'),tr(m),parent=self))
             for c,color in zip(self.cards,d.get('colors',[])):c.current.configure(text='当前颜色  '+(color or '读取失败'))
+            self.display_readings(d.get('colors',[]))
             if d.get('popup'):
                 if self.active_rules:
                     try:

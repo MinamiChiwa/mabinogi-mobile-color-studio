@@ -2,11 +2,11 @@
 
 [简体中文](README.md) · [繁體中文](README.zh-TW.md) · [English](README.en.md) · [日本語](README.ja.md) · [한국어](README.ko.md)
 
-**ColorStudio 0.4.6** 是 Windows 自动寻色工具，支持台服，韩服和日服仍在测试中。工具按您设置的目标颜色操作色板，结果由您在游戏内手动确认。
+**ColorStudio 0.4.7** 是 Windows 自动寻色工具，支持台服，韩服和日服仍在测试中。工具按您设置的目标颜色操作色板，结果由您在游戏内手动确认。
 
 ## 1. 安装
 
-从 [GitHub Releases](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/releases) 下载 **`ColorStudio-v0.4.6-Windows-x64.zip`**，完整解压后运行 `ColorStudio.exe`。保留旁边的 `_internal` 文件夹，无需另装 Python 或 Tesseract。
+从 [GitHub Releases](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/releases) 下载 **`ColorStudio-v0.4.7-Windows-x64.zip`**，完整解压后运行 `ColorStudio.exe`。保留旁边的 `_internal` 文件夹，无需另装 Python 或 Tesseract。
 
 **`UPDATE-ONLY` 是更新专用包，不能用来首次安装，也不能直接解压运行。** 已安装用户见下方“更新”。
 
@@ -36,6 +36,8 @@
 - **未全部达标**：查看当前颜色与各区域色差，再决定继续调整、重试或使用该结果。
 - **上次实测（当前未确认）**：这是之前读取的颜色，请查看游戏当前画面。
 
+未全部达标时，工具按区域优先级选择妥协颜色，同时考虑整体色差、色相与饱和度，尽量保留目标的颜色特征。显示的色差、相似颜色的容差和精准 HEX 的达标条件不变。
+
 计算阶段色板可能暂时不动；浮窗会显示所处阶段和已读取的颜色。
 
 颜色、匹配要求和优先级自动保存。**保存方案**可给当前设置命名，保存多套方案；编辑后需载入才会用于当前寻色。寻色记录与设置方案分别保存。
@@ -51,9 +53,9 @@
 
 主界面点击**检查更新**，发现新版本后选择**下载更新**，下载完成再点击**安装并重启**。更新保留设置、方案与记录。
 
-无法连接 GitHub 时，下载 `UPDATE-ONLY-ColorStudio-0.4.6-win-x64.zip`，在工具内选择**导入离线更新**。首次安装仍使用完整包。
+无法连接 GitHub 时，下载 `UPDATE-ONLY-ColorStudio-0.4.7-win-x64.zip`，在工具内选择**导入离线更新**。首次安装仍使用完整包。
 
-[在线、离线与手动更新指南](docs/automatic-updates.md) · [0.4.6 更新内容](docs/release-notes-0.4.6.md)
+[在线、离线与手动更新指南](docs/automatic-updates.md) · [0.4.7 更新内容](docs/release-notes-0.4.7.md)
 
 ## 帮助与反馈
 

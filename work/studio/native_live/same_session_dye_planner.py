@@ -253,6 +253,7 @@ def _plan_fingerprint(plan):
     if plan.get('schema',1)>=3:fields+=('compromise_candidate',)
     if plan.get('schema',1)>=4:fields+=('approach_candidate',)
     if plan.get('schema',1)>=5:fields+=('candidate_pool',)
+    if 'matching_policy' in plan:fields+=('matching_policy',)
     return hashlib.sha256(_json({key:plan[key] for key in fields}).encode()).hexdigest()
 
 
@@ -400,7 +401,9 @@ def plan_from_checkpoint(context, checkpoint, frames, rules, grid, *, now, engin
         raise ValueError('Invalid deadline/reserve/search bounds')
     end=_timer_deadline(frames,engineering_deadline,reserve_seconds)
     pose=feedback['observed_pose']
-    result=dict(schema=4,context_fingerprint=context['fingerprint'],reference_pose=pose,compromise_candidate=None,
+    from color_matching import MATCHING_POLICY
+    result=dict(schema=4,matching_policy=MATCHING_POLICY,
+        context_fingerprint=context['fingerprint'],reference_pose=pose,compromise_candidate=None,
         approach_candidate=None,periodic_search=None,
         normalized_rules=rules,rules_fingerprint=hashlib.sha256(_json(rules).encode()).hexdigest(),
         result_classification='insufficient_time',nearest_diagnostic=None,reachability_conclusion='not_established',

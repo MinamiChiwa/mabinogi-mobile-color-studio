@@ -7,6 +7,7 @@ from vision import rgb, lab
 from native_palette_model import picker_view_uv, sample_cpu, color32
 from native_palette_scoring import _pose
 from region_priority import priority_indices
+from color_matching import matching_distances, has_chromatic_target
 
 
 def _inverse(uv):
@@ -84,11 +85,14 @@ def target_seed_poses(session, rules, *, scales=(1.,), rotations_degrees=(0.,),
                             distance = np.linalg.norm(lab(flat) - lab([target_rgb])[0], axis=1)
                         losses = np.minimum(losses, distance)
                     guard()
-                    selected = np.argsort(losses, kind='stable')[:pixels_per_region]
-                    choices.extend((float(losses[index]), int(index), fx, fy, uv_samples[index]) for index in selected)
-            choices.sort(key=lambda row: (row[0], row[1], row[2], row[3]))
+                    preference=matching_distances(flat,rule) if has_chromatic_target(rule) else losses
+                    hit=losses<=(0 if rule['exact'] else rule['tolerance'])
+                    selected = np.lexsort((preference,~hit))[:pixels_per_region]
+                    choices.extend((int(not hit[index]),float(preference[index]),float(losses[index]),
+                        int(index),fx,fy,uv_samples[index]) for index in selected)
+            choices.sort(key=lambda row: row[:6])
             z_reference = picker_view_uv(region, count, session['picker_uv'][region][1], **reference).astype(float)
-            for loss, index, fx, fy, uv in choices[:pixels_per_region]:
+            for _, preference, loss, index, fx, fy, uv in choices[:pixels_per_region]:
                 guard()
                 y, x = divmod(int(index), width)
                 z = _inverse(uv)
@@ -112,7 +116,7 @@ def target_seed_poses(session, rules, *, scales=(1.,), rotations_degrees=(0.,),
                             seen.add(key)
                             seeds.append(dict(native_pose=pose, anchor_region=region,
                                               pixel_xy=[x, y], subpixel_fraction=[fx, fy],
-                                              sampled_color_distance=loss))
+                                              sampled_color_distance=loss,sampled_match_score=preference))
     except Expired:
         if reason == 'seeds_exhausted':
             reason = 'deadline'

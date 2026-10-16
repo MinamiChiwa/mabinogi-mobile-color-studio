@@ -124,7 +124,8 @@ def run_native_search(owner,rules,*,mode='search',target=None,activate=False,ser
             'discovery_progress':'discovery','discovery_blocked':'discovery',
             'planning':'search','action':'position','observed':'verify','initial_visual_wait':'native_validate',
             'compromise_selected':'position','observation_wait':'verify','target_approach':'position',
-            'refinement_planning':'refinement','refinement_search_progress':'refinement'}.get(name)
+            'refinement_planning':'refinement','refinement_search_progress':'refinement',
+            'refinement_trial':'refinement','refinement_retained':'refinement','refinement_return':'refinement'}.get(name)
         with (folder/'native-events.jsonl').open('a',encoding='utf-8') as stream:
             stream.write(json.dumps(row,ensure_ascii=False)+'\n')
         if name=='native_observed':

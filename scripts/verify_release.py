@@ -30,7 +30,7 @@ def verify(release,source):
               'native_live.controller','native_live.same_session_dye_planner','native_live.compromise',
               'native_live.route_feedback','input_gestures','screenshot_text','native_live.game_font_reader',
               'screenshot_search','screenshot_samples','screenshot_geometry','screenshot_registration','screenshot_compute','screenshot_evidence',
-              'screenshot_refinement','screenshot_control','screenshot_live','screenshot_preflight','screenshot_prediction','screenshot_single',
+              'screenshot_refinement','refinement_policy','color_matching','screenshot_control','screenshot_live','screenshot_preflight','screenshot_prediction','screenshot_single',
               'native_live.candidate_selection','native_live.collect_dye_validation',
               'native_live.read_dye_input_backend','native_periodic_route',
               'native_live.native_provider_backend','native_live.scan_live_dye',

@@ -13,6 +13,7 @@ import time
 import numpy as np
 from atlas_execution import checked_translation
 from vision import accepted, error, normalize_hex
+from color_matching import MATCHING_POLICY, matching_score, has_chromatic_target
 
 
 @dataclass(frozen=True)
@@ -70,7 +71,8 @@ def score_codes(codes, rules):
         distance=error(color,targets,exact)
         # Exact channels use channel-distance only for ranking; zero remains
         # the sole acceptance threshold, including very dark colors.
-        normalized.append(distance/max(tolerance,1. if exact else .001))
+        preference=matching_score(color,rule) if has_chromatic_target(rule) else distance
+        normalized.append(preference/max(tolerance,1. if exact else .001))
         violations.append(distance>tolerance)
         actual.append(color);deltas.append(delta)
     ok=accepted(actual,rules)
@@ -79,13 +81,15 @@ def score_codes(codes, rules):
     if ordered is None:
         rank=(not ok,max(normalized),sum(violations),float(np.mean(normalized)))
     else:
-        values=[delta for delta in deltas if delta is not None]
+        from color_matching import matching_summary
         # Prioritized plans, measured best retention and native route quality
         # must break equal bins using the same actual Delta-E metrics.
-        rank=(not ok,*ordered,max(values),float(np.mean(values)))
+        rank=(not ok,*ordered,*matching_summary(actual,rules))
     target_exact=all(not r['enabled'] or error(actual[i],r['colors'],True)==0
                      for i,r in enumerate(rules))
-    return dict(colors=actual,deltas=deltas,accepted=ok,target_exact=target_exact,rank=rank)
+    return dict(colors=actual,deltas=deltas,accepted=ok,target_exact=target_exact,rank=rank,
+        matching_policy=MATCHING_POLICY,
+        match_scores=[matching_score(c,r) if r['enabled'] else None for c,r in zip(actual,rules)])
 
 
 def refine_hex(adapter, rules, deadline, *, clock=time.monotonic, limits=None):

@@ -15,17 +15,32 @@ STAGES={
 def progress_text(data):
     if data.get('stage')=='refinement':
         title='正在优化当前配色'
+        status=data.get('refinement_status')
         lines=[]
         colors=data.get('current_colors') or []
         deltas=data.get('current_deltas') or []
         if data.get('verified') and data.get('screenshot_verified') and len(colors) in (2,3) and len(colors)==len(deltas):
-            lines.append('当前配色 · 游戏实测')
+            lines.append('当前试探 · 游戏实测' if status=='trial' else '当前配色 · 游戏实测')
             for i,(color,delta) in enumerate(zip(colors,deltas)):
+                lines.append(f'区域 {i+1}  {color or "—"} · '+(f'ΔE {delta:.2f}' if delta is not None else '未参与匹配'))
+            lines.append('')
+        retained=data.get('retained_colors') or []
+        retained_deltas=data.get('retained_deltas') or []
+        if status in ('trial','restoring','recovering') and len(retained) in (2,3) and len(retained)==len(retained_deltas):
+            lines.append('已保留配色 · 游戏实测')
+            for i,(color,delta) in enumerate(zip(retained,retained_deltas)):
                 lines.append(f'区域 {i+1}  {color or "—"} · '+(f'ΔE {delta:.2f}' if delta is not None else '未参与匹配'))
             lines.append('')
         guidance=('可查看下方已确认的颜色；满意时按 F9 停止。' if lines else
             '正在寻找目标颜色。可按 F9 停止，再查看游戏当前结果。')
-        lines.extend(('正在计算更好的配色，计算期间色板可能暂时不动。','',guidance))
+        if status in ('trial','restoring','recovering'):
+            guidance='按 F9 会立即停止操作；请以游戏当前颜色为准。'
+        message={'trial':'正在核对微调结果；尚未替换已保留配色。',
+            'restoring':'本次微调没有改善，正在尝试返回已保留配色。',
+            'recovering':'返回出现偏差，正在重新定位并修正配色。',
+            'retained':'微调已改善，已保留本次实测配色。'}.get(status,
+                '正在计算更好的配色，计算期间色板可能暂时不动。')
+        lines.extend((message,'',guidance))
         return title,'\n'.join(lines)
     title=STAGES.get(data.get('stage'),'正在按目标计算，请稍候。')
     if data.get('total'):title+=f"  {data.get('current',0)}/{data['total']}"
@@ -51,6 +66,8 @@ def single_result_presentation(data):
     if not data.get('verified') or outcome=='unverified':
         return ('单区域寻色已结束', '当前色码未完成复核，请以游戏内显示为准。')
     if outcome=='matched' or (outcome not in ('matched','compromise','unverified') and data.get('accepted')):
+        if data.get('best_current') is False:
+            return ('单区域目标已达标', '当前颜色符合目标要求，但未回到此前保留的配色；请以游戏当前颜色为准。')
         return ('单区域目标已达标', '自动移动已结束，可继续在游戏内手动调整。')
     if data.get('best_current') is False:
         return ('未命中目标 · 妥协方案',
