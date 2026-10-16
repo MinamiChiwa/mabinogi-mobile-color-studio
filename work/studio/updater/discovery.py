@@ -7,6 +7,7 @@ from .manifest import ManifestError,verify_manifest
 REPOSITORY='MinamiChiwa/mabinogi-mobile-color-studio'
 BASE='https://github.com/'+REPOSITORY
 API='https://api.github.com/repos/'+REPOSITORY+'/releases'
+LATEST_MANIFEST=BASE+'/releases/latest/download/update-manifest.json'
 
 @dataclass(frozen=True)
 class CheckResult:
@@ -47,18 +48,34 @@ def check_release(current_version,channel,cache,cancel,*,client,trusted_keys,man
     if cancel():return result('cancelled','cancelled')
     if not trusted_keys:return result('unavailable','trust_unconfigured')
     try:
+        if manifest_url is None and channel=='stable':
+            # Official release downloads do not share anonymous API quotas.
+            # Only transport/HTTP failure permits API fallback; invalid signed
+            # content, cancellation and compatibility decisions are terminal.
+            direct=check_release(current_version,channel,cache,
+                lambda:cancel() or time.monotonic()-started>=20,
+                client=client,trusted_keys=trusted_keys,manifest_url=LATEST_MANIFEST)
+            if direct.status!='unavailable':return direct
+            check()
+            try:api_retry_at=float(cache.get('api_retry_at',0))
+            except (TypeError,ValueError):api_retry_at=0
+            if now<api_retry_at:return direct
         if manifest_url is None:
             url=API+'/latest' if channel=='stable' else API+'?per_page=100'
             response=get(url,{'If-None-Match':cache['api_etag']} if cache.get('api_etag') else {})
             etag=response.headers.get('ETag','');status=int(response.status)
+            if status==304 and cache.get('release'):release=cache['release'];read(response,1)
+            elif status==304:
+                read(response,1);response=get(url);status=int(response.status)
+                etag=response.headers.get('ETag','')
             if status in (403,429):
                 retry=response.headers.get('Retry-After','')
                 try:retry_at=now+float(retry) if retry else float(response.headers.get('X-RateLimit-Reset',now+3600))
                 except ValueError:retry_at=now+3600
-                read(response,1024*1024);return result('unavailable','rate_limit',retry_at=retry_at)
-            if status==304 and cache.get('release'):release=cache['release'];read(response,1)
-            elif status==304:
-                read(response,1);response=get(url);status=int(response.status)
+                read(response,1024*1024)
+                cache['api_retry_at']=retry_at
+                return result('unavailable','rate_limit',retry_at=retry_at)
+            elif status in (200,304):cache.pop('api_retry_at',None)
             if release is None and status==200:
                 payload=json.loads(read(response,8*1024*1024))
                 rows=[payload] if isinstance(payload,dict) else payload
@@ -96,9 +113,9 @@ def check_release(current_version,channel,cache,cancel,*,client,trusted_keys,man
                 manifest_url=assets['update-manifest.json']
                 cache['release']=release;cache['api_etag']=etag
             elif channel=='stable':
-                if status!=304:read(response,1024*1024)
+                if response is not None and status!=304:read(response,1024*1024)
                 # Official fixed repository fallback, never a public proxy.
-                manifest_url=BASE+'/releases/latest/download/update-manifest.json'
+                return result('unavailable',f'http_{status}')
             else:return result('unavailable','network')
         response=get(manifest_url,{'If-None-Match':cache['etag']} if cache.get('etag') else {})
         status=int(response.status);etag=response.headers.get('ETag','')

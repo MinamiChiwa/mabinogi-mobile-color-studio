@@ -177,7 +177,9 @@ def run_native_search(owner,rules,*,mode='search',target=None,activate=False,ser
         validation=[a for flag,a in (('--validate-korean-build',KR_ADAPTER),('--validate-japanese-build',JP_ADAPTER)) if flag in sys.argv]
         if server is None:
             if len(validation)>1:raise ValueError('Choose one server validation launch')
-            if validation:enable_known_validation_input(backend,validation[0].adapter_id)
+            if validation:
+                from .build_adapters import enable_selected_server_input
+                enable_selected_server_input(backend,'kr' if validation[0]==KR_ADAPTER else 'jp')
         selected_adapter=getattr(backend,'adapter',None)
         if selected_adapter is not None:
             result['build_adapter']=dict(selected_adapter.diagnostic(),

@@ -2,11 +2,11 @@
 
 [简体中文](README.md) · [繁體中文](README.zh-TW.md) · [English](README.en.md) · [日本語](README.ja.md) · [한국어](README.ko.md)
 
-**ColorStudio 0.4.7** 是 Windows 自动寻色工具，支持台服，韩服和日服仍在测试中。工具按您设置的目标颜色操作色板，结果由您在游戏内手动确认。
+**ColorStudio 0.4.8** 是 Windows 自动寻色工具，支持台服，韩服和日服仍在测试中。工具按您设置的目标颜色操作色板，结果由您在游戏内手动确认。
 
 ## 1. 安装
 
-从 [GitHub Releases](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/releases) 下载 **`ColorStudio-v0.4.7-Windows-x64.zip`**，完整解压后运行 `ColorStudio.exe`。保留旁边的 `_internal` 文件夹，无需另装 Python 或 Tesseract。
+从 [GitHub Releases](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/releases) 下载 **`ColorStudio-v0.4.8-Windows-x64.zip`**，完整解压后运行 `ColorStudio.exe`。保留旁边的 `_internal` 文件夹，无需另装 Python 或 Tesseract。
 
 **`UPDATE-ONLY` 是更新专用包，不能用来首次安装，也不能直接解压运行。** 已安装用户见下方“更新”。
 
@@ -53,9 +53,9 @@
 
 主界面点击**检查更新**，发现新版本后选择**下载更新**，下载完成再点击**安装并重启**。更新保留设置、方案与记录。
 
-无法连接 GitHub 时，下载 `UPDATE-ONLY-ColorStudio-0.4.7-win-x64.zip`，在工具内选择**导入离线更新**。首次安装仍使用完整包。
+无法连接 GitHub 时，下载 `UPDATE-ONLY-ColorStudio-0.4.8-win-x64.zip`，在工具内选择**导入离线更新**。首次安装仍使用完整包。
 
-[在线、离线与手动更新指南](docs/automatic-updates.md) · [0.4.7 更新内容](docs/release-notes-0.4.7.md)
+[在线、离线与手动更新指南](docs/automatic-updates.md) · [0.4.8 更新内容](docs/release-notes-0.4.8.md)
 
 ## 帮助与反馈
 

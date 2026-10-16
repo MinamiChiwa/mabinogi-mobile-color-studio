@@ -110,4 +110,178 @@ class NetworkTests(unittest.TestCase):
             self.assertEqual(result.read_bytes(),payload)
 
 
+class RateLimitDiscoveryTests(unittest.TestCase):
+    def test_stable_default_checks_direct_download_without_using_api(self):
+        from updater.discovery import check_release,API
+        from _updater_test_support import KEYS
+        client,latest=self.fixture()
+        result=check_release('0.4.2','stable',{},lambda:False,client=client,trusted_keys=KEYS)
+        self.assertEqual(result.status,'available')
+        self.assertEqual(client.calls,[latest,latest.removesuffix('.json')+'.sig'])
+
+    def test_direct_http_failure_uses_api_and_pinned_signed_assets(self):
+        from updater.discovery import check_release,API,BASE
+        from _updater_test_support import KEYS,signed,entry
+        import json
+        raw,sig=signed([entry()]);calls=[]
+        prefix=BASE+'/releases/download/v0.4.3/'
+        names=('update-manifest.json','update-manifest.sig',entry()['blob'])
+        release=dict(tag_name='v0.4.3',draft=False,prerelease=False,
+            assets=[dict(name=n,browser_download_url=prefix+n) for n in names])
+        class Fixture:
+            def get(self,url,headers=None,timeout=None):
+                calls.append(url)
+                if '/latest/download/' in url:return Response(503,b'')
+                if url==API+'/latest':return Response(200,json.dumps(release).encode())
+                return Response(200,sig if url.endswith('.sig') else raw)
+        result=check_release('0.4.2','stable',{},lambda:False,client=Fixture(),trusted_keys=KEYS)
+        self.assertEqual(result.status,'available')
+        self.assertEqual(calls[1],API+'/latest')
+        self.assertTrue(all(url.startswith(prefix) for url in result.assets.values()))
+
+    def test_invalid_direct_signature_never_falls_back_to_api(self):
+        from updater.discovery import check_release,API
+        from _updater_test_support import KEYS
+        client,_=self.fixture(signature_valid=False)
+        result=check_release('0.4.2','stable',{},lambda:False,client=client,trusted_keys=KEYS)
+        self.assertEqual((result.status,result.reason_code),('invalid','signature'))
+        self.assertNotIn(API+'/latest',client.calls)
+
+    def test_rate_limited_api_is_not_retried_when_direct_is_down(self):
+        from updater.discovery import check_release,API
+        from _updater_test_support import KEYS
+        from unittest.mock import patch
+        calls=[]
+        class Fixture:
+            def get(self,url,headers=None,timeout=None):
+                calls.append(url)
+                return Response(429,b'{}',{'Retry-After':'30'}) if url==API+'/latest' else Response(503,b'')
+        cache={}
+        with patch('updater.discovery.time.time',return_value=1000):
+            result=check_release('0.4.2','stable',cache,lambda:False,client=Fixture(),trusted_keys=KEYS)
+        self.assertEqual(result.reason_code,'rate_limit')
+        with patch('updater.discovery.time.time',return_value=1001):
+            check_release('0.4.2','stable',cache,lambda:False,client=Fixture(),trusted_keys=KEYS)
+        self.assertEqual(calls.count(API+'/latest'),1)
+        with patch('updater.discovery.time.time',return_value=1031):
+            check_release('0.4.2','stable',cache,lambda:False,client=Fixture(),trusted_keys=KEYS)
+        self.assertEqual(calls.count(API+'/latest'),2)
+
+    def fixture(self,status=403,headers=None,signature_valid=True):
+        from updater.discovery import API,BASE
+        from _updater_test_support import signed,entry
+        raw,sig=signed([entry()])
+        latest=BASE+'/releases/latest/download/update-manifest.json'
+        responses={API+'/latest':Response(status,b'{"message":"API rate limit exceeded"}',
+            headers or {'X-RateLimit-Reset':'2000'}),
+            latest:Response(200,raw),latest.removesuffix('.json')+'.sig':Response(200,sig if signature_valid else b'x'*64)}
+        class Fixture:
+            def __init__(self):self.calls=[]
+            def get(self,url,headers=None,timeout=None):
+                self.calls.append(url)
+                return responses[url]
+        return Fixture(),latest
+
+    def test_stable_rate_limit_uses_signed_official_fallback_and_pinned_blob_urls(self):
+        from updater.discovery import check_release,BASE
+        from _updater_test_support import KEYS
+        for status in (403,429):
+            with self.subTest(status=status):
+                client,latest=self.fixture(status);cache={}
+                result=check_release('0.4.2','stable',cache,lambda:False,client=client,trusted_keys=KEYS)
+                self.assertEqual(result.status,'available')
+                self.assertEqual(result.manifest.version,'0.4.3')
+                self.assertIn(latest,client.calls)
+                self.assertTrue(result.assets)
+                self.assertTrue(all(url.startswith(BASE+'/releases/download/v0.4.3/')
+                                    for url in result.assets.values()))
+
+    def test_active_api_cooldown_checks_directly_and_still_detects_update(self):
+        from updater.discovery import check_release,API
+        from _updater_test_support import KEYS
+        from unittest.mock import patch
+        client,latest=self.fixture();cache={}
+        with patch('updater.discovery.time.time',return_value=1000):
+            check_release('0.4.2','stable',cache,lambda:False,client=client,trusted_keys=KEYS)
+            client.calls.clear()
+            result=check_release('0.4.2','stable',cache,lambda:False,client=client,trusted_keys=KEYS)
+        self.assertEqual(result.status,'available')
+        self.assertNotIn(API+'/latest',client.calls)
+        self.assertIn(latest,client.calls)
+
+    def test_direct_success_does_not_need_api_after_cooldown_expires(self):
+        from updater.discovery import check_release,API
+        from _updater_test_support import KEYS
+        from unittest.mock import patch
+        client,_=self.fixture(429,{'Retry-After':'30'});cache={}
+        with patch('updater.discovery.time.time',return_value=1000):
+            check_release('0.4.2','stable',cache,lambda:False,client=client,trusted_keys=KEYS)
+        client.calls.clear()
+        with patch('updater.discovery.time.time',return_value=1031):
+            result=check_release('0.4.2','stable',cache,lambda:False,client=client,trusted_keys=KEYS)
+        self.assertEqual(result.status,'available')
+        self.assertNotIn(API+'/latest',client.calls)
+
+    def test_fallback_still_rejects_bad_signature_and_signed_replay(self):
+        from updater.discovery import check_release
+        from _updater_test_support import KEYS
+        for cache,valid,want in (({},False,'signature'),({'sequence':3},True,'replay')):
+            with self.subTest(reason=want):
+                client,_=self.fixture(signature_valid=valid)
+                result=check_release('0.4.2','stable',cache,lambda:False,client=client,trusted_keys=KEYS)
+                self.assertEqual((result.status,result.reason_code),('invalid',want))
+
+    def test_prerelease_rate_limit_never_switches_to_stable(self):
+        from updater.discovery import check_release,API
+        from _updater_test_support import KEYS
+        calls=[]
+        class Fixture:
+            def get(self,url,headers=None,timeout=None):
+                calls.append(url)
+                return Response(429,b'{}',{'Retry-After':'30'})
+        result=check_release('0.4.2','prerelease',{},lambda:False,client=Fixture(),trusted_keys=KEYS)
+        self.assertEqual((result.status,result.reason_code),('unavailable','rate_limit'))
+        self.assertEqual(calls,[API+'?per_page=100'])
+
+    def test_cancellation_after_direct_response_never_requests_api(self):
+        from updater.discovery import check_release,API
+        from _updater_test_support import KEYS
+        stopped=[False];calls=[]
+        class CancelResponse(Response):
+            def iter_bytes(self):
+                yield b'{}'
+                stopped[0]=True
+        class Fixture:
+            def get(self,url,headers=None,timeout=None):
+                calls.append(url)
+                return CancelResponse(403,b'')
+        result=check_release('0.4.2','stable',{},lambda:stopped[0],client=Fixture(),trusted_keys=KEYS)
+        self.assertEqual(result.status,'cancelled')
+        from updater.discovery import LATEST_MANIFEST
+        self.assertEqual(calls,[LATEST_MANIFEST])
+
+    def test_direct_304_without_signed_cache_refetches_directly(self):
+        from updater.discovery import check_release,API
+        from _updater_test_support import KEYS
+        delegate,latest=self.fixture();calls=[]
+        class Fixture:
+            def get(self,url,headers=None,timeout=None):
+                calls.append(url)
+                return Response(304,b'') if len(calls)==1 else delegate.get(url,headers,timeout)
+        result=check_release('0.4.2','stable',{'api_etag':'old'},lambda:False,client=Fixture(),trusted_keys=KEYS)
+        self.assertEqual(result.status,'available')
+        self.assertEqual(calls[:2],[latest]*2)
+        self.assertIn(latest,calls)
+
+    def test_stale_api_release_does_not_override_new_signed_fallback_version(self):
+        from updater.discovery import check_release,BASE
+        from _updater_test_support import KEYS
+        cache={'release':{'tag_name':'v0.4.1','assets':[]},'api_etag':'old'}
+        client,_=self.fixture()
+        result=check_release('0.4.2','stable',cache,lambda:False,client=client,trusted_keys=KEYS)
+        self.assertEqual(result.status,'available')
+        self.assertEqual(result.manifest.version,'0.4.3')
+        self.assertTrue(all('/v0.4.3/' in url for url in result.assets.values()))
+
+
 if __name__=='__main__':unittest.main()

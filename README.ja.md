@@ -2,11 +2,11 @@
 
 [简体中文](README.md) · [繁體中文](README.zh-TW.md) · [English](README.en.md) · [日本語](README.ja.md) · [한국어](README.ko.md)
 
-**ColorStudio 0.4.7** は、マビノギモバイル台湾版に対応する Windows 用のカラー検索ツールです。韓国版・日本版はテスト中です。指定した色に合わせてパレットを操作し、結果の適用はゲーム内でユーザーが決めます。
+**ColorStudio 0.4.8** は、マビノギモバイル台湾版に対応する Windows 用のカラー検索ツールです。韓国版・日本版はテスト中です。指定した色に合わせてパレットを操作し、結果の適用はゲーム内でユーザーが決めます。
 
 ## 1. インストール
 
-[GitHub Releases](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/releases) から **`ColorStudio-v0.4.7-Windows-x64.zip`** をダウンロードし、すべて展開して `ColorStudio.exe` を実行してください。`_internal` フォルダーは実行ファイルの隣に置いたままにします。Python や Tesseract を別途インストールする必要はありません。
+[GitHub Releases](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/releases) から **`ColorStudio-v0.4.8-Windows-x64.zip`** をダウンロードし、すべて展開して `ColorStudio.exe` を実行してください。`_internal` フォルダーは実行ファイルの隣に置いたままにします。Python や Tesseract を別途インストールする必要はありません。
 
 **`UPDATE-ONLY` は更新専用です。初回インストールには使えず、展開して直接実行することもできません。** すでにお使いの場合は下の「更新」をご覧ください。
 
@@ -53,9 +53,9 @@
 
 メイン画面の**更新を確認**から新しいバージョンを探し、**更新をダウンロード**を選びます。完了後に**インストールして再起動**を押してください。設定・プリセット・履歴は保持されます。
 
-GitHub に接続できない場合は `UPDATE-ONLY-ColorStudio-0.4.7-win-x64.zip` を入手し、ツール内の**オフライン更新を読み込む**を使ってください。初回インストールには完全パッケージを使います。
+GitHub に接続できない場合は `UPDATE-ONLY-ColorStudio-0.4.8-win-x64.zip` を入手し、ツール内の**オフライン更新を読み込む**を使ってください。初回インストールには完全パッケージを使います。
 
-[オンライン・オフライン・手動更新](docs/automatic-updates.ja.md) · [0.4.7 の変更内容](docs/release-notes-0.4.7.md)
+[オンライン・オフライン・手動更新](docs/automatic-updates.ja.md) · [0.4.8 の変更内容](docs/release-notes-0.4.8.md)
 
 ## ヘルプと問題の報告
 
