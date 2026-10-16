@@ -2,11 +2,11 @@
 
 [简体中文](README.md) · [繁體中文](README.zh-TW.md) · [English](README.en.md) · [日本語](README.ja.md) · [한국어](README.ko.md)
 
-**ColorStudio 0.4.6**는 마비노기 모바일 대만 서버를 지원하는 Windows용 색상 검색 도구입니다. 한국·일본 서버는 테스트 중입니다. 설정한 목표 색상에 맞춰 팔레트를 조작하며, 결과를 적용할지는 게임에서 직접 결정합니다.
+**ColorStudio 0.4.7**는 마비노기 모바일 대만 서버를 지원하는 Windows용 색상 검색 도구입니다. 한국·일본 서버는 테스트 중입니다. 설정한 목표 색상에 맞춰 팔레트를 조작하며, 결과를 적용할지는 게임에서 직접 결정합니다.
 
 ## 1. 설치
 
-[GitHub Releases](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/releases)에서 **`ColorStudio-v0.4.6-Windows-x64.zip`**을 받아 전체 압축을 푼 뒤 `ColorStudio.exe`를 실행하세요. `_internal` 폴더는 실행 파일 옆에 그대로 두세요. Python이나 Tesseract를 따로 설치할 필요는 없습니다.
+[GitHub Releases](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/releases)에서 **`ColorStudio-v0.4.7-Windows-x64.zip`**을 받아 전체 압축을 푼 뒤 `ColorStudio.exe`를 실행하세요. `_internal` 폴더는 실행 파일 옆에 그대로 두세요. Python이나 Tesseract를 따로 설치할 필요는 없습니다.
 
 **`UPDATE-ONLY`는 업데이트 전용입니다. 처음 설치할 때 사용할 수 없으며, 압축을 풀어 직접 실행하는 패키지도 아닙니다.** 이미 설치했다면 아래 업데이트 안내를 확인하세요.
 
@@ -36,6 +36,8 @@
 - **일부 목표 미달성**: 현재 색상과 영역별 색차를 확인하고 조정, 재검색 또는 결과 사용을 선택하세요.
 - **마지막 실측(현재 상태 미확인)**: 이전에 읽은 색상입니다. 현재 게임 화면을 확인하세요.
 
+모든 목표를 충족하지 못하면 영역 우선순위에 따라 전체 색차뿐 아니라 색상 계열과 채도도 고려해 목표 색감에 가까운 절충 배색을 고릅니다. 표시되는 색차, 유사 색상의 허용 색차, 완전 일치(HEX)의 충족 조건은 바뀌지 않습니다.
+
 계산 중에는 팔레트가 잠시 움직이지 않을 수 있습니다. 플로팅 창에서 현재 단계와 읽은 색상을 확인할 수 있습니다.
 
 색상, 일치 조건, 우선순위는 자동 저장됩니다. **프리셋 저장**으로 설정에 이름을 붙여 보관하고 편집·불러오기·삭제할 수 있습니다. 편집한 프리셋을 현재 검색에 사용하려면 불러와야 합니다. 검색 기록과 설정 프리셋은 따로 저장합니다.
@@ -51,9 +53,9 @@
 
 메인 화면에서 **업데이트 확인**을 누르고 새 버전이 있으면 **업데이트 다운로드**를 선택하세요. 다운로드가 끝나면 **설치 후 다시 시작**을 누릅니다. 설정·프리셋·기록은 유지됩니다.
 
-GitHub에 접속할 수 없다면 `UPDATE-ONLY-ColorStudio-0.4.6-win-x64.zip`을 받아 도구의 **오프라인 업데이트 가져오기**를 사용하세요. 처음 설치할 때는 전체 설치 패키지를 사용합니다.
+GitHub에 접속할 수 없다면 `UPDATE-ONLY-ColorStudio-0.4.7-win-x64.zip`을 받아 도구의 **오프라인 업데이트 가져오기**를 사용하세요. 처음 설치할 때는 전체 설치 패키지를 사용합니다.
 
-[온라인·오프라인·수동 업데이트](docs/automatic-updates.ko.md) · [0.4.6 변경 내용](docs/release-notes-0.4.6.md)
+[온라인·오프라인·수동 업데이트](docs/automatic-updates.ko.md) · [0.4.7 변경 내용](docs/release-notes-0.4.7.md)
 
 ## 도움말과 문제 제보
 

@@ -5,17 +5,17 @@ Production CLI sources: [asset builder](../../scripts/build_update_assets.py),
 [asset verifier](../../scripts/verify_update_assets.py),
 [frozen verifier](../../scripts/verify_release.py).
 
-For 0.4.6, set APP_VERSION, manifest version and package naming to 0.4.6.
+For 0.4.7, set APP_VERSION, manifest version and package naming to 0.4.7.
 The reviewed version, channel, sequence, key ID and filenames are recorded in
 [release-config.json](../../release/release-config.json). Match the generated
 manifest and assets against this file before publishing.
 Use the existing production public key and a release sequence above the published
-maximum (0.4.5 is sequence6; 0.4.6 uses sequence7). Always pass version and
+maximum (0.4.6 is sequence7; 0.4.7 uses sequence8). Always pass version and
 sequence explicitly; do not use local signing-helper defaults. Do not rotate
 keys merely because the application version changes.
 
 Build from main including the title-bar move/resize fix. Generate incremental
-archives against the published signed manifests for both 0.4.5 and the final
+archives against the published signed manifests for 0.4.6, 0.4.5 and the final
 corrected 0.4.4 (sequence5). Earlier 0.4.4 revisions use the full offline archive.
 
 ## 维护者本地命令
