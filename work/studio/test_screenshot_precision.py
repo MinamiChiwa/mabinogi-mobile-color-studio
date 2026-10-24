@@ -156,7 +156,8 @@ class ScreenshotMeasuredRefinementTests(unittest.TestCase):
                 c=SimpleNamespace(current=value,best=value,rules=mixed_rules(),actions=[],observations=[],
                     observe=observe,budget=Budget(120,.4),write=lambda *a:None,
                     safe_restore=lambda *a,**kw:dict(verified=False),
-                    owner=SimpleNamespace(event=lambda *a,**kw:events.append((a,kw))))
+                    owner=SimpleNamespace(stop=__import__('threading').Event(),
+                        event=lambda *a,**kw:events.append((a,kw))))
                 result=_publish(c,'processing_error')
                 self.assertEqual(result['outcome'],'unverified')
                 self.assertFalse(result['accepted'])

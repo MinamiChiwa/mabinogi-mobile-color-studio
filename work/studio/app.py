@@ -389,7 +389,7 @@ class App(ct.CTk):
         self.page.grid_rowconfigure(2,weight=0)
         controls=ct.CTkFrame(self.page,fg_color='transparent');controls.grid(row=3,column=0,padx=BODY_SIDE_PADDING,pady=(8,4),sticky='ew')
         self.start=ct.CTkButton(controls,text='开始寻色   F8',height=44,width=165,font=(FONT,13,'bold'),fg_color=ACCENT,text_color='#102A27',hover_color='#80E5CF',command=lambda:self.go(activate=True));self.start.grid(row=0,column=0,padx=(0,8),pady=4,sticky='w')
-        self.stop_button=ct.CTkButton(controls,text='停止   F9',height=44,width=100,font=BODY_FONT,fg_color='#2B384C',command=self.stop);self.stop_button.grid(row=0,column=1,padx=(0,8),pady=4,sticky='w')
+        self.stop_button=ct.CTkButton(controls,text='停止   F9',height=44,width=100,font=BODY_FONT,fg_color='#2B384C',command=lambda:self.stop(source='main_stop_button'));self.stop_button.grid(row=0,column=1,padx=(0,8),pady=4,sticky='w')
         self.controls=controls;controls.grid_columnconfigure(2,weight=1)
         selected=self._strategy_defaults['settings'].get('search_strategy','screenshot')
         self.search_strategy=tk.StringVar(value=selected if selected in ('native','screenshot') else 'screenshot')
@@ -825,7 +825,7 @@ class App(ct.CTk):
         self.clear_run_readings()
         if mode=='search':
             try:
-                if self.overlay is None:self.overlay=SearchOverlay(self,self.stop,self.select_candidate,settings_path=DATA/'settings.json')
+                if self.overlay is None:self.overlay=SearchOverlay(self,lambda:self.stop(source='overlay_stop_button'),self.select_candidate,settings_path=DATA/'settings.json')
                 self.overlay.begin(rules,passive=strategy in ('native','screenshot'))
             except Exception:
                 self.set_detail('浮窗暂不可用，寻色状态请查看主窗口。')
@@ -991,10 +991,14 @@ class App(ct.CTk):
                     self.history=read_history(DATA/'history.json');self.display_best(row)
                 except OSError:self.set_detail(tr('本轮结果未能保存，请检查程序文件夹是否可写。'))
         elif k in ('single_verified','screenshot_result'):
-            for i,(card,color) in enumerate(zip(self.cards,d.get('actual_colors') or [None]*3)):
+            from native_status import last_verified_display
+            historical=last_verified_display(d)
+            colors=historical['colors'] if historical else d.get('actual_colors') or [None]*3
+            for i,(card,color) in enumerate(zip(self.cards,colors)):
                 disabled=self.active_rules is not None and not self.active_rules[i]['enabled']
-                card.current.configure(text='当前颜色  '+(color or ('未参与匹配' if disabled else '读取失败')))
-            self.display_readings(d.get('actual_colors') or [])
+                label=tr(historical['label'])+'  ' if historical else tr('当前颜色  ')
+                card.current.configure(text=label+(color or tr('未参与匹配' if disabled else '读取失败')))
+            self.display_readings(colors)
             from ui_progress import single_result_presentation
             if k=='screenshot_result':
                 from screenshot_presentation import result_text

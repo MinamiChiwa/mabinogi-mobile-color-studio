@@ -67,4 +67,16 @@ class ScreenshotUITests(unittest.TestCase):
         self.assertEqual(self.ui.overlay.candidate_rows,{})
         self.assertEqual(self.helper.errors,[])
 
+    def test_stopped_unverified_result_keeps_historical_readings_in_both_windows(self):
+        colors=['#112233','#445566','#778899']
+        self.emit('screenshot_result',dict(backend='screenshot',verified=False,accepted=False,
+            stop_reason='interrupted',interruption_reason='focus_lost',
+            last_verified_screenshot=True,last_verified_colors=colors,last_verified_deltas=[1.,2.,3.]))
+        for card,color in zip(self.ui.cards,colors):
+            self.assertIn(color,str(card.current.cget('text')))
+            self.assertIn('上次实测',str(card.current.cget('text')))
+        labels=[str(widget.cget('text')) for widget in self.ui.overlay.results.winfo_children()]
+        for color in colors:self.assertTrue(any(color in label and '上次实测' in label for label in labels),labels)
+        self.assertEqual(self.helper.errors,[])
+
 if __name__=='__main__':unittest.main()

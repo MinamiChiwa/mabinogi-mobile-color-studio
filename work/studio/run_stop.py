@@ -39,7 +39,7 @@ def interruption_reason(error,diagnostic):
     if '窗口位置或尺寸' in error:return 'window_changed'
     if '无法激活游戏' in error:return 'activation_failed'
     source=(diagnostic or {}).get('source')
-    return {'ui_button':'user_stop','window_close':'window_closed',
+    return {'ui_button':'user_stop','main_stop_button':'user_stop','overlay_stop_button':'user_stop','window_close':'window_closed',
             'hotkey_message':'stop_hotkey','hotkey_poll':'stop_key_detected',
             'native_f9_poll':'stop_key_detected','screenshot_f9_poll':'stop_key_detected',
             'unattributed_stop_flag':'stop_signal_unknown'

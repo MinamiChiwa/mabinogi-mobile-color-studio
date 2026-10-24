@@ -4,6 +4,25 @@ from unittest.mock import MagicMock
 from hotkeys import KeyEdges,run_hotkeys
 
 class HotkeyTests(unittest.TestCase):
+    def message_events(self,vk,modifiers=0):
+        user=MagicMock();stop=threading.Event();events=[]
+        user.RegisterHotKey.return_value=True;user.GetAsyncKeyState.return_value=0
+        def message(pointer,*args):
+            if getattr(message,'sent',False):return False
+            message.sent=True;pointer._obj.wParam=2
+            pointer._obj.lParam=(vk<<16)|modifiers
+            return True
+        user.PeekMessageW.side_effect=message;stop.wait=lambda _:stop.set()
+        run_hotkeys(user,ctypes,W,stop,lambda k,d:events.append((k,d)),[(2,0x78)])
+        return [d for kind,d in events if kind=='hotkey']
+
+    def test_message_id_without_matching_key_is_not_a_stop(self):
+        self.assertEqual(self.message_events(0x77),[])
+        self.assertEqual(self.message_events(0x78,2),[])
+
+    def test_valid_f9_message_survives_a_fast_key_release(self):
+        self.assertEqual(self.message_events(0x78),[dict(id=2,source='message')])
+
     def test_message_and_poll_fire_once_for_one_press(self):
         edges=KeyEdges()
         self.assertTrue(edges.accept(1,1))

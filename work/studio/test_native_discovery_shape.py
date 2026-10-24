@@ -49,6 +49,43 @@ class NativeDiscoveryShapeTests(unittest.TestCase):
                 self.assertEqual(diagnostic['candidate_read_failures'],0)
                 self.assertGreaterEqual(diagnostic.get('rejected_candidate_count',0),len(noise))
 
+    def test_inactive_broken_candidate_does_not_block_unique_active_palette(self):
+        memory=ShapeMemory();second=memory.allocate(128)
+        memory.bytes(second,memory.read(memory.instance,128))
+        controller=memory.allocate(64);memory.put(controller+20,'i',0)
+        memory.put(second+48,'Q',controller);memory.put(second+32,'Q',0)
+        broken=memory.allocate(128);memory.put(second+24,'Q',broken)
+        memory.failed_address=broken
+        scan=IncrementalDyeScan(memory,memory.u64(memory.instance),clock=memory.clock)
+        diagnostic=scan.advance(20.,lambda:None)
+        self.assertTrue(diagnostic['uniqueness_verified'],diagnostic)
+        self.assertEqual(diagnostic['eligible_addresses'],[hex(memory.instance)])
+        self.assertIn(hex(second),diagnostic['inactive_read_failures'])
+
+    def test_final_transient_candidate_error_is_retried_without_another_heap_scan(self):
+        from native_live import scan_live_dye as scanning
+        memory=ShapeMemory();original=scanning.inspect;attempts=[]
+        def flaky(reader,address,cls):
+            if address==memory.instance:attempts.append(address)
+            if address==memory.instance and len(attempts)==2:raise OSError(299,'transient final read')
+            return original(reader,address,cls)
+        with patch.object(scanning,'inspect',side_effect=flaky):
+            scan=IncrementalDyeScan(memory,memory.u64(memory.instance),clock=memory.clock)
+            diagnostic=scan.advance(20.,lambda:None)
+        self.assertTrue(diagnostic['uniqueness_verified'],diagnostic)
+        self.assertGreaterEqual(len(attempts),3)
+
+    def test_transitioning_unreadable_candidate_still_blocks_unique_binding(self):
+        memory=ShapeMemory();second=memory.allocate(128)
+        memory.bytes(second,memory.read(memory.instance,128))
+        controller=memory.allocate(64);memory.put(controller+20,'i',1)
+        memory.put(second+48,'Q',controller);memory.put(second+32,'Q',0)
+        broken=memory.allocate(128);memory.put(second+24,'Q',broken);memory.failed_address=broken
+        scan=IncrementalDyeScan(memory,memory.u64(memory.instance),clock=memory.clock)
+        diagnostic=scan.advance(20.,lambda:None)
+        self.assertFalse(diagnostic['uniqueness_verified'],diagnostic)
+        self.assertIn(hex(second),diagnostic['unreadable_candidate_addresses'])
+
     def test_valid_typed_object_deep_read_failure_still_blocks_uniqueness(self):
         memory=ShapeMemory();memory.failed_address=memory.data+16
         scan=IncrementalDyeScan(memory,memory.u64(memory.instance),clock=memory.clock)

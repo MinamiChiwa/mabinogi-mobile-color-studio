@@ -7,6 +7,40 @@ import numpy as np
 from engine import Runner
 
 class ScreenshotLiveTests(unittest.TestCase):
+    def test_stop_during_retry_wait_keeps_published_result_without_further_capture(self):
+        from screenshot_live import run_screenshot_search
+        from screenshot_control import Controller
+        from vision import Scene
+        scene=Scene(cards=[(0,0,10,10),(20,0,10,10)],markers=[(5,15),(25,20)],
+            board=(0,10,30,40),colors=[None,None],seconds=120,button=None)
+        captures=[];events=[]
+        class Game:
+            target=SimpleNamespace(title='fixture',hwnd=1,pid=2);hwnd=1
+            def __init__(self,*a,**kw):pass
+            def check(self):pass
+            def release(self):pass
+            def geometry(self):return (0,0,100,100)
+            def capture(self):captures.append(1);return np.full((100,100,3),255,np.uint8)
+            capture_waiting=capture
+        with tempfile.TemporaryDirectory() as folder:
+            def emit(kind,data):
+                events.append((kind,data))
+                if kind=='native_retry_available' and data.get('waiting_for_retry'):
+                    owner.stop.request('overlay_stop_button');captures.clear()
+            owner=Runner(emit,folder)
+            rules=[dict(enabled=True,colors=['#000000'],exact=True,tolerance=0,priority=i+1) for i in range(2)]
+            with patch('screenshot_live.recognize',return_value=scene),patch('screenshot_control.recognize',return_value=scene), \
+                 patch('screenshot_control.read_visible',return_value=(['#222222','#333333'],[])), \
+                 patch('screenshot_live.read_timer',return_value=120),patch('screenshot_control.read_timer',return_value=120), \
+                 patch('screenshot_control.u.GetAsyncKeyState',return_value=0), \
+                 patch('screenshot_live._collect',return_value=None),patch('screenshot_live._search'), \
+                 patch.object(Controller,'restore') as restore:
+                result=run_screenshot_search(owner,rules,game_factory=Game)
+            self.assertEqual(captures,[]);self.assertEqual(restore.call_count,1)
+            self.assertEqual(result['actual_colors'],['#222222','#333333'])
+            self.assertTrue(result['verified']);self.assertTrue(result['measurement_retained'])
+            self.assertEqual(result['stop_diagnostic']['source'],'overlay_stop_button')
+
     def processing_error_case(self,*,cancel=False,partial_input=False,fallback_stop=False,failure_kind=None):
         from screenshot_live import run_screenshot_search
         from screenshot_control import Controller
