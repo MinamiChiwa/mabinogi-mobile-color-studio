@@ -1,16 +1,17 @@
 {
-  "version": "0.4.8",
-  "tag": "v0.4.8",
+  "version": "0.4.9",
+  "tag": "v0.4.9",
   "channel": "stable",
-  "release_sequence": 9,
+  "release_sequence": 10,
   "key_id": "colorstudio-production-2026-10",
-  "previous_version": "0.4.7",
-  "full_package": "ColorStudio-v0.4.8-Windows-x64.zip",
-  "offline_package": "UPDATE-ONLY-ColorStudio-0.4.8-win-x64.zip",
-  "delta_package": "UPDATE-ONLY-ColorStudio-from-0.4.7-to-0.4.8-win-x64.zip",
+  "previous_version": "0.4.8",
+  "full_package": "ColorStudio-v0.4.9-Windows-x64.zip",
+  "offline_package": "UPDATE-ONLY-ColorStudio-0.4.9-win-x64.zip",
+  "delta_package": "UPDATE-ONLY-ColorStudio-from-0.4.8-to-0.4.9-win-x64.zip",
   "additional_delta_packages": [
-    "UPDATE-ONLY-ColorStudio-from-0.4.6-to-0.4.8-win-x64.zip",
-    "UPDATE-ONLY-ColorStudio-from-0.4.5-to-0.4.8-win-x64.zip",
-    "UPDATE-ONLY-ColorStudio-from-0.4.4-to-0.4.8-win-x64.zip"
+    "UPDATE-ONLY-ColorStudio-from-0.4.7-to-0.4.9-win-x64.zip",
+    "UPDATE-ONLY-ColorStudio-from-0.4.6-to-0.4.9-win-x64.zip",
+    "UPDATE-ONLY-ColorStudio-from-0.4.5-to-0.4.9-win-x64.zip",
+    "UPDATE-ONLY-ColorStudio-from-0.4.4-to-0.4.9-win-x64.zip"
   ]
 }

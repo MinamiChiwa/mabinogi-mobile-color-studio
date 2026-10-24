@@ -6,10 +6,10 @@
 
 | 用途 | ファイル | 使い方 |
 |---|---|---|
-| 初回インストール・手動更新 | `ColorStudio-v0.4.8-Windows-x64.zip` | すべて展開して実行 |
-| 完全オフライン更新 | `UPDATE-ONLY-ColorStudio-0.4.8-win-x64.zip` | インストール済みのツールから読み込む |
-| 公式 0.4.7 からの更新 | `UPDATE-ONLY-ColorStudio-from-0.4.7-to-0.4.8-win-x64.zip` | ファイルが一致する公式 0.4.7 のみ |
-| 公式 0.4.4 からの更新 | `UPDATE-ONLY-ColorStudio-from-0.4.4-to-0.4.8-win-x64.zip` | ファイルが一致する公式 0.4.4 の最終修正版のみ |
+| 初回インストール・手動更新 | `ColorStudio-v0.4.9-Windows-x64.zip` | すべて展開して実行 |
+| 完全オフライン更新 | `UPDATE-ONLY-ColorStudio-0.4.9-win-x64.zip` | インストール済みのツールから読み込む |
+| 公式 0.4.7 からの更新 | `UPDATE-ONLY-ColorStudio-from-0.4.7-to-0.4.9-win-x64.zip` | ファイルが一致する公式 0.4.7 のみ |
+| 公式 0.4.4 からの更新 | `UPDATE-ONLY-ColorStudio-from-0.4.4-to-0.4.9-win-x64.zip` | ファイルが一致する公式 0.4.4 の最終修正版のみ |
 
 **UPDATE-ONLY は初回インストール用ではなく、展開して直接実行することもできません。** 差分パッケージが合わない場合は完全オフライン更新を使ってください。リリースページの `blob-` ファイルを個別にダウンロードする必要はありません。
 
@@ -46,4 +46,4 @@ GitHub に接続できない場合は、別のパソコンで完全オフライ�
 
 失敗後は現在のバージョンと更新記録を確認してください。問い合わせはログを添えて [GitHub Issues](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/issues) へ。
 
-[使い方に戻る](../README.ja.md) · [0.4.8 の変更内容](release-notes-0.4.8.md)
+[使い方に戻る](../README.ja.md) · [0.4.9 の変更内容](release-notes-0.4.9.md)
