@@ -6,10 +6,10 @@
 
 | 用途 | 文件 | 操作 |
 |---|---|---|
-| 首次安装或手动升级 | `ColorStudio-v0.4.8-Windows-x64.zip` | 完整解压后运行 |
-| 完整离线更新 | `UPDATE-ONLY-ColorStudio-0.4.8-win-x64.zip` | 在已安装工具内导入 |
-| 从官方 0.4.7 更新 | `UPDATE-ONLY-ColorStudio-from-0.4.7-to-0.4.8-win-x64.zip` | 仅用于文件匹配的官方 0.4.7 |
-| 从官方 0.4.4 更新 | `UPDATE-ONLY-ColorStudio-from-0.4.4-to-0.4.8-win-x64.zip` | 仅用于文件匹配的官方最终修订版 0.4.4 |
+| 首次安装或手动升级 | `ColorStudio-v0.4.9-Windows-x64.zip` | 完整解压后运行 |
+| 完整离线更新 | `UPDATE-ONLY-ColorStudio-0.4.9-win-x64.zip` | 在已安装工具内导入 |
+| 从官方 0.4.7 更新 | `UPDATE-ONLY-ColorStudio-from-0.4.7-to-0.4.9-win-x64.zip` | 仅用于文件匹配的官方 0.4.7 |
+| 从官方 0.4.4 更新 | `UPDATE-ONLY-ColorStudio-from-0.4.4-to-0.4.9-win-x64.zip` | 仅用于文件匹配的官方最终修订版 0.4.4 |
 
 **UPDATE-ONLY 不能用于首次安装，也不能直接解压运行。** 小差异包不适用时，使用完整离线更新包。无需手动下载发布页的 `blob-` 文件。
 
@@ -46,4 +46,4 @@
 
 安装失败时先查看当前版本和更新记录；需要协助可在 [GitHub Issues](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/issues) 附日志。
 
-[返回使用说明](../README.md) · [0.4.8 更新内容](release-notes-0.4.8.md)
+[返回使用说明](../README.md) · [0.4.9 更新内容](release-notes-0.4.9.md)

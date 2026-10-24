@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import sys
 
-APP_VERSION = '0.4.8'
+APP_VERSION = '0.4.9'
 POLICY_REVISION = 'native-screenshot-hue-recovery-v5'
 
 

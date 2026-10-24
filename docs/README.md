@@ -3,7 +3,7 @@
 ## 使用工具
 
 - 使用说明：[简体中文](../README.md) · [繁體中文](../README.zh-TW.md) · [English](../README.en.md) · [日本語](../README.ja.md) · [한국어](../README.ko.md)
-- [自动更新](automatic-updates.md) · [服务器选择](server-adaptation/server-selection.md) · [0.4.8 更新内容](release-notes-0.4.8.md)
+- [自动更新](automatic-updates.md) · [服务器选择](server-adaptation/server-selection.md) · [0.4.9 更新内容](release-notes-0.4.9.md)
 
 ## 开发维护
 
