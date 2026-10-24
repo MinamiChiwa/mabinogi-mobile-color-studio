@@ -3,9 +3,46 @@ import importlib.util
 import io
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 
 class RegressionEntryTests(unittest.TestCase):
+    def test_smoke_imports_only_its_modules(self):
+        m = self.module()
+        with patch.object(m.unittest.TestLoader, 'loadTestsFromName', return_value=unittest.TestSuite()) as load:
+            m.discover_tests('smoke')
+        self.assertEqual({call.args[0] for call in load.call_args_list}, m.SMOKE_MODULES)
+
+    def test_focused_selection_rejects_unknown_module_and_keeps_requested_case(self):
+        m = self.module()
+        with self.assertRaisesRegex(ValueError, 'Unknown test module'):
+            m.discover_tests(names=['test_typo'])
+        name = 'test_run_tests.RegressionEntryTests.test_duplicate_names_are_run_once'
+        cases = m.discover_tests(names=[name, name])
+        self.assertEqual([case.id() for case in cases], [name])
+        overlapping = m.discover_tests(names=['test_run_tests', name])
+        self.assertEqual(sum(case.id() == name for case in overlapping), 1)
+
+    def test_failed_import_cannot_be_filtered_into_a_successful_profile(self):
+        m = self.module()
+        failed = unittest.TestLoader().loadTestsFromName('test_module_does_not_exist')
+        selected, _ = m.select_tests(list(m.flatten(failed)), 'smoke')
+        self.assertEqual(len(selected), 1)
+
+    def test_explicit_pytest_paths_are_not_silently_filtered(self):
+        from types import SimpleNamespace
+        path = Path(__file__).resolve().parents[1] / 'conftest.py'
+        spec = importlib.util.spec_from_file_location('pytest_selection_contract', path)
+        plugin = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(plugin)
+        item = object()
+        items = [item]
+        config = SimpleNamespace(option=SimpleNamespace(file_or_dir=['tests/studio/test_new.py']),
+                                 getoption=lambda name: None)
+        plugin.pytest_collection_modifyitems(config, items)
+        self.assertEqual(items, [item])
+        self.assertEqual(config._colorstudio_selection['profile'], 'focused')
+
     def test_release_verdict_requires_evidence_even_when_unittest_succeeds(self):
         m = self.module()
         for skipped, expected in (

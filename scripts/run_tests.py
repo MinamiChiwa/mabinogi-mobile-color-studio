@@ -12,7 +12,10 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 STUDIO = ROOT / 'work' / 'studio'
-PROFILES = ('quick', 'release', 'research', 'full')
+TESTS = ROOT / 'tests' / 'studio'
+PROFILES = ('smoke', 'quick', 'release', 'research', 'full')
+SMOKE_MODULES = frozenset(('test_core', 'test_run_stop', 'test_profile_store',
+                           'test_region_priority', 'test_display_geometry', 'test_run_tests'))
 
 # Stable current contracts: settings/UI, native IO, DPI geometry and safe return.
 QUICK_MODULES = frozenset('''
@@ -72,7 +75,8 @@ test_app_shutdown
 EXTRA_CURRENT_MODULES = frozenset(('test_profile_store', 'test_profile_ui',
                                    'test_color_matching',
                                    'test_region_priority', 'test_priority_search_paths',
-                                   'test_native_frame_budget_recovery'))
+                                   'test_native_frame_budget_recovery',
+                                   'test_screenshot_stop_results', 'test_native_discovery_shape'))
 
 # These are retained, runnable historical/search-matrix suites. They are not
 # deleted or disabled in unittest discovery; quick intentionally does not repeat
@@ -215,14 +219,28 @@ def flatten(suite):
             yield test
 
 
-def discover_tests():
-    for path in (ROOT, STUDIO, ROOT / 'scripts'):
+def discover_tests(profile='full', names=None):
+    """Import only requested modules; release/research/full explicitly discover all."""
+    for path in (ROOT, STUDIO, TESTS, ROOT / 'scripts'):
         if str(path) not in sys.path:
             sys.path.insert(0, str(path))
     loader = unittest.TestLoader()
-    suites = [loader.discover(str(STUDIO), pattern='test_*.py')]
-    suites.append(loader.loadTestsFromName('test_run_tests'))
-    return list(flatten(unittest.TestSuite(suites)))
+    if names:
+        available = {p.stem for folder in (TESTS, ROOT / 'scripts')
+                     for p in folder.glob('test_*.py')}
+        for name in names:
+            if name.split('.')[0] not in available:
+                raise ValueError('Unknown test module: ' + name)
+        suites = [loader.loadTestsFromName(name) for name in dict.fromkeys(names)]
+    elif profile in ('smoke', 'quick'):
+        modules = (SMOKE_MODULES if profile == 'smoke' else
+                   QUICK_MODULES | EXTRA_CURRENT_MODULES |
+                   {name.split('.')[0] for name in QUICK_TEST_IDS})
+        suites = [loader.loadTestsFromName(name) for name in sorted(modules)]
+    else:
+        suites = [loader.discover(str(TESTS), pattern='test_*.py'),
+                  loader.loadTestsFromName('test_run_tests')]
+    return list({test.id(): test for test in flatten(unittest.TestSuite(suites))}.values())
 
 
 def select_tests(tests, profile, *, no_desktop=False):
@@ -249,7 +267,9 @@ def select_tests(tests, profile, *, no_desktop=False):
         desktop = name.startswith(DESKTOP_TEST_PREFIXES)
         quick = ((current or name in quick_ids) and name not in quick_excluded
                  and (not desktop or name in QUICK_DESKTOP_TEST_IDS))
-        include = (profile == 'full' or (profile == 'quick' and quick)
+        include = (isinstance(test, unittest.loader._FailedTest)
+                   or (profile == 'smoke' and module in SMOKE_MODULES and not desktop)
+                   or profile == 'full' or (profile == 'quick' and quick)
                    or (profile == 'release' and (quick or name in release_ids or desktop))
                    or (profile == 'research' and not quick and not desktop))
         if not include:
@@ -345,26 +365,43 @@ def release_evidence_complete(profile, no_desktop, success, skips):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--suite', choices=PROFILES, default='quick')
+    parser.add_argument('--suite', choices=PROFILES, default='smoke')
+    parser.add_argument('--modules', nargs='+', help='Run only named modules or dotted test IDs; bypass profile filtering')
     parser.add_argument('--list', action='store_true', help='List selected test IDs without running them')
     parser.add_argument('--json', type=Path, help='Write a complete selection/result/duration report')
     parser.add_argument('--no-desktop', action='store_true', help='Omit actual Tk/foreground/capture checks; not a release verdict')
     parser.add_argument('--verbose', action='store_true')
     args = parser.parse_args(argv)
     began = time.perf_counter()
-    tests = discover_tests()
-    known_ids = {test.id() for test in tests}
-    missing = (set(QUICK_TEST_IDS) | set(RELEASE_TEST_IDS) | set(QUICK_DESKTOP_TEST_IDS)) - known_ids
-    if missing:
-        parser.error('Required profile contracts are missing: ' + ', '.join(sorted(missing)))
-    selected, selection = select_tests(tests, args.suite, no_desktop=args.no_desktop)
+    try:
+        tests = discover_tests(args.suite, args.modules)
+    except ValueError as error:
+        parser.error(str(error))
+    if args.modules:
+        selected = tests
+        omitted = [test for test in selected if args.no_desktop and test.id().startswith(DESKTOP_TEST_PREFIXES)]
+        selected = [test for test in selected if test not in omitted]
+        selection = dict(profile='focused', selected_count=len(selected), discovered_count=len(tests),
+                         desktop_omitted_count=len(omitted), modules=sorted({t.id().split('.')[0] for t in selected}))
+    else:
+        if args.suite in ('quick', 'release', 'full'):
+            required = set(QUICK_TEST_IDS)
+            if args.suite != 'quick':
+                required |= set(RELEASE_TEST_IDS) | set(QUICK_DESKTOP_TEST_IDS)
+            missing = required - {test.id() for test in tests}
+            if missing:
+                parser.error('Required profile contracts are missing: ' + ', '.join(sorted(missing)))
+        selected, selection = select_tests(tests, args.suite, no_desktop=args.no_desktop)
+    if not selected:
+        parser.error('No tests selected; check module names or desktop filtering')
+    effective_profile = 'focused' if args.modules else args.suite
     report = {
         'generated_utc': datetime.now(timezone.utc).isoformat(),
         'scope': 'offline regression; no game input or consumable item',
         'selection': selection, 'list_only': args.list,
         'release_complete': False,
     }
-    print(f"Suite {args.suite}: {len(selected)} selected / {selection['discovered_count']} discovered"
+    print(f"Suite {effective_profile}: {len(selected)} selected / {selection['discovered_count']} discovered"
           + (f"; {selection['desktop_omitted_count']} desktop checks omitted" if args.no_desktop else ''))
     if args.list:
         for test in selected:
@@ -377,7 +414,7 @@ def main(argv=None):
         ).run(unittest.TestSuite(selected))
         report.update(result_summary(result))
         report['release_complete'] = release_evidence_complete(
-            args.suite, args.no_desktop, result.wasSuccessful(), report['skips'])
+            effective_profile, args.no_desktop, result.wasSuccessful(), report['skips'])
         counts = report['counts']
         print(f"Passed {counts['passed']}; skipped {counts['skipped']}; failed {counts['failed']}; "
               f"errors {counts['errors']}; expected failures {counts['expected_failures']}; "
@@ -388,7 +425,7 @@ def main(argv=None):
         for row in report['slowest']:
             print(f"  {row['seconds']:7.3f}s  {row['id']}")
         status = 0 if result.wasSuccessful() else 1
-        if args.suite == 'release' and not args.no_desktop and not report['release_complete']:
+        if effective_profile == 'release' and not args.no_desktop and not report['release_complete']:
             print('Release verification incomplete: failures or required evidence skipped.')
             status = 1
     report['elapsed_seconds'] = round(time.perf_counter() - began, 6)

@@ -65,6 +65,9 @@ captures/
 debug-screenshots/
 /data/
 .cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 *.log
 
 # Signing secrets remain outside the repository; public trust JSON is tracked.
