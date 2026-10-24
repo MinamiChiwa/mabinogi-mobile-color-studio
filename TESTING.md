@@ -1,48 +1,50 @@
-# 回归测试
+# 测试：只检查本次改动
 
-日常使用 quick，打包使用 release。精简测试不改变实际搜索范围、时间预算或游戏色码验收。
+推荐入口是 `python run_tests.py`。先安装根目录 `requirements.txt`；在已激活的虚拟环境中运行。
 
-```powershell
-.\.venv\Scripts\python.exe scripts/run_tests.py --json outputs/test-quick.json
-.\.venv\Scripts\python.exe scripts/run_tests.py --suite release --json outputs/test-release.json
-.\.venv\Scripts\python.exe scripts/run_tests.py --suite research --json outputs/test-research.json
-.\.venv\Scripts\python.exe scripts/run_tests.py --suite full --json outputs/test-full.json
-```
-
-根目录 `run_tests.py`、`run_tests.ps1 -Suite quick` 与 `pytest --test-profile=quick` 共用同一选择器。旧分组入口已移除；完整发布判定使用上面的标准入口和 JSON 报告。
-
-## 当前分层
-
-| 集合 | 范围 |
-| --- | --- |
-| quick | 设置、方案、区域优先级、多语言、DPI 与坐标、输入和会话保护、计时与重试、关键路线契约；4 个真实桌面代表检查。 |
-| release | quick 加完整桌面矩阵、记录色板的双黑／三黑／相似路线、保护恢复、实测结果保存和备用图像策略集成。 |
-| research | 历史搜索矩阵、更多色板与扰动、研究工具及历史 rc10 完整路线。 |
-| full | 全部发现的测试；release 与 research 的并集覆盖全部测试。 |
-
-当前名单在 `scripts/run_tests.py`。新增模块不会自动进入 quick：未分类模块列入报告并在 research/full 执行；审核后加入模块或用例白名单。单模块内昂贵的会话回放可明确留到 release。
+## 日常操作
 
 ```powershell
-# 只列出测试，不执行
-.\.venv\Scripts\python.exe scripts/run_tests.py --suite release --list --json outputs/test-selection.json
-# 不创建真实测试窗口；不能作为发布验收
-.\.venv\Scripts\python.exe scripts/run_tests.py --no-desktop --json outputs/test-unit.json
+# 基础冒烟：颜色规则、停止状态、配置、优先级、窗口坐标和测试入口
+python run_tests.py
+
+# 改了停止处理，就只运行对应模块；支持多个名称
+python run_tests.py --modules test_run_stop test_hotkeys
+
+# 也可以只运行一个用例
+python run_tests.py --modules test_run_tests.RegressionEntryTests.test_duplicate_names_are_run_once
+
+# 查看选择，不执行；记录放在被忽略的 outputs 目录
+python run_tests.py --list
+python run_tests.py --modules test_run_stop --json outputs/stop-tests.json
 ```
 
-真实桌面检查会创建和关闭工具测试窗口，必须顺序执行。所有集合使用离线模型、记录样本或测试窗口，不操作游戏、不消耗道具。离线结果不代表实机精准命中。
+`--modules` 不会再套用默认筛选，拼错名称或导入失败会报错。`run_tests.ps1 -Modules test_run_stop,test_hotkeys` 是同一入口的 Windows 包装。
 
-## 证据与发布要求
+## 什么时候扩大范围
 
-JSON 报告包含选择清单、通过／跳过／失败／错误数、逐项耗时、最慢用例及未分类模块。必要用例被改名或丢失会失败退出。
+| 范围 | 命令 | 用途 |
+| --- | --- | --- |
+| 基础冒烟 | `python run_tests.py` | 环境与核心规则快速检查；不含真实桌面操作 |
+| 指定模块 | `python run_tests.py --modules test_screenshot_live` | 日常修复首选；只导入指定模块及其依赖 |
+| 常用集成 | `python run_tests.py --suite quick` | 兼容旧入口，覆盖面较大，不是日常默认 |
+| 发布检查 | `python run_tests.py --suite release --json outputs/release-tests.json` | 打包前检查；包含真实 Tk/桌面检查，需要可用桌面 |
+| 历史回放 | `python run_tests.py --suite research` | 排查对应历史问题时才使用，部分依赖本地样本 |
+| 全部 | `python run_tests.py --suite full` | 大范围迁移才使用，禁止每次修改都运行 |
 
-部分样本属于本机私有验证资料，不进入 Git 或便携包。缺失时测试明确跳过；quick 的成功不表示这些项目已执行。完整 release 缺少任何必要样本或桌面验证时，`release_complete` 为 false，命令返回非零。唯一允许的补充样本跳过是历史私有 OCR 档案 `test_archived_heldout_hex_including_four_previous_misses`（原因必须为 `Local capture archive unavailable`）。不要为获得绿色结果扩大例外名单。
+`--no-desktop` 可以排除真实桌面检查，但不能据此宣称发布验收完成。日志中的通过、跳过、失败分别统计；缺失的历史样本不算通过。离线测试不能证明实机颜色效果或 4K 性能。
 
-开发环境的 `work/studio/fixtures` 和当前发布依赖的少量记录样本必须保留；清理临时输出前先核对测试引用。没有完整私有样本的干净 Git 副本可做源码检查，不能独立签发完整发布结论。可复用的脱敏固定样本仍是后续测试可移植性的改进方向。
+## 文件在哪里
 
-## 最新结果
+- `tests/studio/`：应用行为测试和共享模拟器，已与生产源码分开。
+- `scripts/test_run_tests.py`：测试入口自身的检查。
+- 根目录 `fixtures/`：随仓库提供的小型样本。
+- `work/studio/fixtures/`、`work/studio/data/`：可选本地历史记录，不提交。
 
-当前 rc5 结果及时间见 [维护记录](docs/maintenance-2026-10-11.md)；机器负载影响时长，以 JSON 为准。旧版本逐次测试计数可从 Git 历史查阅，不在本文件重复追加。
+测试文件名保留原名，方便从旧报告找到对应用例。`test_paths.py` 统一生产源码位置，移动测试不会改变本地样本的读取位置。
 
-## 更新专项
+如使用 pytest，显式文件或用例会直接执行，不再被隐藏的默认分组筛掉；不带路径时默认只选基础冒烟。日常优先使用上述入口，避免 pytest 为筛选而先收集全库。
 
-日常 quick 增加清单、路径、版本、差异、网络状态和用户控制契约；文件事务、独立锁、离线资产与实际 Tk 对话框在 release。单独运行：`python -m unittest discover -s work/studio -p "test_updater*.py"`；发布资产另运行 `test_update_assets`。所有测试使用临时/隔离目录，不操作游戏，不消耗道具。冻包演练脚本 `scripts/smoke_frozen_update.py` 只接受新建隔离目录和测试签名包，不能指向桌面工具。正式签名和实际发布另行验收。
+## 添加或删除测试
+
+先复用现有模拟器和用例。新增测试应能解释“玩家遇到什么问题，错误行为是什么”。同一行为的重复检查应合并；仅检查源码字符串的旧检查应在有行为覆盖后删除。保留仍在使用的历史策略测试，按需执行，不用测试总数衡量质量。

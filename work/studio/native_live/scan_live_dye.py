@@ -83,6 +83,7 @@ class IncrementalDyeScan:
   self.validation_addresses=None;self.validation_index=0;self.validated={}
   self.phase='scanning';self.bytes_scanned=0;self.chunks_scanned=0;self.regions_visited=0
   self.read_failures=0;self.last_read_error=None;self.candidate_read_errors={};self.rejected_candidates={}
+  self.inactive_read_failures={};self.candidate_retries={}
   self.read_seconds=0.;self.search_seconds=0.;self.inspection_seconds=0.
   self.exact_search_blocks=0
   self.aligned_search_blocks=0;self.aligned_matches=None;self.aligned_window_end=0
@@ -93,7 +94,18 @@ class IncrementalDyeScan:
   except (InterruptedError,TimeoutError):raise
   except OSError as exc:
    check();hit=None;unreadable=True
-   self.candidate_read_errors[address]=type(exc).__name__+': '+str(exc)
+   error=type(exc).__name__+': '+str(exc)
+   self.candidate_read_errors[address]=error
+   # A dead UI instance may retain its class header after its data is freed.
+   # Exclude it only with two readable, matching lifecycle witnesses. Unknown
+   # or active objects remain blocking, including failures in this witness.
+   try:
+    inactive=_inactive_witness(self.reader,address,self.cls)
+    check()
+    if inactive and inactive==_inactive_witness(self.reader,address,self.cls):
+     self.inactive_read_failures[address]=error;unreadable=False
+   except (InterruptedError,TimeoutError):raise
+   except (OSError,ValueError,struct.error):pass
   except InvalidDyeCandidate as exc:
    check();hit=None;self.rejected_candidates[address]=str(exc)
   except (ValueError,struct.error):
@@ -101,6 +113,7 @@ class IncrementalDyeScan:
   finally:self.inspection_seconds+=max(0.,self.clock()-began)
   check()
   if hit:
+   self.inactive_read_failures.pop(address,None)
    self.rejected_candidates.pop(address,None)
    self.hits[address]=hit
    if hit['capture_eligible']:self.first_eligible_seen.setdefault(address,began)
@@ -126,6 +139,10 @@ class IncrementalDyeScan:
      self.phase='complete';continue
     address=self.validation_addresses[self.validation_index]
     self._inspect(address,check,validating=True)
+    # Retry only the unresolved candidate, never rescan gigabytes of heap.
+    retries=self.candidate_retries.get(address,0)
+    if address in self.candidate_read_errors and retries<2:
+     self.candidate_retries[address]=retries+1;inspected+=1;continue
     self.validation_index+=1;inspected+=1;continue
    if self.buffer is not None:
     search_began=self.clock()
@@ -228,6 +245,8 @@ class IncrementalDyeScan:
    first_eligible_seen_monotonic=min((self.first_eligible_seen[address] for address in eligible),default=None),
    read_failures=self.read_failures,last_read_error=self.last_read_error,
    candidate_read_failures=len(self.candidate_read_errors),
+   inactive_read_failures={hex(a):e for a,e in self.inactive_read_failures.items()},
+   candidate_retries={hex(a):n for a,n in self.candidate_retries.items()},
    unreadable_candidate_addresses=[hex(address) for address in sorted(self.candidate_read_errors)],
    candidate_read_errors={hex(address):error for address,error in sorted(self.candidate_read_errors.items())},
    rejected_candidate_count=len(self.rejected_candidates),
@@ -241,6 +260,19 @@ class IncrementalDyeScan:
    search_seconds=self.search_seconds,inspection_seconds=self.inspection_seconds,
    throughput_mib_per_second=self.bytes_scanned/(1024*1024*elapsed) if elapsed>0 else 0.,
    inputs_sent=0,ready_for_input=False)
+
+def _inactive_witness(reader,address,cls):
+ r=CandidateReadView(reader)
+ if r.u64(address)!=cls or r.u64(address+8)!=0:return None
+ fields=_typed_object(r,address,'MM.Client.Presentation.UI.Instances.StageScene.Dyeing.DyeingPaletteInstanceImpl',
+  ('<TransitionController>k__BackingField','<Result>k__BackingField'))
+ controller=_pointer(r.u64(address+fields['<TransitionController>k__BackingField']),'transition controller')
+ state=struct.unpack('<i',r.read(controller+20,4))[0]
+ result=r.u64(address+fields['<Result>k__BackingField'])
+ # State 2 is the only verified active state. An absent result alone is not
+ # enough: the object may be activating while its data is being constructed.
+ return (controller,state,result) if state==0 and result==0 else None
+
 
 def inspect(r,a,cls):
  r=CandidateReadView(r)

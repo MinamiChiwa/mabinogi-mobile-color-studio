@@ -1,5 +1,12 @@
 """Actual screenshot results and their explicit historical/current distinction."""
 def result_text(data):
+    if data.get('stop_reason')=='interrupted':
+        from native_status import result_text as native_result_text
+        cause=data.get('interruption_reason')
+        if cause in ('focus_lost','window_changed','activation_failed'):
+            return native_result_text(data)
+        if data.get('verified'):
+            return '截图寻色已停止','游戏实际色码已复核，请在游戏内手动确认是否套用。'
     if data.get('stop_reason') in ('palette_ended','interrupted'):
         return '截图寻色已停止','自动操作已停止；请以游戏当前颜色为准。'
     if data.get('stop_reason')=='processing_error':

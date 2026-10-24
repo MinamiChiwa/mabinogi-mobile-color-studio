@@ -456,10 +456,14 @@ class SearchOverlay(ct.CTkToplevel):
             title,body=result_text(data)
         else:title,body=single_result_presentation(data)
         self.render(title,body)
-        for i,(color,delta) in enumerate(zip(data.get('actual_colors') or [None]*3,
-                                           data.get('actual_deltas') or [None]*3)):
+        from native_status import last_verified_display
+        historical=last_verified_display(data)
+        colors=historical['colors'] if historical else data.get('actual_colors') or [None]*3
+        deltas=historical['deltas'] if historical else data.get('actual_deltas') or [None]*3
+        for i,(color,delta) in enumerate(zip(colors,deltas)):
             if not self.rules[i]['enabled']:continue
-            text=f"区域 {i+1}\n"+tr('当前颜色  ')+(color or tr('读取失败'))
+            label=tr(historical['label'])+'  ' if historical else tr('当前颜色  ')
+            text=f"区域 {i+1}\n"+label+(color or tr('读取失败'))
             if delta is not None:text+=f" · ΔE {delta:.2f}"
             ct.CTkLabel(self.results,text=tr(text),justify='left',anchor='w').pack(fill='x',padx=8,pady=8)
     def handle(self,kind,data):

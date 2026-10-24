@@ -30,7 +30,13 @@ def run_hotkeys(user,ctypes,types,stop,emit,keys):
         while not stop.is_set():
             while user.PeekMessageW(ctypes.byref(msg),None,0x312,0x312,1):
                 key=int(msg.wParam)
-                if key in registered and edges.accept(key,time.monotonic()):emit('hotkey',{'id':key,'source':'message'})
+                payload=int(msg.lParam);vk=(payload>>16)&0xffff;modifiers=payload&0xffff
+                # An ID alone is not proof of this registration's key. Ignore
+                # foreign/malformed messages, but don't require the key to
+                # remain down: a legitimate quick F9 tap must still stop.
+                if (key in registered and vk==registered[key] and not modifiers&~0x4000
+                        and edges.accept(key,time.monotonic())):
+                    emit('hotkey',{'id':key,'source':'message'})
             # Keep an emergency stop even if another utility owns F9.
             for key,vk in keys:
                 if key not in registered and vk != 0x78:continue

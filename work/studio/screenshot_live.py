@@ -310,8 +310,8 @@ def _search(c,samples):
         if c.budget.remaining()<c.return_cost()+7:break
     return samples
 
-def _publish(c,reason=None):
-    if c.current and c.current.get('accepted') and not c.current.get('confirmed'):
+def _publish(c,reason=None,*,emit=True):
+    if reason not in ('interrupted','palette_ended') and c.current and c.current.get('accepted') and not c.current.get('confirmed'):
         try:
             c.observe('final-match-confirmation')
             if (getattr(c,'refinement_anchor',None) is not None and c.best and
@@ -319,7 +319,9 @@ def _publish(c,reason=None):
                 settled=_settle_refinement(c,c.current,c.best)
                 if settled and c.current and c.current.get('accepted') and not c.current.get('confirmed'):
                     c.observe('returned-match-confirmation')
-        except (PaletteEnded,Interrupted) as exc:
+        except Interrupted as exc:
+            return _finish_interruption(c,exc)
+        except PaletteEnded as exc:
             c.current=None
             reason=reason or ('palette_ended' if isinstance(exc,PaletteEnded) else 'stopped')
             recovery=c.safe_restore(reason,interruption=exc)
@@ -341,8 +343,42 @@ def _publish(c,reason=None):
         no_apply=True,no_game_memory=True,remaining_seconds=c.budget.remaining())
     result['outcome']='matched' if result['accepted'] else 'compromise' if result['verified'] else 'unverified'
     result.pop('matrix',None);result.pop('frame',None)
-    c.write('result.json',result);c.owner.event('screenshot_result',**result)
+    c.write('result.json',result)
+    if emit:c.owner.event('screenshot_result',**result)
     return result
+
+def _finish_interruption(c,exc):
+    from run_stop import stop_diagnostic,interruption_reason
+    diagnostic=stop_diagnostic(c.owner.stop)
+    reason=getattr(exc,'reason',None)
+    # Typed causes take precedence over ambiguous localized exception text.
+    cause=({'binding_changed':'window_changed'}.get(reason,reason) if reason and reason!='user_stop'
+        else interruption_reason(str(exc),diagnostic))
+    if reason=='user_stop' and diagnostic is None:cause='stop_signal_unknown'
+    measured=c.current
+    # act() invalidates current BEFORE sending any input. A stop in the idle
+    # result phase must not erase that still-valid measurement or re-confirm
+    # it by sending/capturing after an emergency stop.
+    keep=(reason=='user_stop' and measured and measured.get('verified')
+        and not c.input_in_progress and not c.input_uncertain)
+    recovery=None
+    if not keep:
+        c.current=None
+        recovery=c.safe_restore('interrupted',interruption=exc)
+    result=_publish(c,'interrupted',emit=False)
+    result.update(interruption_reason=cause,stop_diagnostic=diagnostic,
+        interruption_error=str(exc),measurement_retained=bool(keep))
+    if recovery is not None:result['failure_recovery']=recovery
+    if not result['verified']:
+        history=(measured if measured and measured.get('verified') else
+            next((row for row in reversed(c.observations) if row.get('verified')),None))
+        if history and history.get('verified'):
+            result.update(last_verified_colors=history.get('actual_colors'),
+                last_verified_deltas=history.get('actual_deltas'),last_verified_screenshot=True)
+    c.write('result.json',result)
+    c.owner.event('screenshot_result',**result)
+    return result
+
 
 def run_screenshot_search(owner,rules,mode='search',auto=False,activate=False,target=None,
     game_factory=Game,wait_for_retry=True,server=None,**context):
@@ -390,6 +426,7 @@ def run_screenshot_search(owner,rules,mode='search',auto=False,activate=False,ta
                     try:c.restore()
                     except TimeEnded:pass
             result=_publish(c,reason)
+            if result.get('stop_reason')=='interrupted':return result
             if not wait_for_retry:return result
             owner.event('native_retry_available',enabled=c.budget.can_input(5),waiting_for_retry=True,
                 verified=result['verified'],screenshot_verified=result['verified'],
@@ -414,11 +451,7 @@ def run_screenshot_search(owner,rules,mode='search',auto=False,activate=False,ta
             return _publish(c,'palette_ended')
         raise
     except Interrupted as exc:
-        if c:
-            c.current=None
-            recovery=c.safe_restore('interrupted',interruption=exc)
-            result=_publish(c,'interrupted')
-            if recovery['verified']:return result
+        if c:return _finish_interruption(c,exc)
         raise
     except Exception as exc:
         if c:
@@ -432,13 +465,17 @@ def run_screenshot_search(owner,rules,mode='search',auto=False,activate=False,ta
                 if not c.input_in_progress and c.best:
                     recovery['attempted']=True;c.restore()
                 if c.current is None:c.observe('error-current-actual')
-            except (Interrupted,PaletteEnded) as stopped:
-                c.current=None;reason='interrupted' if isinstance(stopped,Interrupted) else 'palette_ended'
+            except Interrupted as stopped:
+                return _finish_interruption(c,stopped)
+            except PaletteEnded:
+                c.current=None;reason='palette_ended'
             except Exception as restore_error:
                 recovery['error']=type(restore_error).__name__+': '+str(restore_error)
                 try:c.observe('error-current-actual')
-                except (Interrupted,PaletteEnded) as stopped:
-                    c.current=None;reason='interrupted' if isinstance(stopped,Interrupted) else 'palette_ended'
+                except Interrupted as stopped:
+                    return _finish_interruption(c,stopped)
+                except PaletteEnded:
+                    c.current=None;reason='palette_ended'
                 except Exception:c.current=None
             recovery['verified']=bool(c.current and c.current['verified'])
             c.write('error-recovery.json',recovery)

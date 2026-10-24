@@ -1,10 +1,17 @@
-"""Pytest uses the canonical offline selector; release verdicts use run_tests.py."""
+"""Default to smoke checks; explicit pytest paths run exactly what was requested."""
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+for folder in (ROOT / 'work/studio', ROOT / 'tests/studio', ROOT / 'scripts'):
+    sys.path.insert(0, str(folder))
+
 from scripts.run_tests import PROFILES, select_tests
 
 
 def pytest_addoption(parser):
-    parser.addoption('--test-profile', choices=PROFILES, default='quick',
-                     help='quick (default), release, research, or full')
+    parser.addoption('--test-profile', choices=PROFILES, default=None,
+                     help='Optional profile; without paths defaults to smoke')
 
 
 class _SelectorCase:
@@ -18,8 +25,12 @@ class _SelectorCase:
 
 
 def pytest_collection_modifyitems(config, items):
+    profile = config.getoption('--test-profile')
+    if profile is None and config.option.file_or_dir:
+        config._colorstudio_selection = dict(profile='focused', selected_count=len(items))
+        return
     cases = [_SelectorCase(item) for item in items]
-    selected, selection = select_tests(cases, config.getoption('--test-profile'))
+    selected, selection = select_tests(cases, profile or 'smoke')
     kept = {id(case.item) for case in selected}
     excluded = [item for item in items if id(item) not in kept]
     config._colorstudio_selection = selection
