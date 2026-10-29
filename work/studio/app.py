@@ -52,6 +52,8 @@ CARD_GAP=6
 BODY_SIDE_PADDING=12
 SCROLLBAR_WIDTH=17
 MIN_WINDOW_WIDTH=CARD_WIDTH+CARD_GAP*2+BODY_SIDE_PADDING*2+SCROLLBAR_WIDTH
+# V7 三列工作台的验收基准宽度（原 1120 不足以容纳三列 + 运行栏）
+WINDOW_DEFAULT_WIDTH=1280
 COMPACT_HEADER_EXTRA_HEIGHT=80
 # Show one complete card row and its note in the viewport. Keep this height
 # fixed during native window resizing; extra cards remain vertically scrollable.
@@ -154,8 +156,13 @@ def build_runner(emit,folder,strategy='screenshot',entry=None,entry_size=None):
     from screenshot_live import run_screenshot_search
     return Runner(emit,folder,screenshot_runner=run_screenshot_search)
 
-ct.set_appearance_mode('dark'); ct.set_default_color_theme('blue')
-BG='#10151F'; PANEL='#192230'; INK='#EDF3FA'; MUTED='#94A4B8'; ACCENT='#62D7BD'
+import theme as ui_theme
+import ui_kit
+
+# 视觉层：配色统一由 theme 提供（深/浅两套）；业务逻辑不依赖这里的取值。
+ct.set_appearance_mode(ui_theme.theme.appearance); ct.set_default_color_theme('blue')
+BG=ui_theme.color('bg'); PANEL=ui_theme.color('panel'); INK=ui_theme.color('text')
+MUTED=ui_theme.color('muted'); ACCENT=ui_theme.color('accent')
 FONT=FONT_FAMILY
 from update_bootstrap import active_data_directory,installation_root
 _update_data=active_data_directory(installation_root()) if getattr(sys,'frozen',False) else None
@@ -168,30 +175,34 @@ i18n.install_widgets(ct)
 
 class Card(ct.CTkFrame):
     def __init__(self,parent,index):
-        super().__init__(parent,width=CARD_WIDTH,height=CARD_HEIGHT,fg_color=PANEL,corner_radius=18,border_width=1,border_color='#2A3546')
+        super().__init__(parent,width=CARD_WIDTH,height=CARD_HEIGHT,**ui_kit.card(True,True))
         self.index=index;self.session_available=True; self.enabled=tk.BooleanVar(value=True); self.mode=tk.StringVar(value='精准 HEX'); self.tolerance=tk.DoubleVar(value=8)
         self.target=tk.StringVar(value='#202020'); self.alt=tk.StringVar(value='')
         self.grid_columnconfigure(0,weight=1)
         heading=ct.CTkFrame(self,fg_color='transparent')
         heading.grid(row=0,column=0,padx=16,pady=(7,3),sticky='ew')
-        ct.CTkLabel(heading,text=f'0{index+1}  /  颜色区域',font=SECTION_FONT,text_color=INK,height=22).pack(side='left')
-        self.enable_switch=ct.CTkSwitch(heading,text='已启用' if self.enabled.get() else '未启用',width=95,variable=self.enabled,progress_color=ACCENT,font=SMALL_FONT)
+        ct.CTkLabel(heading,text=f'0{index+1}  /  颜色区域',font=(FONT,15,'bold'),text_color=INK,height=22).pack(side='left')
+        self.enable_switch=ct.CTkSwitch(heading,text='已启用' if self.enabled.get() else '未启用',width=95,variable=self.enabled,font=SMALL_FONT,
+            progress_color=ui_theme.color('accent'),button_color=ui_theme.color('text'),
+            fg_color=ui_theme.color('field_line'),button_hover_color=ui_theme.color('accent_hover'))
         self.enable_switch.pack(side='right')
         self.priority=tk.IntVar(value=index+1)
         priority_bar=ct.CTkFrame(self,fg_color='transparent')
         priority_bar.grid(row=1,column=0,padx=16,pady=(0,2),sticky='ew')
         ct.CTkLabel(priority_bar,text='优先级',font=SMALL_FONT,text_color=MUTED,height=22).pack(side='left')
-        self.priority_menu=ct.CTkOptionMenu(priority_bar,values=['1','2','3'],width=66,height=24,font=SMALL_FONT,
+        self.priority_menu=ct.CTkOptionMenu(priority_bar,values=['1','2','3'],width=66,font=SMALL_FONT,**ui_kit.select(height=24),
             command=lambda value:self.winfo_toplevel().set_card_priority(self.index,int(value)))
         self.priority_menu.set(str(index+1));self.priority_menu.pack(side='right')
         self.preview_frame=ct.CTkFrame(self,fg_color='transparent')
         self.preview_frame.grid(row=2,column=0,padx=16,pady=(4,3),sticky='ew')
-        self.swatch=ct.CTkButton(self.preview_frame,text='点击选色',height=30,corner_radius=10,command=self.pick,font=BODY_FONT,fg_color='#202020',hover_color='#35445B')
+        self.swatch=ct.CTkButton(self.preview_frame,text='点击选色',font=BODY_FONT,corner_radius=10,
+            fg_color=ui_theme.color('placeholder'),hover_color=ui_theme.color('btn_hover'),
+            text_color=ui_theme.color('text'),border_width=0,command=self.pick)
         self.preview_frame.grid_columnconfigure(0,weight=1)
         self.preview_frame.grid_columnconfigure(1,weight=1)
         self.swatch.configure(width=110)
         self.swatch.grid(row=0,column=0,sticky='ew',padx=(0,4))
-        ct.CTkButton(self.preview_frame,text='⌖  屏幕吸管',width=110,height=30,fg_color='#28364A',hover_color='#364D63',font=SMALL_FONT,command=lambda:self.winfo_toplevel().pick_color(self.target.set)).grid(row=0,column=1,sticky='ew',padx=(4,0))
+        ct.CTkButton(self.preview_frame,text='⌖  屏幕吸管',width=110,font=SMALL_FONT,command=lambda:self.winfo_toplevel().pick_color(self.target.set),**ui_kit.button('secondary',height=30)).grid(row=0,column=1,sticky='ew',padx=(4,0))
         self.palette=ct.CTkLabel(self.preview_frame,text='',height=38)
         self.palette.grid(row=1,column=0,columnspan=2,sticky='ew',pady=(3,0))
         self.palette.bind('<Button-1>',self.open_palette)
@@ -200,11 +211,11 @@ class Card(ct.CTkFrame):
         self.palette_note.grid(row=2,column=0,columnspan=2,sticky='w')
         self._palette_future=None;self._palette_key=None;self._palette_pixels=None
         self._preview_job=None
-        self.target_entry=ct.CTkEntry(self,textvariable=self.target,height=29,font=HEX_FONT,border_color='#36445B');self.target_entry.grid(row=3,column=0,padx=16,sticky='ew')
+        self.target_entry=ct.CTkEntry(self,textvariable=self.target,font=HEX_FONT,**ui_kit.entry(height=29));self.target_entry.grid(row=3,column=0,padx=16,sticky='ew')
         self.label_alt=ct.CTkLabel(self,text='替代颜色 · 多个颜色用逗号分隔',font=SMALL_FONT,text_color=MUTED,height=15,wraplength=255,justify='left');self.label_alt.grid(row=4,column=0,padx=16,pady=(1,0),sticky='w')
-        self.alt_entry=ct.CTkEntry(self,textvariable=self.alt,height=27,placeholder_text='#FFFFFF, #EAEAEA');self.alt_entry.grid(row=5,column=0,padx=16,sticky='ew')
+        self.alt_entry=ct.CTkEntry(self,textvariable=self.alt,placeholder_text='#FFFFFF, #EAEAEA',**ui_kit.entry(height=27));self.alt_entry.grid(row=5,column=0,padx=16,sticky='ew')
         self.alts=ct.CTkFrame(self,fg_color='transparent',height=12); self.alts.grid(row=6,column=0,padx=16,pady=1,sticky='ew');self.alts.pack_propagate(False)
-        self.mode_selector=ct.CTkSegmentedButton(self,values=[tr('精准 HEX'),tr('相似颜色')],command=self.select_mode,font=BODY_FONT,selected_color='#236D62',selected_hover_color='#2C8275',height=30)
+        self.mode_selector=ct.CTkSegmentedButton(self,values=[tr('精准 HEX'),tr('相似颜色')],command=self.select_mode,font=BODY_FONT,selected_color=ui_theme.color('btn'),selected_hover_color=ui_theme.color('btn_hover'),text_color=ui_theme.color('btn_text'),height=30,corner_radius=ui_theme.radius('control'))
         self.mode_selector.grid(row=7,column=0,padx=16,pady=(2,2),sticky='ew')
         i18n.on_language(self,self.refresh_language)
         self.slider=DeliberateSlider(self,from_=1,to=35,number_of_steps=34,variable=self.tolerance,command=self.change_mode,progress_color=ACCENT,button_color=ACCENT)
@@ -219,8 +230,11 @@ class Card(ct.CTkFrame):
     def update_enabled(self,*_):
         available=getattr(self,'session_available',True)
         enabled=self.enabled.get() and available
-        background='#192D35' if enabled else '#151B25'
-        self.configure(fg_color=background,border_color=ACCENT if enabled else '#303A48',border_width=2 if enabled else 1)
+        # 保留启用态整卡染色（产品特性）；颜色来自主题，深浅色自动切换。
+        background=ui_theme.color('card_on') if enabled else ui_theme.color('card_off')
+        self.configure(fg_color=background,
+                       border_color=ui_theme.color('card_on_line') if enabled else ui_theme.color('line'),
+                       border_width=2 if enabled else 1)
         self.enable_switch.configure(text=('已启用' if enabled else '未启用') if available else '本局不可用',
             width=95 if available else 112,text_color=ACCENT if enabled else MUTED)
         self.preview_frame.configure(fg_color=background)
@@ -350,10 +364,10 @@ class App(ct.CTk):
         self.server=tk.StringVar(value=saved_server if saved_server in dict(SERVER_OPTIONS) else 'tw')
         self.window_controls=ct.CTkFrame(toolbar,fg_color='transparent')
         self.window_controls.grid(row=0,column=0,sticky='ew');self.window_controls.grid_columnconfigure(0,weight=1)
-        self.window_button=ct.CTkButton(self.window_controls,text='游戏窗口 · 自动检测',width=210,height=32,font=BODY_FONT,anchor='w',fg_color='#28364A',command=self.pick_window)
+        self.window_button=ct.CTkButton(self.window_controls,text='游戏窗口 · 自动检测',width=210,font=BODY_FONT,anchor='w',command=self.pick_window,**ui_kit.button('secondary',height=32))
         self.window_button.grid(row=0,column=0,sticky='ew')
         self.server_menu=ct.CTkOptionMenu(self.window_controls,values=[str(tr(label)) for _,label in SERVER_OPTIONS],
-            width=110,height=32,font=BODY_FONT,dynamic_resizing=False,command=self.change_server)
+            width=110,font=BODY_FONT,dynamic_resizing=False,command=self.change_server,**ui_kit.select(height=32))
         self.server_menu.grid(row=0,column=1,padx=(8,0),sticky='e')
         self.refresh_server_label()
         self.refresh_window_label()
@@ -363,16 +377,16 @@ class App(ct.CTk):
         self.body_scroll.grid(row=2,column=0,padx=BODY_SIDE_PADDING,sticky='')
         self.body_scroll.grid_columnconfigure(0,weight=1)
         self.toolbar_buttons=[
-            ct.CTkButton(toolbar,text='保存方案',width=100,height=32,font=BODY_FONT,fg_color='#28364A',command=self.save),
-            ct.CTkButton(toolbar,text='寻色记录',width=100,height=32,font=BODY_FONT,fg_color='#28364A',command=self.show_history),
-            ct.CTkOptionMenu(toolbar,values=list(i18n.LANGUAGES),width=115,font=BODY_FONT,command=self.change_language,variable=tk.StringVar(value=i18n.language)),
+            ct.CTkButton(toolbar,text='保存方案',width=100,font=BODY_FONT,command=self.save,**ui_kit.button('secondary',height=32)),
+            ct.CTkButton(toolbar,text='寻色记录',width=100,font=BODY_FONT,command=self.show_history,**ui_kit.button('secondary',height=32)),
+            ct.CTkOptionMenu(toolbar,values=list(i18n.LANGUAGES),width=115,font=BODY_FONT,command=self.change_language,variable=tk.StringVar(value=i18n.language),**ui_kit.select()),
         ]
         links=ct.CTkFrame(header,fg_color='transparent');self.links=links;links.grid(row=0,column=1,sticky='e')
-        self.tutorial_button=ct.CTkButton(links,text='?',width=36,height=36,fg_color='#62D7BD',hover_color='#80E5CF',text_color='#102A27',font=ICON_FONT,command=self.show_tutorial)
+        self.tutorial_button=ct.CTkButton(links,text='?',width=36,font=ICON_FONT,command=self.show_tutorial,**ui_kit.button('secondary',height=36,corner_radius=8))
         self.tutorial_button.pack(side='right',padx=4)
-        self.github_button=ct.CTkButton(links,text='GitHub',width=70,height=32,font=BODY_FONT,fg_color='#28364A',command=lambda:webbrowser.open(GITHUB))
+        self.github_button=ct.CTkButton(links,text='GitHub',width=70,font=BODY_FONT,command=lambda:webbrowser.open(GITHUB),**ui_kit.button('secondary',height=32))
         self.github_button.pack(side='right',padx=4)
-        self.support_button=ct.CTkButton(links,text='♥  支持作者',width=100,height=32,font=BODY_FONT,fg_color='#694C91',command=self.show_support)
+        self.support_button=ct.CTkButton(links,text='♥  支持作者',width=100,font=BODY_FONT,command=self.show_support,**ui_kit.button('ghost',height=32))
         self.support_button.pack(side='right',padx=4)
         for column,button in enumerate(self.toolbar_buttons,1):button.grid(row=0,column=column,padx=(8,0),sticky='ew')
         for column in range(1,4):toolbar.grid_columnconfigure(column,weight=0)
@@ -388,13 +402,13 @@ class App(ct.CTk):
         # Keep the fixed-height card viewport in normal flow; a weighted row creates large blank bands around it.
         self.page.grid_rowconfigure(2,weight=0)
         controls=ct.CTkFrame(self.page,fg_color='transparent');controls.grid(row=3,column=0,padx=BODY_SIDE_PADDING,pady=(8,4),sticky='ew')
-        self.start=ct.CTkButton(controls,text='开始寻色   F8',height=44,width=165,font=(FONT,13,'bold'),fg_color=ACCENT,text_color='#102A27',hover_color='#80E5CF',command=lambda:self.go(activate=True));self.start.grid(row=0,column=0,padx=(0,8),pady=4,sticky='w')
-        self.stop_button=ct.CTkButton(controls,text='停止   F9',height=44,width=100,font=BODY_FONT,fg_color='#2B384C',command=lambda:self.stop(source='main_stop_button'));self.stop_button.grid(row=0,column=1,padx=(0,8),pady=4,sticky='w')
+        self.start=ct.CTkButton(controls,text='开始寻色   F8',width=165,font=(FONT,13,'bold'),command=lambda:self.go(activate=True),**ui_kit.button('primary',height=44,corner_radius=7));self.start.grid(row=0,column=0,padx=(0,8),pady=4,sticky='w')
+        self.stop_button=ct.CTkButton(controls,text='停止   F9',width=100,font=BODY_FONT,command=lambda:self.stop(source='main_stop_button'),**ui_kit.button('secondary',height=44));self.stop_button.grid(row=0,column=1,padx=(0,8),pady=4,sticky='w')
         self.controls=controls;controls.grid_columnconfigure(2,weight=1)
         selected=self._strategy_defaults['settings'].get('search_strategy','screenshot')
         self.search_strategy=tk.StringVar(value=selected if selected in ('native','screenshot') else 'screenshot')
         self.strategy_menu=ct.CTkOptionMenu(controls,values=[str(tr('截图寻色')),str(tr(NATIVE_STRATEGY_LABEL))],
-            width=330,height=30,font=BODY_FONT,command=self.change_search_strategy)
+            width=330,font=BODY_FONT,command=self.change_search_strategy,**ui_kit.select(height=30))
         self.strategy_menu.grid(row=1,column=0,columnspan=2,sticky='w',pady=(4,2))
         self.strategy_menu.set(str(tr(NATIVE_STRATEGY_LABEL if self.search_strategy.get()=='native' else '截图寻色')))
         self.strategy_note=ct.CTkLabel(controls,text='寻色方式：截图寻色。不读取游戏内存。',font=SMALL_FONT,
@@ -403,7 +417,7 @@ class App(ct.CTk):
         self.region_note=ct.CTkLabel(controls,text='',font=SMALL_FONT,text_color=MUTED,
             anchor='w',justify='left',wraplength=500,height=18)
         self.region_note.grid(row=3,column=0,columnspan=3,sticky='w',pady=(2,0));self.region_note.grid_remove()
-        status=ct.CTkFrame(self.page,fg_color=PANEL,corner_radius=14);status.grid(row=4,column=0,padx=BODY_SIDE_PADDING,pady=(4,8),sticky='ew');status.grid_columnconfigure(0,weight=1)
+        status=ct.CTkFrame(self.page,fg_color=ui_theme.color('panel_alt'),corner_radius=10,border_width=1,border_color=ui_theme.color('line'));status.grid(row=4,column=0,padx=BODY_SIDE_PADDING,pady=(4,8),sticky='ew');status.grid_columnconfigure(0,weight=1)
         self.status=ct.CTkLabel(status,text='就绪 · 请先选择游戏窗口和目标颜色',font=BODY_FONT,anchor='w',justify='left',wraplength=720,text_color=INK);self.status.grid(row=0,column=0,padx=18,pady=(12,5),sticky='ew')
         self.detail=ct.CTkLabel(status,text='',font=SMALL_FONT,text_color=MUTED,wraplength=720,anchor='w',justify='left')
         self.detail.grid(row=1,column=0,padx=18,pady=(0,8),sticky='ew');self.detail.grid_remove()
@@ -726,7 +740,7 @@ class App(ct.CTk):
         requested_logical_height=int((requested_native_height+dpi-1)//dpi)
         minimum_height=min(requested_logical_height,available_height)
         self.minsize(minimum_width,minimum_height)
-        width=max(minimum_width,min(1120,available_width))
+        width=max(minimum_width,min(WINDOW_DEFAULT_WIDTH,available_width))
         # Start at the content height so high-resolution displays do not add
         # a large empty area below the controls. The user can still resize freely.
         height=min(available_height,minimum_height)

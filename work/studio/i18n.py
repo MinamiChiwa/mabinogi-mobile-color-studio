@@ -367,6 +367,61 @@ def set_language(value):
     for widget,name in list(_refreshers.items()):
         if widget.winfo_exists():getattr(widget,name)()
 
+# ---------------------------------------------------------------------------
+# 紧凑浮层（QuickPanel）新增文案
+#   这些是 V5 引入的小面板专用词，主词典里没有；集中补在这里，
+#   避免散落到 EN/TW 两张大表里难以维护。
+# ---------------------------------------------------------------------------
+EN.update({
+    '游戏窗口': 'Game window',
+    '刷新': 'Refresh',
+    '未检测到游戏窗口': 'No game window found',
+    '新方案名称': 'New preset name',
+    '保存': 'Save',
+    '已保存': 'Saved',
+    '载入': 'Load',
+    '删除': 'Delete',
+    '还没有保存的方案': 'No presets yet',
+    '还没有寻色记录': 'No results yet',
+    '检查更新': 'Check for updates',
+    '当前版本已是最新': 'You are up to date',
+    '正在检查更新…': 'Checking for updates…',
+    '发现新版本': 'New version available',
+    '正在下载': 'Downloading',
+    '更新已下载，可安装': 'Update ready to install',
+    '检查更新失败，请稍后重试': 'Update check failed, please retry later',
+    '赞助完全自愿，不论是否赞助都能使用全部功能。':
+        'Sponsorship is voluntary; all features work either way.',
+    '提交问题 / Issues': 'Report an issue',
+    '最大': 'Max',
+    '平均': 'Avg',
+})
+
+TW.update({
+    '游戏窗口': '遊戲視窗',
+    '刷新': '重新整理',
+    '未檢測到遊戲窗口': '未偵測到遊戲視窗',
+    '未检测到游戏窗口': '未偵測到遊戲視窗',
+    '新方案名称': '新方案名稱',
+    '保存': '儲存',
+    '已保存': '已儲存',
+    '载入': '載入',
+    '删除': '刪除',
+    '还没有保存的方案': '尚未儲存任何方案',
+    '还没有寻色记录': '尚無尋色紀錄',
+    '检查更新': '檢查更新',
+    '当前版本已是最新': '目前為最新版本',
+    '正在检查更新…': '正在檢查更新…',
+    '发现新版本': '發現新版本',
+    '正在下载': '正在下載',
+    '更新已下载，可安装': '更新已下載，可安裝',
+    '检查更新失败，请稍后重试': '檢查更新失敗，請稍後再試',
+    '赞助完全自愿，不论是否赞助都能使用全部功能。':
+        '贊助完全自願，無論是否贊助都能使用全部功能。',
+    '提交问题 / Issues': '回報問題',
+})
+
+
 def install_widgets(ct):
     """Translate display text only; identifiers and HEX values are never changed."""
     if getattr(ct,'_studio_i18n',False):return

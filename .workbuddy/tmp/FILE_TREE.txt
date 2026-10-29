@@ -1,0 +1,420 @@
+color-studio/   （不含 .workbuddy / outputs / __pycache__ / work/studio/data）
+├── .github/  (1)
+│   └── FUNDING.yml
+├── docs/  (58)
+│   ├── development/  (3)
+│   │   ├── maintenance.md
+│   │   ├── README.md
+│   │   └── release-tooling.md
+│   ├── research/  (27)
+│   │   ├── 2026-10-12-game-font-hex-countdown.md
+│   │   ├── 2026-10-12-live-color-display.md
+│   │   ├── 2026-10-12-mixed-compromise-diagnosis.md
+│   │   ├── 2026-10-12-rc6-route-and-rotation.md
+│   │   ├── 2026-10-12-rc8-hex-conflict.md
+│   │   ├── 2026-10-12-startup-color-verification.md
+│   │   ├── 2026-10-13-live-single-region.md
+│   │   ├── 2026-10-13-priority-compromise-search.md
+│   │   ├── 2026-10-13-updater-parent-exit.md
+│   │   ├── 2026-10-25-data7-stop-and-discovery.md
+│   │   ├── archive-index-2026-10-11.md
+│   │   ├── data3-audit-2026-10-11.md
+│   │   ├── data3-fixes-2026-10-11.md
+│   │   ├── finalization-2026-10-11.md
+│   │   ├── initial-discovery-timeout-2026-10-11.md
+│   │   ├── rc11-route-and-ui-audit-2026-10-10.md
+│   │   ├── rc12-protected-refinement-2026-10-10.md
+│   │   ├── rc13-three-user-tests-2026-10-10.md
+│   │   ├── rc14-portable-window-2026-10-10.md
+│   │   ├── rc15-dpi-coordinate-2026-10-10.md
+│   │   ├── rc16-remote-window-experiments-2026-10-10.md
+│   │   ├── remote-process-access-2026-10-11.md
+│   │   ├── retry-budget-2026-10-11.md
+│   │   ├── screenshot-mixed-precision.md
+│   │   ├── screenshot-search-preview.md
+│   │   ├── three-white-tail-2026-10-11.md
+│   │   └── two-region-dye-2026-10-11.md
+│   ├── server-adaptation/  (6)
+│   │   ├── 2026-10-12-kr-data5-and-jp-integration.md
+│   │   ├── 2026-10-12-kr-integration-report.md
+│   │   ├── 2026-10-12-kr-prelogin-report.md
+│   │   ├── 2026-10-17-kr-build-update.md
+│   │   ├── korean-validation.md
+│   │   └── server-selection.md
+│   ├── automatic-updates.en.md
+│   ├── automatic-updates.ja.md
+│   ├── automatic-updates.ko.md
+│   ├── automatic-updates.md
+│   ├── automatic-updates.zh-TW.md
+│   ├── README.md
+│   ├── release-notes-0.4.1.md
+│   ├── release-notes-0.4.2.md
+│   ├── release-notes-0.4.3.md
+│   ├── release-notes-0.4.4.md
+│   ├── release-notes-0.4.5.md
+│   ├── release-notes-0.4.6.md
+│   ├── release-notes-0.4.7.md
+│   ├── release-notes-0.4.8.md
+│   ├── release-notes-0.4.9.md
+│   ├── verification-auto-update-2026-10-12.md
+│   ├── verification-lossless-speed-2026-10-12.md
+│   ├── verification-release-0.4.2.md
+│   ├── verification-release-0.4.3.md
+│   ├── verification-release-0.4.4.md
+│   ├── verification-retry-continuous-2026-10-12.md
+│   └── verification-retry-retention-2026-10-12.md
+├── fixtures/  (15)
+│   ├── game-font/  (5)
+│   │   ├── README.md
+│   │   ├── timer-105.png
+│   │   ├── timer-115.png
+│   │   ├── timer-117.png
+│   │   └── timer-9.png
+│   ├── native-hex-conflict/  (2)
+│   │   ├── cards.png
+│   │   └── README.md
+│   ├── native-route-feedback/  (5)
+│   │   ├── fragment_0.png
+│   │   ├── fragment_1.png
+│   │   ├── fragment_2.png
+│   │   ├── route-case.json
+│   │   └── snapshot.json
+│   └── screenshot-feedback/  (3)
+│       ├── final-19.png
+│       ├── timer-30.png
+│       └── timer-39.png
+├── release/  (2)
+│   ├── release-config.json
+│   └── update-public-keys.json
+├── scripts/  (4)
+│   ├── build_update_assets.py
+│   ├── recover_update.ps1
+│   ├── verify_release.py
+│   └── verify_update_assets.py
+├── work/  (296)
+│   └── studio/  (296)
+│       ├── native_live/  (45)
+│       │   ├── assets/  (6)
+│       │   │   ├── dye_hex_glyphs.json
+│       │   │   ├── dye_hex_glyphs.npz
+│       │   │   ├── dye_timer_hourglass.json
+│       │   │   ├── dye_timer_hourglass.png
+│       │   │   ├── game_font_glyphs.json
+│       │   │   └── game_font_glyphs.npz
+│       │   ├── __init__.py
+│       │   ├── benchmark_dye_scan.py
+│       │   ├── build_adapters.py
+│       │   ├── build_layout.py
+│       │   ├── candidate_selection.py
+│       │   ├── capture_dye_state.py
+│       │   ├── collect_dye_validation.py
+│       │   ├── compromise.py
+│       │   ├── controller.py
+│       │   ├── dye_action_checkpoint.py
+│       │   ├── dye_hex_glyphs.py
+│       │   ├── dye_visual_readiness.py
+│       │   ├── game_font_reader.py
+│       │   ├── map_unity_window.py
+│       │   ├── native_provider_backend.py
+│       │   ├── probe_timer.py
+│       │   ├── project_closed_loop_io.py
+│       │   ├── project_probe_io.py
+│       │   ├── read_dye_input_backend.py
+│       │   ├── read_dye_motion.py
+│       │   ├── read_dye_window.py
+│       │   ├── read_dye_window_mapping.py
+│       │   ├── read_native_mouse_diagnostic.py
+│       │   ├── read_native_rect.py
+│       │   ├── read_native_transform.py
+│       │   ├── read_toucharea_geometry.py
+│       │   ├── read_toucharea_rect.py
+│       │   ├── read_unity_screen.py
+│       │   ├── refinement.py
+│       │   ├── retry.py
+│       │   ├── retry_recovery.py
+│       │   ├── route_feedback.py
+│       │   ├── runtime_read.py
+│       │   ├── same_session_dye_planner.py
+│       │   ├── scan_live_dye.py
+│       │   ├── service.py
+│       │   ├── session_deadline.py
+│       │   ├── session_status.py
+│       │   └── time_policy.py
+│       ├── qt_ui/  (36)
+│       │   ├── qml/  (25)
+│       │   │   ├── AtlasPanel.qml
+│       │   │   ├── ColorPicker.qml
+│       │   │   ├── EnvWindowButton.qml
+│       │   │   ├── Eyedropper.qml
+│       │   │   ├── HistoryDialog.qml
+│       │   │   ├── InfoDialog.qml
+│       │   │   ├── InlineColorPicker.qml
+│       │   │   ├── Loc.qml
+│       │   │   ├── Main.qml
+│       │   │   ├── Overlay.qml
+│       │   │   ├── Popover.qml
+│       │   │   ├── PresetDialog.qml
+│       │   │   ├── qmldir
+│       │   │   ├── QuickPanel.qml
+│       │   │   ├── RegionCard.qml
+│       │   │   ├── RoundedImage.qml
+│       │   │   ├── UiButton.qml
+│       │   │   ├── UiCheck.qml
+│       │   │   ├── UiCombo.qml
+│       │   │   ├── UiField.qml
+│       │   │   ├── UiScrollBar.qml
+│       │   │   ├── UiSlider.qml
+│       │   │   ├── UpdateDialog.qml
+│       │   │   ├── Viewer.qml
+│       │   │   └── WindowDialog.qml
+│       │   ├── __init__.py
+│       │   ├── bridge.py
+│       │   ├── core.py
+│       │   ├── dialogs.py
+│       │   ├── eyedropper.py
+│       │   ├── host.py
+│       │   ├── i18n_qt.py
+│       │   ├── overlay.py
+│       │   ├── picker.py
+│       │   ├── update.py
+│       │   └── window_fx.py
+│       ├── updater/  (16)
+│       │   ├── __init__.py
+│       │   ├── discovery.py
+│       │   ├── download.py
+│       │   ├── http_client.py
+│       │   ├── manifest.py
+│       │   ├── offline.py
+│       │   ├── paths.py
+│       │   ├── payload.py
+│       │   ├── planner.py
+│       │   ├── runtime.py
+│       │   ├── service.py
+│       │   ├── transaction.py
+│       │   ├── trust.py
+│       │   ├── types.py
+│       │   ├── ui_update.py
+│       │   └── win_process.py
+│       ├── _updater_test_support.py
+│       ├── analyze_live_atlas.py
+│       ├── app.py
+│       ├── app_data.py
+│       ├── atlas_adapter.py
+│       ├── atlas_bound_route.py
+│       ├── ATLAS_BUDGET_20260926.md
+│       ├── atlas_budget_review.py
+│       ├── atlas_capture_worker.py
+│       ├── atlas_execution.py
+│       ├── ATLAS_EXECUTION_PERFORMANCE_20260929.md
+│       ├── atlas_failure_review.py
+│       ├── atlas_live_adapter.py
+│       ├── atlas_mask_route_review.py
+│       ├── atlas_masks.py
+│       ├── atlas_pose.py
+│       ├── atlas_pose_scoring.py
+│       ├── atlas_replan.py
+│       ├── atlas_review.py
+│       ├── atlas_runner.py
+│       ├── atlas_runtime.py
+│       ├── atlas_search_review.py
+│       ├── atlas_service.py
+│       ├── atlas_similarity.py
+│       ├── atlas_stage_budget.py
+│       ├── atlas_trial.py
+│       ├── BASELINE_20261009.md
+│       ├── best_result.py
+│       ├── build_info.py
+│       ├── build_release.py
+│       ├── business.py
+│       ├── CALIBRATION_20260924.md
+│       ├── CALIBRATION_20260926.md
+│       ├── CANDIDATE_DISPLAY_REVIEW_20260929.md
+│       ├── candidate_ranking.py
+│       ├── capture_color_check.py
+│       ├── CAPTURE_REVIEW_20260926_113839.md
+│       ├── CAPTURE_REVIEW_20260927_003658.md
+│       ├── capture_storage_review.py
+│       ├── color_family.py
+│       ├── COLOR_FAMILY_REVIEW_20260929.md
+│       ├── color_matching.py
+│       ├── display_geometry.py
+│       ├── dye_regions.py
+│       ├── engine.py
+│       ├── entry_picker.py
+│       ├── execution_diagnostics.py
+│       ├── EXECUTION_REGRESSION_REVIEW_20260929.md
+│       ├── eyedropper.py
+│       ├── eyedropper_native.py
+│       ├── FAILED_SEARCH_REVIEW_20260927.md
+│       ├── GAME_MECHANISM_VALIDATION_GATE.md
+│       ├── GEOMETRY.md
+│       ├── gesture_evidence.py
+│       ├── GESTURE_REACHABILITY_AUDIT_20260929.md
+│       ├── gesture_replay.py
+│       ├── gesture_response_probe.py
+│       ├── HEX_FEEDBACK_20260926.md
+│       ├── hex_feedback_search.py
+│       ├── hex_refinement.py
+│       ├── hotkeys.py
+│       ├── i18n.py
+│       ├── input_gestures.py
+│       ├── input_response.py
+│       ├── JOINT_EXECUTION_20260927.md
+│       ├── Korean-preflight.cmd
+│       ├── Korean-validation.cmd
+│       ├── large_motion_review.py
+│       ├── live_atlas_capture.py
+│       ├── locale_ja.py
+│       ├── locale_ko.py
+│       ├── marker_geometry.py
+│       ├── MARKER_SEARCH_REVIEW_20260929.md
+│       ├── micro_registration_review.py
+│       ├── micro_return_adapter.py
+│       ├── micro_return_probe.py
+│       ├── MICRO_RETURN_PROTOCOL.md
+│       ├── micro_return_review.py
+│       ├── native-window-check.ps1
+│       ├── native_action_refine.py
+│       ├── native_input_assessment.py
+│       ├── native_input_compile.py
+│       ├── native_input_pipeline.py
+│       ├── native_input_pivot_refine.py
+│       ├── native_input_response.py
+│       ├── native_input_route_search.py
+│       ├── native_palette_action_search.py
+│       ├── native_palette_actions.py
+│       ├── native_palette_model.py
+│       ├── native_palette_pipeline.py
+│       ├── native_palette_pose.py
+│       ├── native_palette_provider.py
+│       ├── native_palette_refine.py
+│       ├── native_palette_scoring.py
+│       ├── native_palette_search.py
+│       ├── native_periodic_route.py
+│       ├── native_periodic_search.py
+│       ├── native_preflight.py
+│       ├── native_runtime_adapter.py
+│       ├── native_runtime_bridge.py
+│       ├── native_runtime_discovery.py
+│       ├── native_runtime_geometry.py
+│       ├── native_runtime_observation.py
+│       ├── native_status.py
+│       ├── native_target_pipeline.py
+│       ├── native_target_seeds.py
+│       ├── native_transform_matrix.py
+│       ├── OBSERVED_RESULT_PROTECTION_20260929.md
+│       ├── overlay_native.py
+│       ├── palette.py
+│       ├── palette_viewer.py
+│       ├── periodic_atlas.py
+│       ├── PERIODIC_SEARCH.md
+│       ├── planner.py
+│       ├── platform_win.py
+│       ├── POINT_PROBE_REVIEW_20260926.md
+│       ├── point_sampling_probe.py
+│       ├── preview_atlas_results.py
+│       ├── process_access.py
+│       ├── profile_store.py
+│       ├── PROGRESS_20260926.md
+│       ├── PROJECT_STATUS.md
+│       ├── REACHABLE_INPUT_REVIEW_20260929.md
+│       ├── REACHABLE_SEARCH_PLAN.md
+│       ├── refinement_policy.py
+│       ├── region_priority.py
+│       ├── registration_precision_methods.py
+│       ├── registration_uncertainty_audit.py
+│       ├── release_documents.py
+│       ├── replay_archive.py
+│       ├── resize_rendering.py
+│       ├── resize_surface.py
+│       ├── RESPONSE_EVIDENCE_20260929.md
+│       ├── result_history.py
+│       ├── review_failed_candidates.py
+│       ├── review_runtime_motion.py
+│       ├── review_ui.py
+│       ├── rotation_comparison.py
+│       ├── rotation_probe_review.py
+│       ├── ROTATION_RESPONSE_REVIEW_20260929.md
+│       ├── ROUND5.md
+│       ├── ROUTE_AND_PRECISION_20260926.md
+│       ├── run_stop.py
+│       ├── runtime_messages.py
+│       ├── RUNTIME_REGISTRATION_REVIEW_20260927.md
+│       ├── SAMPLING_INVESTIGATION_20260926.md
+│       ├── scan_route_review.py
+│       ├── scan_settling.py
+│       ├── scan_settling_review.py
+│       ├── SCAN_SETTLING_REVIEW_20260929.md
+│       ├── screen_mapping.py
+│       ├── screenshot_compute.py
+│       ├── screenshot_control.py
+│       ├── screenshot_evidence.py
+│       ├── screenshot_geometry.py
+│       ├── screenshot_live.py
+│       ├── screenshot_prediction.py
+│       ├── screenshot_preflight.py
+│       ├── screenshot_presentation.py
+│       ├── screenshot_refinement.py
+│       ├── screenshot_registration.py
+│       ├── screenshot_samples.py
+│       ├── screenshot_search.py
+│       ├── screenshot_single.py
+│       ├── screenshot_strings.py
+│       ├── screenshot_text.py
+│       ├── screenshot_text_fixture.png
+│       ├── search_overlay.py
+│       ├── SEARCH_PROGRESS_20260927.md
+│       ├── SESSION_FAILURE_REVIEW_20260929_191405.md
+│       ├── SESSION_QUALITY_PERFORMANCE_20260929.md
+│       ├── session_store.py
+│       ├── single_region_live.py
+│       ├── single_region_search.py
+│       ├── STARTUP_PERFORMANCE_20260929.md
+│       ├── strategy_defaults.py
+│       ├── theme.py
+│       ├── TRANSFER_VALIDATION_20260926.md
+│       ├── ui_dialogs.py
+│       ├── ui_kit.py
+│       ├── ui_performance.py
+│       ├── ui_presets.py
+│       ├── ui_progress.py
+│       ├── ui_settings.py
+│       ├── ui_strings.py
+│       ├── ui_typography.py
+│       ├── update_bootstrap.py
+│       ├── update_helper.py
+│       ├── update_recovery_identity.py
+│       ├── user_copy.py
+│       ├── validate_hex_feedback.py
+│       ├── vision.py
+│       ├── WINDOW_CHECK.en.md
+│       ├── WINDOW_CHECK.zh-CN.md
+│       ├── WINDOW_CHECK.zh-TW.md
+│       ├── window_dpi.py
+│       ├── window_picker.py
+│       ├── window_target.py
+│       └── workflow_budget.py
+├── .gitattributes
+├── .gitignore
+├── AGENTS.md
+├── QT_UI_GUIDE.md
+├── README.en.md
+├── README.ja.md
+├── README.ko.md
+├── README.md
+├── README.zh-TW.md
+├── requirements-build.txt
+├── requirements.txt
+├── run_grid_capture.bat
+├── run_point_probe.bat
+├── run_preflight.bat
+├── run_qt.bat
+├── run_qt.py
+├── run_response_probe.bat
+├── run_response_probe.ps1
+├── run_rotation_compare.bat
+├── run_studio.bat
+├── run_zoom_reversibility.bat
+└── TESTING.md
+
+合计 398 个文件

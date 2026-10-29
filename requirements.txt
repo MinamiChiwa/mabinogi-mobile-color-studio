@@ -8,3 +8,5 @@ opencc-python-reimplemented==0.1.7
 cryptography==46.0.5
 packaging==25.0
 httpx==0.28.1
+# Qt 界面（run_qt.py 与 work/studio/qt_ui 需要）
+PySide6==6.12.0

@@ -10,7 +10,9 @@ from ui_performance import DeliberateSlider
 from i18n import tr,on_language
 from display_geometry import work_area,clamp_position
 from vision import accepted
-from ui_typography import SECTION_FONT,BODY_FONT,SMALL_FONT
+from ui_typography import SECTION_FONT,BODY_FONT,SMALL_FONT,FONT_FAMILY
+import theme as ui_theme
+import ui_kit
 from overlay_native import configure_overlay,unregister_overlay
 
 
@@ -85,7 +87,8 @@ class SearchOverlay(ct.CTkToplevel):
     def __init__(self,parent,stop,select_candidate=None,settings_path=None):
         super().__init__(parent)
         self.withdraw();self.overrideredirect(True);self.attributes('-topmost',True)
-        self.configure(fg_color='#131F2C');self.rules=[];self.phase='waiting';self._text=None
+        import theme as ui_theme
+        self.configure(fg_color=ui_theme.color('panel'));self.rules=[];self.phase='waiting';self._text=None
         self.select_candidate=select_candidate;self.candidate_rows={};self.batch_id=None;self.stop_action=stop
         self.default_candidate_id=None
         self.retry_action=getattr(parent,'request_native_retry',None)
@@ -98,7 +101,7 @@ class SearchOverlay(ct.CTkToplevel):
         self.attributes('-alpha',max(.65,min(1.,float(self.preferences.get('overlay_alpha',.92)))))
         self.grid_columnconfigure(0,weight=1)
         self.grid_rowconfigure(1,weight=1)
-        self.heading=ct.CTkLabel(self,text='等待染色界面',font=SECTION_FONT,anchor='w',text_color='#62D7BD',wraplength=374)
+        self.heading=ct.CTkLabel(self,text='等待染色界面',font=(FONT_FAMILY,15,'bold'),anchor='w',text_color=ui_theme.color('text'),wraplength=374)
         self.heading.grid(row=0,column=0,padx=16,pady=(10,2),sticky='ew')
         # Scroll status text and candidates together. The heading and stop
         # control stay accessible even on a short, highly scaled display.
@@ -106,22 +109,22 @@ class SearchOverlay(ct.CTkToplevel):
         self.content.grid(row=1,column=0,padx=8,sticky='nsew');self.content.grid_columnconfigure(0,weight=1)
         self.copy=ct.CTkLabel(self.content,text='',font=BODY_FONT,justify='left',anchor='w',wraplength=350)
         self.copy.grid(row=0,column=0,padx=8,pady=4,sticky='ew')
-        self.stop_button=ct.CTkButton(self,text='停止 F9',height=32,font=BODY_FONT,fg_color='#236D62',command=stop)
+        self.stop_button=ct.CTkButton(self,text='停止 F9',font=BODY_FONT,command=stop,**ui_kit.button('primary',height=34))
         self.stop_button.grid(row=2,column=0,padx=16,pady=(4,10),sticky='ew')
-        self.retry_button=ct.CTkButton(self,text='重新寻色（仅供测试） F7',height=30,font=BODY_FONT,
-            fg_color='#28364A',state='disabled',command=self.request_retry)
-        self.activity=ct.CTkProgressBar(self.content,height=4,mode='indeterminate',progress_color='#62D7BD')
+        self.retry_button=ct.CTkButton(self,text='重新寻色（仅供测试） F7',font=BODY_FONT,
+            state='disabled',command=self.request_retry,**ui_kit.button('secondary',height=30))
+        self.activity=ct.CTkProgressBar(self.content,height=3,mode='indeterminate',progress_color=ui_theme.color('accent'))
         self.activity.grid(row=1,column=0,padx=8,pady=6,sticky='ew')
-        self.elapsed=ct.CTkLabel(self.content,text='',font=SMALL_FONT,anchor='w',text_color='#94A4B8',wraplength=350)
+        self.elapsed=ct.CTkLabel(self.content,text='',font=SMALL_FONT,anchor='w',text_color=ui_theme.color('muted'),wraplength=350)
         self.elapsed.grid(row=2,column=0,padx=8,sticky='ew')
         settings=ct.CTkFrame(self.content,fg_color='transparent');settings.grid(row=3,column=0,padx=8,pady=5,sticky='ew')
         settings.grid_columnconfigure(1,weight=1)
         ct.CTkLabel(settings,text='不透明度',font=SMALL_FONT).grid(row=0,column=0,padx=(0,8))
         self.opacity=DeliberateSlider(settings,from_=.65,to=1,width=130,command=self.set_opacity)
         self.opacity.set(float(self.preferences.get('overlay_alpha',.92)));self.opacity.grid(row=0,column=1,sticky='ew')
-        self.collapse=ct.CTkButton(settings,text='收起',width=76,height=26,font=SMALL_FONT,fg_color='#28364A',command=self.toggle_collapse)
+        self.collapse=ct.CTkButton(settings,text='收起',width=76,font=SMALL_FONT,command=self.toggle_collapse,**ui_kit.button('secondary',height=26))
         self.collapse.grid(row=0,column=2,padx=(10,0))
-        self.results=ct.CTkFrame(self.content,fg_color='#131F2C')
+        self.results=ct.CTkFrame(self.content,fg_color=ui_theme.color('panel'))
         self.heading.bind('<Button-1>',self._drag_start)
         self.heading.bind('<B1-Motion>',self._drag)
         self.heading.bind('<ButtonRelease-1>',self.save_position)
@@ -307,7 +310,7 @@ class SearchOverlay(ct.CTkToplevel):
         if data.get('compromise_only'):
             ct.CTkLabel(self.candidate_container,
                         text=tr('本轮没有预测达标方案；以下结果仅供参考，实际复核未达标时会停止。'),
-                        font=SMALL_FONT,text_color='#F2C879',wraplength=520,
+                        font=SMALL_FONT,text_color=ui_theme.color('warn'),wraplength=520,
                         anchor='w',justify='left').pack(fill='x',padx=6,pady=(0,5))
         for row in rows:
             result=data.get('observations',{}).get(row['id']) if native or row['id']==default else None
