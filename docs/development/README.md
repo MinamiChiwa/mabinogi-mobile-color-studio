@@ -9,7 +9,7 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
 python work/studio/app.py          # 或双击 run_studio.bat
-python -m pip install pytest; python -m pytest
+python -m pip install pytest pefile==2024.8.26; python -m pytest
 ```
 
 若 OCR 不在默认安装目录，按应用设置指定路径。开发环境也不要自动进入染色或套用结果。

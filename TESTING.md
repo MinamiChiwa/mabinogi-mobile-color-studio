@@ -1,11 +1,11 @@
 # 测试指南
 
-自动测试只覆盖**不需要游戏**就能确定对错的行为契约，整套在 2 秒内跑完，每次改动都可以完整运行。寻色效果只能在游戏里实测，不用自动测试冒充。
+自动测试只覆盖**不需要游戏**就能确定对错的行为契约，整套通常在几十秒内完成，耗时随环境与冷启动情况变化。寻色效果只能在游戏里实测，不用自动测试冒充。
 
 ## 运行
 
 ```powershell
-python -m pip install -r requirements.txt pytest
+python -m pip install -r requirements.txt pytest pefile==2024.8.26
 python -m pytest                                   # 全部
 python -m pytest tests/test_qt_app.py              # 一个文件
 python -m pytest -k mirror                         # 按名称筛选
@@ -22,6 +22,9 @@ Qt 测试在 `offscreen` 模式下运行，不会弹出窗口、不注册全局�
 | `tests/test_update_assets.py` | 发布资产只有签名清单与 blob；校验能发现被改动的 blob；增量下载量统计 |
 | `tests/test_qt_app.py` | 全部 QML 可编译、主窗口无告警；寻色中关闭先停止再退出；空闲关闭保存设置；更新后首次启动等待提交、回滚时退出；安装更新时退出；顶栏可打开完整更新对话框 |
 | `tests/test_ui_translations.py` | QML 固定文案在英、日、韩界面都有翻译，不残留中文 |
+| `tests/test_qt_search_surface.py`、`test_qt_color_input.py` | 浮窗按钮、拖动、透明度、读秒与关闭；色码输入绑定、吸管前台切换及失败收尾 |
+| `tests/test_discovery_repair.py`、`test_qt_bundle.py` | 内存扫描遇到瞬态故障时继续；打包时识别不兼容的 ICU DLL，缺少兼容依赖时拒绝交付 |
+| `tests/test_destination_recovery.py`、`test_screenshot_trial_budget.py` | 多区域落点纠偏保持联合目标；每次微调计入反馈与返回成本 |
 
 ## 写新测试
 
@@ -38,6 +41,6 @@ Qt 测试在 `offscreen` 模式下运行，不会弹出窗口、不注册全局�
 | 寻色效果、耗时、4K 表现 | 在游戏内分别实测截图寻色与精准寻色，如实记录未测项 |
 | 打包内容 | `python scripts/verify_release.py <包目录> --json <报告>`：字节码与源码一致、QML 完整、未打入 Tk 与个人数据 |
 | 更新资产 | `python scripts/verify_update_assets.py <资产目录> --package <包目录> --public-keys <公钥JSON>` |
-| 真实升级演练 | `python scripts/smoke_frozen_update.py --old-package <旧版包> --assets <新版资产> --keys <测试公钥JSON> --out <空目录>`：在隔离目录里用测试签名完成一次冻结程序升级，覆盖健康检查与首次启动确认 |
+| 真实升级演练 | `python scripts/smoke_frozen_update.py --old-package <旧版包> --assets <新版资产> --keys <对应公钥JSON> --out <空目录>`：在隔离目录完成一次冻结程序升级，覆盖健康检查与首次启动确认；正式资产使用生产公钥 |
 
 发布流程见[发布指南](docs/development/release-tooling.md)。
