@@ -10,8 +10,6 @@ import colorsys
 
 from PySide6.QtCore import Property, QObject, Signal, Slot
 
-import theme as ui_theme
-
 # 常用色 12 个（ui-spec 7.4）
 COMMON_COLORS = [
     '#000000', '#FFFFFF', '#7F7F7F', '#8E0126',

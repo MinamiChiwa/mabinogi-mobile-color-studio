@@ -10,15 +10,12 @@
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QObject, Qt, QUrl, Signal, Slot
-from PySide6.QtGui import QGuiApplication, QImage, QPixmap
-from PySide6.QtQuick import QQuickWindow, QSGRendererInterface
+from PySide6.QtCore import QObject, QUrl, Signal, Slot
+from PySide6.QtGui import QImage
 from PySide6.QtQml import QQmlApplicationEngine
 
-import theme as ui_theme
-from i18n import tr
+from qt_ui import QML_DIR
 
-_QML_DIR = None
 _STATE = None
 # 主窗口：对话框以它为锚点居中，避免系统把窗口丢到屏幕角落
 _PARENT = None
@@ -70,11 +67,7 @@ def bind_state(state):
 
 
 def _qml_dir():
-    global _QML_DIR
-    if _QML_DIR is None:
-        from pathlib import Path
-        _QML_DIR = Path(__file__).resolve().parent / 'qml'
-    return _QML_DIR
+    return QML_DIR
 
 
 def _ensure_engine():
@@ -115,9 +108,6 @@ def _pil_to_qimage(image):
 def open_palette_viewer(host, colors, target, *, pool=None):
     """展示完整允许色图。像素与目标色来自调用方，本函数不重新计算。"""
     from palette import full_atlas
-    # 原先这里还有 `import palette_viewer as legacy`，但从未使用；
-    # 而它 import tkinter + customtkinter，会让 Qt 入口把 Tk 整套拉起来。
-    # 查看器本身是 Viewer.qml，不依赖它。
 
     future = None
     if pool is not None:

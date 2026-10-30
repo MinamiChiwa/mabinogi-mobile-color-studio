@@ -85,3 +85,6 @@ debug-screenshots/
 *.pem
 *.p12
 *.pfx
+
+# Local AI tool notes
+.workbuddy/

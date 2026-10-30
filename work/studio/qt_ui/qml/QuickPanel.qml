@@ -97,7 +97,6 @@ Item {
                     case 'history':  return Loc.t('寻色记录')
                     case 'tutorial': return Loc.t('使用教程')
                     case 'support':  return Loc.t('支持作者')
-                    case 'update':   return Loc.t('检查更新')
                     }
                     return ''
                 }
@@ -549,35 +548,6 @@ Item {
                         cursorShape: Qt.PointingHandCursor
                         onClicked: bridge.openLink(bridge.supportLinks()[modelData.k])
                     }
-                }
-            }
-        }
-
-        // ================= 检查更新 =================
-        ColumnLayout {
-            Layout.fillWidth: true
-            spacing: 6
-            visible: panel.kind === 'update'
-
-            Text {
-                id: updateLabel
-                Layout.fillWidth: true
-                property var info: ({})
-                text: info.label || Loc.t('当前版本已是最新')
-                color: panel.cMuted2
-                font.pixelSize: 11
-                wrapMode: Text.WordWrap
-            }
-
-            UiButton {
-                Layout.fillWidth: true
-                text: Loc.t('检查更新')
-                kind: 'secondary'
-                implicitHeight: 28
-                onClicked: {
-                    if (!bridge) return
-                    bridge.checkUpdate()
-                    Qt.callLater(function() { updateLabel.info = bridge.updateInfo() })
                 }
             }
         }

@@ -1,41 +1,21 @@
-"""业务核心：不依赖任何 GUI 框架。
+"""业务核心：寻色流程、方案与设置、事件分发；不依赖任何 GUI 框架。
 
-## 为什么需要这个模块
-
-原 `app.py` 把业务方法写在 `class App(ct.CTk)` 里，导致任何界面（包括 Qt）
-只要复用这些方法，就必须 ``import app``，进而连带导入 ``customtkinter`` 并
-执行 ``ct.set_appearance_mode`` / ``i18n.install_widgets(ct)`` 等 Tk 副作用。
-
-本模块把**业务方法本身**搬出来，``App`` 与 ``QtHost`` 都从这个基类继承，
-于是：
-
-* 业务代码只有一份（不是复制两份）；
-* Qt 入口不再需要 ``import customtkinter``；
-* Tk 版 `app.py` 可以继续用同一批方法，行为不变。
-
-## 边界
-
-本模块**只**包含原来就在 `App` 里的业务方法，逐字搬运，未改写任何一行逻辑。
-界面投影仍由宿主类（`app.App` 的 CTk 控件 / `qt_ui.host.QtHost` 的适配器）承担，
-业务方法内部依旧是 ``self.status.configure(...)`` 这类调用。
+`qt_ui.host.QtHost` 继承 `Business`，并提供业务方法读写的界面投影
+（``self.status`` / ``self.start`` / ``self.cards`` …）与 ``after`` 定时器。
 """
 from __future__ import annotations
 
 import json
-import queue
 import sys
 import threading
 from pathlib import Path
 
 import i18n
 from i18n import tr
-from pathlib import Path as _Path
 
-# 与原 app.py 一致：theme 在业务层以 ui_theme 的名字出现，只取色值常量。
-# theme 本身不含 GUI 依赖（纯字典），不会把 Tk 拉起来。
+# theme 是纯数据（色值字典），业务层只取占位色常量。
 import theme as ui_theme
 
-# --- 与原 app.py 完全一致的模块级依赖 -------------------------------------
 import platform_win  # noqa: F401  必须在截图模块之前建立物理像素感知
 from app_data import resolve_data_directory
 from engine import Runner
@@ -44,7 +24,7 @@ from palette import allowed_colors, overview
 from window_target import resolve_target, WindowTarget, activate_target_window
 from result_history import describe_result, read_history, save_result
 from ui_settings import read_settings, save_settings
-from profile_store import read_profile, write_profile, canonical_profile, PresetStore
+from profile_store import read_profile, write_profile, canonical_profile
 from strategy_defaults import migrate_strategy_defaults
 from session_store import new_session_path, start_session_cleanup
 from hotkeys import run_hotkeys
@@ -54,12 +34,9 @@ from concurrent.futures import ThreadPoolExecutor
 SERVER_OPTIONS = (('tw', '台服'), ('kr', '韩服'), ('jp', '日服'))
 NATIVE_STRATEGY_LABEL = '精准寻色（读取内存，风险较高）'
 
-APP_VERSION = '0.4.9'
+from build_info import APP_VERSION
 
 # --- 外链与教程文案 -------------------------------------------------------
-# 原来这两项在 ui_dialogs.py 里，但那个模块 import customtkinter，
-# Qt 入口不能为了取一个地址把 Tk 拉起来，所以常量放在这本无 GUI 依赖的模块。
-# ui_dialogs 仍保留同名常量，Tk 版行为不变。
 GITHUB = 'https://github.com/MinamiChiwa/mabinogi-mobile-color-studio'
 AFDIAN = 'https://afdian.com/a/minamichiwa'
 PATREON = 'https://patreon.com/chiwaminami?utm_medium=unknown&utm_source=join_link&utm_campaign=creatorshare_creator&utm_content=copyLink'
@@ -77,14 +54,11 @@ TUTORIAL = [
 
 PALETTE_POOL = ThreadPoolExecutor(max_workers=1)
 
-# 与原 app.py 的模块级常量一致：色值同样取自 theme，不硬编码。
-# 这两个值只被「清空读数」用到（把「实测颜色」重置成占位态）。
+# 「清空读数」把实测颜色重置成占位态时使用的文字色。
 MUTED = ui_theme.color('muted')
-ACCENT = ui_theme.color('accent')
 
 
 def build_runner(emit, folder, strategy='screenshot', entry=None, entry_size=None):
-    """与原 app.py 逐字一致。"""
     if strategy == 'native':
         from native_live.service import run_native_search
         return Runner(emit, folder, native_runner=run_native_search)
@@ -97,7 +71,6 @@ def build_runner(emit, folder, strategy='screenshot', entry=None, entry_size=Non
 
 
 def build_preview(target, tolerance):
-    """与原 app.py 的同名函数逐字一致（纯组合，不含新算法）。"""
     pixels = allowed_colors(target, tolerance)
     return pixels, overview(pixels)
 
@@ -108,7 +81,7 @@ def installation_root():
 
 
 def data_directory():
-    """与原 app.py 的 DATA 计算方式一致。"""
+    """打包运行时优先使用更新事务记录的数据目录，否则为程序旁的 data。"""
     from update_bootstrap import active_data_directory, installation_root as _root
     update_data = active_data_directory(_root()) if getattr(sys, 'frozen', False) else None
     return update_data or resolve_data_directory(
@@ -123,10 +96,7 @@ i18n.language = i18n.normalize_language(
 
 
 class RuleSource:
-    """区域规则的唯一实现。界面层（Tk 卡片 / Qt 卡片）都从这里取。
-
-    原 `app.Card.rule` 的逐字搬运，保证送进引擎的规则字典完全一致。
-    """
+    """区域规则的唯一实现：卡片变量 → 送进引擎的规则字典。"""
 
     def rule(self):
         if not self.enabled.get():
@@ -140,10 +110,7 @@ class RuleSource:
 
 
 class Business:
-    """业务方法集合。宿主类（CTk / Qt）提供 ``self.<控件>`` 即可运行。
-
-    这里的方法体来自原 `app.App`，逐字搬运。
-    """
+    """业务方法集合。宿主类提供 ``self.<控件>`` 投影、``after`` 与 ``show_notice``。"""
 
     # ------------------------------------------------------------------
     # 运行控制
@@ -328,19 +295,9 @@ class Business:
         if self.active_rules:
             self.display_colors(describe_result(colors, self.active_rules))
 
-    # -- 提示框：业务层只声明「要提示什么」--------------------------------
     def show_notice(self, kind, title, message):
-        """弹出提示框。
-
-        默认实现仍用 tkinter.messagebox —— Tk 版（``app.App``）没有覆写它，
-        行为与改动前逐字一致。Qt 版在 ``QtHost`` 里覆写成自绘对话框，
-        因此业务层本身不再 ``import tkinter``。
-        """
-        from tkinter import messagebox
-        if kind == 'error':
-            messagebox.showerror(title, message, parent=self)
-        else:
-            messagebox.showinfo(title, message, parent=self)
+        """弹出提示框；kind 为 'info' 或 'error'。由宿主实现。"""
+        raise NotImplementedError
 
     def clear_run_readings(self):
         self.best_summary = None
@@ -459,9 +416,6 @@ class Business:
         selected = next((server for server, label in SERVER_OPTIONS if str(tr(label)) == value), None)
         if selected is None:
             return
-        picker = getattr(self, '_window_picker', None)
-        if picker is not None and picker.winfo_exists():
-            picker.destroy()
         self.server.set(selected)
         self.selected_window = None
         self._bound_target = None

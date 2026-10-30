@@ -1,6 +1,5 @@
 """Local, offline UI translations. Profile mode identifiers stay stable."""
 import re
-import weakref
 from functools import lru_cache
 from opencc import OpenCC
 language='简体中文'
@@ -319,8 +318,6 @@ _locales={'日本語':JA,'한국어':KO}
 _locale_patterns={name:re.compile('|'.join(re.escape(key) for key in sorted(values,key=len,reverse=True)))
                   for name,values in _locales.items()}
 _english_parts=sorted(EN,key=len,reverse=True)
-_widgets=weakref.WeakSet()
-_refreshers=weakref.WeakKeyDictionary()
 
 
 class DisplayText(str):
@@ -352,25 +349,14 @@ def tr(text):
     return DisplayText(_translate(source,language),source)
 
 
-def on_language(widget,callback):
-    _refreshers[widget]=callback.__name__
-
-
 def set_language(value):
     global language
     if value not in LANGUAGES:raise ValueError('Unknown language')
     language=value
-    for widget in list(_widgets):
-        if not widget.winfo_exists():continue
-        if hasattr(widget,'_i18n_text'):widget.configure(text=widget._i18n_text)
-        if hasattr(widget,'_i18n_title'):widget.title(widget._i18n_title)
-    for widget,name in list(_refreshers.items()):
-        if widget.winfo_exists():getattr(widget,name)()
 
 # ---------------------------------------------------------------------------
 # 紧凑浮层（QuickPanel）新增文案
-#   这些是 V5 引入的小面板专用词，主词典里没有；集中补在这里，
-#   避免散落到 EN/TW 两张大表里难以维护。
+#   小面板专用词，主词典里没有；集中补在这里。
 # ---------------------------------------------------------------------------
 EN.update({
     '游戏窗口': 'Game window',
@@ -384,23 +370,14 @@ EN.update({
     '还没有保存的方案': 'No presets yet',
     '还没有寻色记录': 'No results yet',
     '检查更新': 'Check for updates',
-    '当前版本已是最新': 'You are up to date',
-    '正在检查更新…': 'Checking for updates…',
-    '发现新版本': 'New version available',
-    '正在下载': 'Downloading',
-    '更新已下载，可安装': 'Update ready to install',
-    '检查更新失败，请稍后重试': 'Update check failed, please retry later',
     '赞助完全自愿，不论是否赞助都能使用全部功能。':
         'Sponsorship is voluntary; all features work either way.',
     '提交问题 / Issues': 'Report an issue',
-    '最大': 'Max',
-    '平均': 'Avg',
 })
 
 TW.update({
     '游戏窗口': '遊戲視窗',
     '刷新': '重新整理',
-    '未檢測到遊戲窗口': '未偵測到遊戲視窗',
     '未检测到游戏窗口': '未偵測到遊戲視窗',
     '新方案名称': '新方案名稱',
     '保存': '儲存',
@@ -410,40 +387,7 @@ TW.update({
     '还没有保存的方案': '尚未儲存任何方案',
     '还没有寻色记录': '尚無尋色紀錄',
     '检查更新': '檢查更新',
-    '当前版本已是最新': '目前為最新版本',
-    '正在检查更新…': '正在檢查更新…',
-    '发现新版本': '發現新版本',
-    '正在下载': '正在下載',
-    '更新已下载，可安装': '更新已下載，可安裝',
-    '检查更新失败，请稍后重试': '檢查更新失敗，請稍後再試',
     '赞助完全自愿，不论是否赞助都能使用全部功能。':
         '贊助完全自願，無論是否贊助都能使用全部功能。',
     '提交问题 / Issues': '回報問題',
 })
-
-
-def install_widgets(ct):
-    """Translate display text only; identifiers and HEX values are never changed."""
-    if getattr(ct,'_studio_i18n',False):return
-    ct._studio_i18n=True
-    for cls in (ct.CTkLabel,ct.CTkButton,ct.CTkCheckBox,ct.CTkSwitch):
-        original_init=cls.__init__;original_config=cls.configure
-        def init(self,*args,_original=original_init,**kwargs):
-            if 'text' in kwargs:
-                self._i18n_text=getattr(kwargs['text'],'source',kwargs['text'])
-                kwargs['text']=tr(kwargs['text'])
-            _original(self,*args,**kwargs)
-            _widgets.add(self)
-        def configure(self,*args,_original=original_config,**kwargs):
-            if 'text' in kwargs:
-                self._i18n_text=getattr(kwargs['text'],'source',kwargs['text'])
-                kwargs['text']=tr(kwargs['text'])
-            return _original(self,*args,**kwargs)
-        cls.__init__=init;cls.configure=configure
-    for cls in (ct.CTk,ct.CTkToplevel):
-        original=cls.title
-        def title(self,string=None,_original=original):
-            if string is None:return _original(self)
-            self._i18n_title=getattr(string,'source',string);_widgets.add(self)
-            return _original(self,tr(string))
-        cls.title=title

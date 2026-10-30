@@ -7,6 +7,8 @@ class DownloadCancelled(DownloadError): pass
 
 def download_bytes(client,url,partial,size,sha256,*,cancel=lambda:False,emit=lambda e:None,timeout=(5,15),max_retries=2):
     partial=Path(partial);partial.parent.mkdir(parents=True,exist_ok=True);attempt=0
+    # A mirror-first client switches to direct GitHub after a failed attempt.
+    report_failure=getattr(client,'report_failure',lambda url:None)
     meta=partial.with_name(partial.name+'.json')
     try:identity=json.loads(meta.read_text(encoding='utf-8'))
     except (OSError,ValueError):identity={}
@@ -46,7 +48,7 @@ def download_bytes(client,url,partial,size,sha256,*,cancel=lambda:False,emit=lam
             attempt+=1;continue
         elif status in (429,500,502,503,504) and attempt<max_retries:
             if hasattr(response,'close'):response.close()
-            attempt+=1
+            report_failure(url);attempt+=1
             try:delay=min(5.,max(.1,float(getattr(response,'headers',{}).get('Retry-After',.25*attempt))))
             except ValueError:delay=.25*attempt
             until=time.monotonic()+delay
@@ -70,7 +72,7 @@ def download_bytes(client,url,partial,size,sha256,*,cancel=lambda:False,emit=lam
         except DownloadCancelled:raise
         except Exception as exc:
             if isinstance(exc,DownloadError) or attempt>=max_retries:raise DownloadError(str(exc)) from exc
-            attempt+=1;continue
+            report_failure(url);attempt+=1;continue
         finally:
             if hasattr(response,'close'):response.close()
         if received!=size:
@@ -78,5 +80,7 @@ def download_bytes(client,url,partial,size,sha256,*,cancel=lambda:False,emit=lam
             partial.unlink(missing_ok=True);raise DownloadError('download size mismatch')
         digest=hash_file(partial)
         if digest!=sha256:
-            partial.unlink(missing_ok=True);raise DownloadError('download hash mismatch')
+            partial.unlink(missing_ok=True);report_failure(url)
+            if attempt>=max_retries:raise DownloadError('download hash mismatch')
+            attempt+=1;continue
         return complete()

@@ -1,24 +1,20 @@
 """Qt 版寻色浮窗。
 
-对外接口与原 `search_overlay.SearchOverlay` 保持一致
-（``begin`` / ``render`` / ``handle`` / ``dismiss`` / ``mark_retry_requested``），
-因为 `app.App` 的业务方法会调用这些名字。
+对外接口（``begin`` / ``render`` / ``handle`` / ``dismiss`` /
+``mark_retry_requested``）由 `business.Business` 的寻色流程调用。
 
-**原生能力保持原样**：仍然使用 `overlay_native` 模块注册 HWND，
-即 ``SetWindowDisplayAffinity(hwnd, 0x11)``（截图排除）、
+窗口原生属性由 `overlay_native` 注册：
+``SetWindowDisplayAffinity(hwnd, 0x11)``（截图排除）、
 ``WS_EX_NOACTIVATE``（不抢焦点）、``WS_EX_TOPMOST``（置顶）。
-这部分逻辑没有重写，只是换了一个宿主窗口。
 
 按需求**不做整窗透明度**；圆角通过透明窗口 + 圆角矩形实现。
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QTimer, QUrl, Qt, Signal, Slot
+from PySide6.QtCore import QObject, QTimer, Signal, Slot
 from PySide6.QtQml import QQmlApplicationEngine
-from PySide6.QtQuick import QQuickWindow
 
 import overlay_native
 from display_geometry import clamp_position, work_area
@@ -206,11 +202,7 @@ class OverlayState(QObject):
 
 
 class QtOverlay(QObject):
-    """替代 `search_overlay.SearchOverlay`。
-
-    只保留 `app.App` 会调用的方法签名；内部把内容投影到 QML，
-    并把 Win32 注册交给原有 `overlay_native`。
-    """
+    """寻色浮窗：把寻色事件投影到 QML，Win32 注册交给 `overlay_native`。"""
 
     def __init__(self, host, stop, select_candidate=None, settings_path=None):
         super().__init__()
@@ -259,7 +251,7 @@ class QtOverlay(QObject):
             return 0.92
 
     def save_position(self):
-        """拖动结束后保存位置（原版 save_position）。"""
+        """拖动结束后保存位置。"""
         if not self.settings_path or self._window is None:
             return
         self._position = [self._window.x(), self._window.y()]
@@ -269,7 +261,7 @@ class QtOverlay(QObject):
             pass
 
     def set_opacity(self, value):
-        """设置浮窗不透明度；250ms 防抖写盘（原版 set_opacity）。"""
+        """设置浮窗不透明度；250ms 防抖写盘。"""
         try:
             value = max(0.65, min(1.0, float(value)))
         except (TypeError, ValueError):
@@ -309,7 +301,7 @@ class QtOverlay(QObject):
         # 不透明度在窗口真正显示后再应用（见 _apply_alpha）：
         # QWindow 尚未 shown 时设置会被平台的 native handler 忽略。
 
-        # 按原版策略：无边框、置顶、不抢焦点、截图排除
+        # 无边框、置顶、不抢焦点、截图排除
         self._prepare_native()
         return window
 
@@ -488,7 +480,7 @@ class QtOverlay(QObject):
             self._window.hide()
 
     def _candidate_rows(self, data):
-        """把原版的候选数据投影成 QML 卡片。
+        """把引擎的候选数据投影成 QML 卡片。
 
         字段来源与 ``search_overlay.show_candidates`` 一致：
         ``candidates[i]`` 给出颜色/色差，``observations[id]`` 给出实测值，
@@ -558,11 +550,7 @@ class QtOverlay(QObject):
         return rows
 
     def handle(self, kind, data):
-        """对齐原 `SearchOverlay.handle` 的**入参语义**。
-
-        真正的判定在原版里；这里只处理"该显示什么"的少数几类事件，
-        其余交回 ``app.App.handle_event``。
-        """
+        """只处理浮窗要显示的事件；状态与结果判定由 ``Business.handle_event`` 负责。"""
         if getattr(self, '_dismissed', False):
             return
         if not isinstance(data, dict):
@@ -606,7 +594,7 @@ class QtOverlay(QObject):
             return
 
         if kind == 'finished':
-            # 原版在 native 运行结束时直接收起浮窗
+            # native 运行结束时直接收起浮窗
             if getattr(self, '_native_run', False):
                 self.dismiss()
                 return
@@ -686,7 +674,7 @@ class QtOverlay(QObject):
         px, py = clamp_position(position, area, size)
         self._window.setPosition(int(px / scale), int(py / scale))
         self._position = [int(px / scale), int(py / scale)]
-        # 拖动结束后落库（原版在 ButtonRelease-1 里 save_position）
+        # 拖动结束后落库
         self.save_position()
 
     def _place(self, window):

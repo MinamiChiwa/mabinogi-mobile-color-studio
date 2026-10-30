@@ -1,11 +1,10 @@
 """Qt Quick 界面层：展示状态与控件适配器。
 
-设计约束（见 docs/design/qt-migration-plan.md）：
+设计约束：
 
-* 本包**只做展示**。寻色、判色、方案读写、事件处理全部调用 `app.App` 的原有方法，
+* 本包**只做展示**。寻色、判色、方案读写、事件处理都在 `business.Business`，
   不在这里重新实现、也不改写任何返回值。
-* 适配器存在的唯一目的，是让 `app.App` / `app.Card` 里形如
-  ``self.status.configure(text=...)`` 的调用能落到 QML 上。
+* 适配器让业务方法里形如 ``self.status.configure(text=...)`` 的调用落到 QML 上。
 * 颜色与圆角一律取自 `theme`，不新增字面量。
 """
 from __future__ import annotations
@@ -19,13 +18,12 @@ import theme as ui_theme
 
 
 # ---------------------------------------------------------------------------
-# 变量适配器：替代 tk.BooleanVar / StringVar / DoubleVar / IntVar
+# 变量适配器：业务方法通过 .get() / .set() 读写卡片与设置
 # ---------------------------------------------------------------------------
 class VarShim:
-    """为业务代码提供 ``.get()`` / ``.set()`` / ``.trace_add()``。
+    """提供 ``.get()`` / ``.set()`` / ``.trace_add()``。
 
-    `app.Card.__init__` 会给每个变量挂 ``trace_add('write', schedule_autosave)``，
-    所以这里必须保留同名接口。
+    QtHost 给卡片变量挂 ``trace_add('write', schedule_autosave)`` 实现自动保存。
     """
 
     __slots__ = ('_get', '_set', '_traces')
@@ -124,14 +122,6 @@ class MenuShim(_Shim):
             self._on_select(value)
 
 
-class SliderShim(_Shim):
-    """DeliberateSlider 的替身：只保留外观与禁用态。
-
-    「滚轮不改变数值」这一行为由 QML 侧 ``wheelEnabled: false`` 承担，
-    语义与原版一致。
-    """
-
-
 class CardLabelShim(_Shim):
     """卡片内某个文字/色块标签的替身。
 
@@ -151,22 +141,6 @@ class CardLabelShim(_Shim):
     def configure(self, **kwargs):
         self._state.update(kwargs)
         self._sink(kwargs)
-
-
-class NullShim(_Shim):
-    """占位：原版存在但 Qt 侧无对应物的控件（如原生 resize 表面）。"""
-
-    def destroy(self):
-        pass
-
-    def lift(self):
-        pass
-
-    def transient(self, *_args):
-        pass
-
-    def protocol(self, *_args):
-        pass
 
 
 # ---------------------------------------------------------------------------

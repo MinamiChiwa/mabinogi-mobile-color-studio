@@ -1,30 +1,17 @@
-"""软件更新对话框（Qt 版）。
+"""软件更新对话框。
 
-替换原 `updater.ui_update.UpdateUI` 的**承载方式**，不改更新器本身：
-
-* 事件仍然由 `UpdateRuntime` 产生，经 `business.handle_event('update', …)`
-  转到本类——`business.py` 一行未改；
-* 文案仍然取自 `updater.ui_update.update_copy()` / `text()`，
-  五语翻译与「有新版本 x.y.z」等措辞不做二次创作；
-* 下载、取消、安装、忽略、导入离线包全部调用 `UpdateRuntime` 的原有方法，
-  本类只负责按钮可用性与进度显示。
-
-`UpdateUI.handle(event)` 是原版的调用契约，这里保留同名方法，
-所以 `QtHost` 只要把 `self.update_ui` 指向本类，业务侧无需任何适配。
+* 事件由 `UpdateRuntime` 产生，经 `business.handle_event('update', …)` 交给 ``handle``；
+* 五语文案来自 `updater.ui_update`；
+* 检查、下载、取消、安装、忽略都调用 `UpdateRuntime`，本类只负责按钮可用性与进度显示。
 """
 from __future__ import annotations
 
-from pathlib import Path
-
 from PySide6.QtCore import Property, QObject, QUrl, Signal, Slot
-from PySide6.QtGui import QGuiApplication
-from PySide6.QtQml import QQmlApplicationEngine
 
 import i18n
 from qt_ui import dialogs as _dialogs
 
-# 动作顺序与原 Tk 版一致（检查 / 下载 / 安装 / 取消 / 忽略 / 离线 / 稍后）
-ACTIONS = ('check', 'download', 'install', 'cancel', 'ignore', 'offline', 'later')
+ACTIONS = ('check', 'download', 'install', 'cancel', 'ignore', 'later')
 
 
 def _ui_update():
@@ -52,7 +39,7 @@ class UpdatePanel(QObject):
     # 与原 UpdateUI 相同的入口
     # ------------------------------------------------------------------
     def handle(self, event):
-        """由 `business.handle_event` 调用。事件字典原样传入，不改键名。"""
+        """由 `business.handle_event` 调用。"""
         import time
         if event['kind'] == 'download':
             now = time.monotonic()
@@ -63,10 +50,8 @@ class UpdatePanel(QObject):
                                           / max(0.01, now - origin[0])))
         self.last = event
         if event['kind'] == 'exit_requested':
-            # 安装器要求退出：与原版一样先标记，再走正常关闭流程
-            # （Qt 侧关闭动作挂在 aboutToQuit → host.shutdown）。
-            self._host._update_install_exit = True
-            QGuiApplication.quit()
+            # 更新助手已接管安装：保存设置后退出，让它替换程序文件。
+            self._host.close()
             return
         self.refresh()
 
@@ -143,8 +128,6 @@ class UpdatePanel(QObject):
             self._runtime.cancel()
         elif key == 'ignore':
             self._ignore()
-        elif key == 'offline':
-            self._pick_offline()
         elif key == 'later':
             self._close()
 
@@ -165,24 +148,6 @@ class UpdatePanel(QObject):
         self._button = _ui_update().text('check', i18n.language)
         self.refresh()
 
-    def _pick_offline(self):
-        """离线包选择交给 QML 的文件对话框，选完把路径原样交给 runtime。"""
-        if self._window is not None:
-            try:
-                self._window.requestOfflinePick()
-            except (AttributeError, RuntimeError):
-                pass
-
-    @Slot(str)
-    def offlinePicked(self, url):
-        """QML 传回的是 file:// URL，转成本地路径后交给 runtime。"""
-        from PySide6.QtCore import QUrl
-
-        raw = str(url or '')
-        path = QUrl(raw).toLocalFile() if raw.startswith('file:') else raw
-        if path:
-            self._runtime.offline(path)
-
     @Slot(bool)
     def setAutomatic(self, value):
         self._runtime.preference(automatic=bool(value))
@@ -194,7 +159,7 @@ class UpdatePanel(QObject):
         self.refresh()
 
     def operation_busy(self):
-        """与原版同义：进行中的取色/选窗/寻色都算忙。"""
+        """进行中的取色/选窗/寻色都算忙。"""
         return (self._host.busy or self._host.picking
                 or self._host.__dict__.get('_window_selecting', False)
                 or self._host.__dict__.get('_color_selecting', False))
@@ -246,12 +211,12 @@ class UpdatePanel(QObject):
         busy = self.operation_busy()
         rows = []
         for key in ACTIONS:
-            enabled = (key in ('later', 'offline', 'check')
+            enabled = (key in ('later', 'check')
                        or (key == 'download' and state == 'available')
                        or (key == 'install' and state == 'ready')
                        or (key == 'cancel' and state in ('checking', 'downloading'))
                        or (key == 'ignore' and bool(version)))
-            if key in ('offline', 'download', 'install') and busy:
+            if key in ('download', 'install') and busy:
                 enabled = False
             rows.append({
                 'key': key,
@@ -286,7 +251,6 @@ class UpdatePanel(QObject):
             'heading': copy['title'] if version else ui.text('title', lang),
             'body': self._body(),
             'notice': ui.text('checking_notice', lang),
-            'offlineNotice': ui.text('offline_notice', lang),
             'autoLabel': ui.text('automatic', lang),
             'preLabel': ui.text('prerelease', lang),
             'automatic': bool(self._runtime.prefs.get('automatic', True)),

@@ -86,11 +86,17 @@ Window {
     height: Math.min(752, Screen.desktopAvailableHeight - 80)
     minimumWidth: 360
     minimumHeight: 520
-    visible: true
+    // 更新后首次启动时保持隐藏，由 QtHost 在更新提交后显示
+    visible: launchVisible
     // AppearAnim：窗口出场统一淡入
     NumberAnimation on opacity { from: 0; to: 1; duration: 150; easing.type: Easing.OutCubic }
     color: 'transparent'
-    flags: Qt.Window | Qt.FramelessWindowHint
+    flags: Qt.Window | Qt.FramelessWindowHint | Qt.WindowMinimizeButtonHint
+    // 标题栏关闭、任务栏关闭、Alt+F4 都交给 QtHost.close()：先停寻色、保存设置再退出
+    onClosing: (close) => {
+        close.accepted = false
+        bridge.requestClose()
+    }
     title: Loc.t('染色工坊 · 瑪奇 Mobile')
 
     // ---------------------------------------------------------------------
@@ -247,15 +253,47 @@ Window {
                                     kind: modelData.kind
                                     implicitHeight: 30
                                     onClicked: {
-                                        // update / tutorial / support 走紧凑浮层；
-                                        // github 保持直接开浏览器
-                                        if (modelData.key === 'github') {
-                                            bridge.headerAction('github')
+                                        // tutorial / support 走紧凑浮层；
+                                        // github 开浏览器，update 打开完整更新对话框
+                                        if (modelData.key === 'github' || modelData.key === 'update') {
+                                            bridge.headerAction(modelData.key)
                                         } else {
                                             root.openPanel(modelData.key, hdrBtn)
                                         }
                                     }
                                 }
+                            }
+                        }
+
+                        // 窗口控制：无边框窗口需要自带最小化与关闭
+                        Item {
+                            width: minBtn.implicitWidth
+                            height: 30
+                            anchors.verticalCenter: parent.verticalCenter
+
+                            UiButton {
+                                id: minBtn
+                                objectName: 'minimizeBtn'
+                                text: '—'
+                                kind: 'ghost'
+                                implicitWidth: 32
+                                implicitHeight: 30
+                                onClicked: root.showMinimized()
+                            }
+                        }
+                        Item {
+                            width: closeBtn.implicitWidth
+                            height: 30
+                            anchors.verticalCenter: parent.verticalCenter
+
+                            UiButton {
+                                id: closeBtn
+                                objectName: 'closeBtn'
+                                text: '✕'
+                                kind: 'ghost'
+                                implicitWidth: 32
+                                implicitHeight: 30
+                                onClicked: root.close()
                             }
                         }
                     }

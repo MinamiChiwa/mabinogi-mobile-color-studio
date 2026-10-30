@@ -27,13 +27,11 @@
 
 取消（Esc / 右键 / 关窗）时不回调，`host.picking` 复位。
 
-## 与原 Tk 版的关系
+## 依赖
 
-坐标映射、DPI 上下文、桌面边界、按键轮询全部**复用原模块**
-（`eyedropper_native` / `screen_mapping` / `window_dpi`），未重写。
-仅窗口载体从 `tk.Toplevel` 换成 Qt 窗口，因此不能再用
-`eyedropper_native.picker_hwnd()`（它硬校验窗口类名为 `TkTopLevel`），
-改由本模块的 `_show_picker()` 完成同样的校验与定位。
+坐标映射、DPI 上下文、桌面边界与按键轮询来自
+`eyedropper_native` / `screen_mapping` / `window_dpi`；
+窗口的校验与定位由本模块的 `_show_picker()` 完成。
 """
 from __future__ import annotations
 
@@ -41,20 +39,14 @@ import ctypes as C
 from ctypes import wintypes as W
 
 from PIL import ImageGrab
-from PySide6.QtCore import QObject, Slot, QTimer, QUrl, Qt
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtCore import QObject, Slot, QTimer, QUrl
+from PySide6.QtGui import QImage
 from PySide6.QtQml import QQmlApplicationEngine
-from PySide6.QtQuick import QQuickImageProvider, QQuickWindow
+from PySide6.QtQuick import QQuickImageProvider
 
 
 def pixel_hex(image, x, y):
-    """读一个物理像素的 HEX。
-
-    与原 ``eyedropper.pixel_hex`` 逐字相同。放在这里是因为原模块
-    在文件头 ``import tkinter``，而 Qt 入口不应为了读一个像素
-    把 Tk 框架整套拉起来（会连带 PIL.ImageTk）。
-    两者的一致性由 ``verify_qt.py`` 的子进程比对保证。
-    """
+    """读一个物理像素的 HEX；坐标越界时夹到图像边缘。"""
     x = max(0, min(image.width - 1, int(x)))
     y = max(0, min(image.height - 1, int(y)))
     return '#%02X%02X%02X' % image.convert('RGB').getpixel((x, y))
@@ -140,7 +132,7 @@ class QtEyedropper(QObject):
             self._image = screen
             self._provider.set_image(_pil_to_qimage(screen))
             self._open_window()
-        except Exception as exc:      # noqa: BLE001 - 与原版一致：任何异常都回到 UI
+        except Exception as exc:      # noqa: BLE001 - 任何异常都回到 UI
             self._finish(error=exc)
 
     def _open_window(self):
@@ -174,11 +166,7 @@ class QtEyedropper(QObject):
         self._escape_timer.start()
 
     def _verify_and_pin(self):
-        """确认窗口客户区与物理桌面完全重合；同时确保不激活、置顶。
-
-        这段校验与原版 ``eyedropper_native.show_picker`` 等价，
-        只是不再要求窗口类名为 ``TkTopLevel``。
-        """
+        """确认窗口客户区与物理桌面完全重合；同时确保不激活、置顶。"""
         user = native._u
         hwnd = user.GetAncestor(int(self._window.winId()), 2)
         if not hwnd:
@@ -222,7 +210,7 @@ class QtEyedropper(QObject):
         """返回 (hex, 标签位置是否翻转)，用于悬浮标签。
 
         坐标换算用**物理光标**而不是 QML 逻辑坐标 —— 后者会被 window DPR
-        再缩一次，与原版"物理像素取色"的语义不符。
+        再缩一次，与"物理像素取色"的语义不符。
         """
         if self._finished or self._image is None:
             return ''

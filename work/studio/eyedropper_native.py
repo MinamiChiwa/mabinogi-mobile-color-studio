@@ -1,9 +1,7 @@
-"""Physical desktop coordinates and a verified, nonactivating Tk picker window."""
+"""Physical desktop coordinates, cursor and Esc polling for the screen eyedropper."""
 import ctypes as C
 from ctypes import wintypes as W
-import os
 
-from overlay_native import configure_overlay, unregister_overlay
 from window_dpi import physical_pixel_context
 
 
@@ -48,39 +46,3 @@ def physical_cursor():
 
 def escape_pressed():
     return bool(_u.GetAsyncKeyState(0x1B) & 0x8000)
-
-
-def picker_hwnd(window):
-    """Never position an owner or any foreign window returned by a bad handle."""
-    hwnd = _u.GetAncestor(window.winfo_id(), 2)  # GA_ROOT, excludes owner chains.
-    pid = W.DWORD()
-    class_name = C.create_unicode_buffer(256)
-    if (not hwnd or not _u.IsWindow(hwnd)
-            or not _u.GetWindowThreadProcessId(hwnd, C.byref(pid))
-            or pid.value != os.getpid()
-            or not _u.GetClassNameW(hwnd, class_name, len(class_name))
-            or class_name.value != 'TkTopLevel'
-            or not _u.AreDpiAwarenessContextsEqual(
-                _u.GetWindowDpiAwarenessContext(hwnd), C.c_void_p(-4))):
-        raise OSError('无法确认取色窗口，请重试。')
-    return int(hwnd)
-
-
-def show_picker(window, bounds):
-    """Show only the confirmed picker at 1:1 physical pixels without activation."""
-    hwnd = picker_hwnd(window)
-    left, top, right, bottom = bounds
-    try:
-        with physical_pixel_context(_u):
-            configure_overlay(hwnd, passive=False)
-            if not _u.SetWindowPos(hwnd, -1, left, top, right-left, bottom-top, 0x50):
-                raise OSError('无法显示取色窗口，请重试。')  # SHOWWINDOW | NOACTIVATE
-            rect, origin = W.RECT(), W.POINT()
-            if (not _u.GetClientRect(hwnd, C.byref(rect))
-                    or not _u.ClientToScreen(hwnd, C.byref(origin))
-                    or (origin.x, origin.y, origin.x+rect.right, origin.y+rect.bottom) != tuple(bounds)):
-                raise OSError('取色窗口与屏幕像素不一致，请重试。')
-        return hwnd
-    except Exception:
-        unregister_overlay(hwnd)
-        raise

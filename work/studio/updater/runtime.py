@@ -3,11 +3,10 @@ import base64,json,os,shutil,sys,tempfile,threading,time,uuid
 from pathlib import Path
 from .service import UpdateService
 from .discovery import check_release
-from .http_client import GitHubClient
+from .http_client import MirrorFirstClient
 from .manifest import verify_manifest
 from .planner import plan_update
 from .download import download_bytes
-from .offline import import_offline
 from .payload import unpack_blob
 from .paths import atomic_json,hash_file,safe_path,checked_root
 from .trust import TRUSTED_KEYS
@@ -16,7 +15,7 @@ from .win_process import launch_helper,process_creation,other_install_instances
 class UpdateRuntime:
     def __init__(self,root,data,version,emit,*,keys=None,client=None):
         self.root=Path(root);self.data=Path(data);self.version=version;self.emit=emit
-        self.keys=TRUSTED_KEYS if keys is None else keys;self.client=client or GitHubClient()
+        self.keys=TRUSTED_KEYS if keys is None else keys;self.client=client or MirrorFirstClient()
         self.service=UpdateService(lambda event:self.emit(dict(kind=event.kind,reason=event.reason_code,
             version=event.version)),installer=self.prepare_install)
         self.storage=self.data/'updates';self.cache=self.storage/'blobs';self.worker=None;self.result=None
@@ -41,7 +40,7 @@ class UpdateRuntime:
                 try:job()
                 except BaseException as exc:
                     self.service.state='ready' if previous_state=='ready' else 'available' if self.service.manifest else 'idle'
-                    reason=('cancelled' if self.service.cancelled() else 'wrong_base' if 'wrong_base' in str(exc)
+                    reason=('cancelled' if self.service.cancelled()
                         else 'conflicts' if 'conflict' in str(exc).lower() else 'verification')
                     self.emit(dict(kind='failed',reason=reason))
                     try:atomic_json(self.storage/'last-error.json',dict(type=type(exc).__name__,message=str(exc)))
@@ -96,29 +95,6 @@ class UpdateRuntime:
             (self.cache/'update-manifest.json').write_bytes(self.result.raw)
             (self.cache/'update-manifest.sig').write_bytes(self.result.signature)
             self._ready(self.result.manifest)
-        return self._start(job)
-    def offline(self,archive):
-        def job():
-            self.service.state='downloading';self.emit(dict(kind='importing'))
-            old,old_raw,_=self._old()
-            pending=self.storage/('.import-'+uuid.uuid4().hex)
-            try:
-                new=import_offline(archive,pending,trusted_keys=self.keys,root=self.root,old_raw=old_raw,
-                    cancel=self.service.cancelled,emit=lambda e:self.emit(dict(e,kind='download')))
-                from packaging.version import Version
-                if Version(new.version)<=Version(self.version):raise ValueError('Downgrades are unsupported')
-                cached=self._load(self.storage/'discovery.json')
-                if new.release_sequence<cached.get('sequence',0):raise ValueError('Replay rejected')
-                if new.minimum_updater>1 or new.data_schema_write!=1 or 1 not in new.data_schema_read:raise ValueError('Incompatible updater')
-                if self.service.cancelled():raise RuntimeError('cancelled')
-                self._plan(new)
-                self.cache.mkdir(parents=True,exist_ok=True)
-                for path in pending.iterdir():path.replace(self.cache/path.name)
-                cached.update(sequence=max(cached.get('sequence',0),new.release_sequence),signed_version=new.version)
-                atomic_json(self.storage/'discovery.json',cached)
-                self.service.manifest=new;self._ready(new)
-            finally:
-                if pending.exists():shutil.rmtree(pending)
         return self._start(job)
     def _ready(self,manifest):
         if self.service.cancelled():raise RuntimeError('cancelled')

@@ -2,19 +2,14 @@ import QtQuick
 import QtQuick.Window
 import QtQuick.Layouts
 import QtQuick.Controls
-import QtQuick.Dialogs
 
 // 软件更新 —— ui-spec-v7.md 7.8 / 7.9
 //   宽 560 · 圆角 12 · 正文可滚动 · 状态与按钮可用性全部来自 updatePanel.view
-//   业务动作（check / download / install / cancel / ignore / offline）转发给 UpdateRuntime
+//   业务动作（check / download / install / cancel / ignore / later）转发给 UpdateRuntime
 Window {
     id: root
 
     readonly property var d: updatePanel.view
-
-    function requestOfflinePick() {
-        offlineDialog.open()
-    }
 
     width: 560
     height: Math.min(760, Math.max(420, body.implicitHeight + 56))
@@ -25,13 +20,6 @@ Window {
     color: 'transparent'
     flags: Qt.Window | Qt.FramelessWindowHint
     title: root.d.title
-
-    FileDialog {
-        id: offlineDialog
-        title: root.d.title
-        nameFilters: ['离线更新包 (*.zip)', '所有文件 (*)']
-        onAccepted: updatePanel.offlinePicked(String(selectedFile))
-    }
 
     Rectangle {
         anchors.fill: parent
@@ -162,8 +150,6 @@ Window {
                         text: modelData.label
                         kind: (modelData.primary && modelData.enabled) ? 'primary'
                               : modelData.key === 'later' ? 'ghost' : 'secondary'
-                        // 「稍后」独占一行，避免 7 个按钮在 2 列里留下半行空位
-                        Layout.columnSpan: modelData.key === 'later' ? 2 : 1
                         enabled: modelData.enabled
                         onClicked: updatePanel.act(modelData.key)
                     }
@@ -173,7 +159,7 @@ Window {
             // ---- 脚注 ----
             Text {
                 Layout.fillWidth: true
-                text: root.d.notice + '\n' + root.d.offlineNotice
+                text: root.d.notice
                 color: uiState.themeColor('faint', uiState.appearance)
                 font.pixelSize: 10
                 lineHeight: 1.5

@@ -1,54 +1,38 @@
-"""Qt 宿主：接管界面，复用 `app.App` 的全部业务方法。
+"""Qt 宿主：继承 `business.Business`，把业务方法的界面调用投影到 QML。
 
-## 为什么这样组织
-
-`app.App` 的界面构建与业务逻辑混在同一个类里（`__init__` 里同时有
-``self.q = queue.Queue()`` 和 ``ct.CTkButton(...)``）。要做到"业务行为
-完全不变"，就不能把业务代码抄一份——抄写就是修改。
-
-这里的做法是**只借用方法对象**：
-
-    QtHost.go = core.App.go          # 同一个代码对象，未复制
-    QtHost.stop = core.App.stop
-
-只要宿主提供业务方法读写的那些实例属性（``self.q`` / ``self.cards`` /
-``self.status`` / ``self.start`` …），这些方法就以 `QtHost` 为 ``self``
-正常运行。界面类的 ``configure(...)`` 由 ``qt_ui.core`` 里的适配器接住，
-转成 QML 状态写入。
-
-所以本文件里**不允许出现**寻色、判色、方案格式相关的任何逻辑。
+业务方法读写 ``self.q`` / ``self.cards`` / ``self.status`` / ``self.start`` 等
+实例属性；``configure(...)`` 由 ``qt_ui.core`` 的适配器接住，转成 `UiState`
+字段。本文件只负责界面投影与生命周期（启动、更新确认、关闭），
+不放寻色、判色或方案格式相关的逻辑。
 """
 from __future__ import annotations
 
+import json
 import queue
 import sys
 import threading
+from pathlib import Path
 
-from PySide6.QtCore import QObject, QTimer, QUrl, Qt, Slot
+from PySide6.QtCore import QObject, QTimer
 from PySide6.QtGui import QGuiApplication
-from PySide6.QtQml import QQmlApplicationEngine
 
 import business as core
 import i18n
 import theme as ui_theme
 from i18n import tr
 
-from qt_ui.core import (CardLabelShim, MenuShim, NullShim, SliderShim, UiState,
-                        VarShim, _pil_to_data_uri)
+from qt_ui import QML_DIR
+from qt_ui.core import CardLabelShim, MenuShim, UiState, VarShim, _pil_to_data_uri
 from qt_ui.bridge import Bridge
 
-from pathlib import Path as _Path
-
-_QML_DIR = _Path(__file__).resolve().parent / 'qml'
-
 
 # ---------------------------------------------------------------------------
-# 卡片：只保留变量与外观投影，规则计算直接借用 core.Card.rule
+# 卡片：变量与外观投影；规则字典由 business.RuleSource 生成
 # ---------------------------------------------------------------------------
 class QtCard(core.RuleSource):
-    """替代 `app.Card`。
+    """区域卡片的变量与显示投影。
 
-    `rule()` 由 business.RuleSource 提供，保证送进引擎的规则字典与原版一致。
+    `rule()` 由 business.RuleSource 提供，即送进引擎的规则字典。
     """
 
     def __init__(self, host, index):
@@ -67,7 +51,7 @@ class QtCard(core.RuleSource):
             def setter(value):
                 store[key] = value
                 # 目标色 / 模式 / 容差会改变「允许色集合」，需要重算缩略图；
-                # 其它字段只刷新显示。与原版 Card 的 trace 行为一致。
+                # 其它字段只刷新显示。
                 if key in ('target', 'mode', 'tolerance'):
                     self.preview()
                 else:
@@ -83,22 +67,10 @@ class QtCard(core.RuleSource):
         self.tolerance = bind('tolerance', float)
         self.priority = bind('priority', int)
 
-        # 原代码会调用 card.priority_menu.set(...) 和 card.change_mode()
+        # 业务方法会调用 card.priority_menu.set(...)；优先级显示由 refresh() 投影。
         self.priority_menu = MenuShim(lambda _kw: None)
-        self.mode_selector = MenuShim(lambda _kw: None)
-
-        self.slider = SliderShim(lambda kw: None)
-        self.hint = NullShim(lambda kw: None)
         self.current = CardLabelShim(self._sink_current, self, 'current')
         self.best_label = CardLabelShim(self._sink_best, self, 'best')
-        self.alts = NullShim(lambda kw: None)
-        self.swatch = NullShim(lambda kw: None)
-        self.palette = NullShim(lambda kw: None)
-        self.palette_note = NullShim(lambda kw: None)
-        self.enable_switch = NullShim(lambda kw: None)
-        self.preview_frame = NullShim(lambda kw: None)
-        self.target_entry = NullShim(lambda kw: None)
-        self.alt_entry = NullShim(lambda kw: None)
 
         self._palette_pixels = None
         self._palette_key = None
@@ -109,7 +81,7 @@ class QtCard(core.RuleSource):
 
         self.refresh()
 
-    # -- 与原版同名，供业务方法调用 -----------------------------------------
+    # -- 供业务方法调用 -----------------------------------------------------
     def refresh_language(self):
         self._host_refresh_language()
 
@@ -136,7 +108,7 @@ class QtCard(core.RuleSource):
         self.host.schedule_palette(self)
 
     def schedule_palette(self):
-        """与原版一致：80ms 防抖，连续输入只算最后一次。"""
+        """80ms 防抖，连续输入只算最后一次。"""
         job = self._preview_job
         if job is not None:
             try:
@@ -169,7 +141,7 @@ class QtCard(core.RuleSource):
             self.host.state.card(self.index, currentDot=color)
 
     def _sink_best(self, kwargs):
-        """把原版 ``best_label.configure(text='#RRGGBB · ΔE 3.20', fg_color=...)``
+        """把业务方法的 ``best_label.configure(text='#RRGGBB · ΔE 3.20', fg_color=...)``
         投影成读数区需要的三段：色点、HEX、ΔE 与徽标。
 
         徽标只读 ``self.rule()`` —— 也就是送进引擎的那份规则字典，
@@ -194,7 +166,7 @@ class QtCard(core.RuleSource):
         if 'fg_color' in kwargs:
             color = kwargs['fg_color']
             changes['bestBg'] = color
-            # 原版用 fg_color 显示实测色，这里同步成读数区色点
+            # fg_color 是实测色，同步成读数区色点
             if str(color).startswith('#') and str(color).upper() != '#28364A':
                 changes['bestDot'] = color
         if 'text_color' in kwargs:
@@ -231,15 +203,12 @@ class QtCard(core.RuleSource):
 # Qt 宿主
 # ---------------------------------------------------------------------------
 class QtHost(core.Business, QObject):
-    # ---- 借用业务方法（同一代码对象，非复制） ----------------------------
-
-    def __init__(self, engine_app=None):
+    def __init__(self):
         super().__init__()
-        self._engine_app = engine_app
         self.state = UiState()
         self.bridge = Bridge(self, self.state)
 
-        # ---- 业务所需的数据属性（与原版同名同义） ----
+        # ---- 业务方法读写的数据属性 ----
         self.selected_window = None
         self._bound_target = None
         self.overlay = None
@@ -254,7 +223,10 @@ class QtHost(core.Business, QObject):
         self.keys = {}
         self.cards = []
         self._closing = False
+        # 更新后首次启动：`--update-ready <事务目录>`，确认提交前不启用热键、不写设置。
         self._update_health_pending = '--update-ready' in sys.argv
+        self._update_transaction = (Path(sys.argv[sys.argv.index('--update-ready') + 1])
+                                    if self._update_health_pending else None)
         self._loading_profile = False
         self._profile_read_failed = False
         self._autosave_job = None
@@ -264,7 +236,7 @@ class QtHost(core.Business, QObject):
         self._retry_enabled = False
         self._native_candidate_batch = None
         self._native_candidate_closed = False
-        # 主窗口：对话框/浮窗以它为锚点定位（由 run_qt.py 注入）
+        # 主窗口：对话框/浮窗以它为锚点定位（由 app.py 注入）
         self.window = None
         self._last_palette_job = {}
 
@@ -288,24 +260,7 @@ class QtHost(core.Business, QObject):
         self.search_strategy = VarShim(lambda: strategy_store['value'],
                                        lambda v: strategy_store.__setitem__('value', v))
 
-        # ---- 界面替身 ----
-        self.page = NullShim(lambda kw: None)
-        self.header = NullShim(lambda kw: None)
-        self.brand = NullShim(lambda kw: None)
-        self.toolbar = NullShim(lambda kw: None)
-        self.links = NullShim(lambda kw: None)
-        self.body_scroll = NullShim(lambda kw: None)
-        self.card_body = NullShim(lambda kw: None)
-        self.intro = NullShim(lambda kw: None)
-        self.intro_labels = []
-        self.toolbar_buttons = [NullShim(lambda kw: None) for _ in range(3)]
-        self.controls = NullShim(lambda kw: None)
-        self.window_controls = NullShim(lambda kw: None)
-        self._resize_surface = NullShim(lambda kw: None)
-        self._resize_redraw = NullShim(lambda kw: None)
-        self._resize_layout_job = None
-        self._topbars_compact = None
-
+        # ---- 业务方法写入的界面投影 ----
         self.status = _StatusSink(self, 'status')
         self.detail = _TextSink(self, 'detail')
         self.footer = _TextSink(self, 'footer')
@@ -318,10 +273,9 @@ class QtHost(core.Business, QObject):
         self.server_menu = MenuShim(lambda kw: self._apply_menu('server', kw),
                                    on_select=self.change_server)
 
-        # ---- 计时器：用 Qt 的 QTimer 替代 Tk 的 after ----
+        # ---- 计时器：after()/after_cancel() 的 QTimer 登记 ----
         self._timers = {}
 
-        # ---- 初始化顺序与原版对齐，但跳过所有 Tk 控件构造 ----
         for index in range(3):
             card = QtCard(self, index)
             card.host = self
@@ -330,15 +284,13 @@ class QtHost(core.Business, QObject):
         self._hotkeys_stop = threading.Event()
         self._hotkey_thread = threading.Thread(target=self.hotkey_loop, daemon=True)
 
-        # 更新器：与原版 app.py 相同入口与参数，只把 UI 承载换成 Qt。
-        # 不初始化会让 go()/pick_window() 里的 updater.service.state 保护判断失效。
+        # 更新器：go()/pick_window() 依赖 updater.service.state 做安装期保护。
         from updater.runtime import UpdateRuntime
         self.updater = UpdateRuntime(
             core.installation_root(), core.DATA, core.APP_VERSION,
             lambda event: self.q.put(('update', event)))
 
-        # 更新对话框：business.handle_event 里写的是 self.update_ui.handle(d)，
-        # 这里挂上 Qt 版承载，业务代码一行不用改。
+        # business.handle_event 把 'update' 事件交给 self.update_ui.handle(d)。
         from qt_ui.update import UpdatePanel
         self.update_ui = UpdatePanel(self, self.updater)
 
@@ -352,7 +304,6 @@ class QtHost(core.Business, QObject):
         self.refresh_window_label()
         self.refresh_language()
 
-        # 与 Tk 版一致的启动顺序：load() 会走 apply_profile
         self.load()
 
         for card in self.cards:
@@ -365,27 +316,18 @@ class QtHost(core.Business, QObject):
         for card in self.cards:
             self.schedule_palette(card)
 
-        # 浮窗：与原版一样惰性创建，但换成 Qt 实现。
-        # go() 内部会判断 self.overlay is None 再调 _make_overlay()，这里先占位。
+        # 浮窗预创建；失败时留 None，go() 开始寻色时会再调 _make_overlay() 重试。
         try:
             self.overlay = self._make_overlay()
         except Exception:
-            # 构造失败时留 None：go() 会在下次开始时再次调用 _make_overlay()
-            # 重试，而不是抛 AttributeError 被 except 静默吞掉。
             self.overlay = None
 
-    # ------------------------------------------------------------------
-    # 计时器：提供 after / after_cancel，语义等同 Tk
-    # ------------------------------------------------------------------
-    def _make_overlay(self):
-        """构造 Qt 版寻色浮窗。
+    @property
+    def update_health_pending(self):
+        return self._update_health_pending
 
-        `business.Business.go` 里有 ``self.overlay = self._make_overlay()``，
-        而基类不持有这个工厂（Tk 版 app.App 在自己的 go() 里直接 new
-        SearchOverlay）。之前 QtHost 没有定义它，一旦浮窗预创建失败
-        （overlay 为 None），下次点「开始寻色」就会 AttributeError，
-        并被 go() 的 ``except Exception`` 静默吞掉，只剩状态栏一句提示。
-        """
+    def _make_overlay(self):
+        """构造寻色浮窗（business.go 在 overlay 为 None 时调用）。"""
         from qt_ui.overlay import QtOverlay
         return QtOverlay(
             self,
@@ -400,15 +342,10 @@ class QtHost(core.Business, QObject):
         qt_dialogs.bind_window(window)
 
     def show_notice(self, kind, title, message):
-        """覆写 business.Business.show_notice：用自绘对话框，不引入 tkinter。
-
-        原版是 ``tkinter.messagebox.showinfo/showerror``。Qt 版把它换成本项目
-        已有的信息对话框（同样走 window_fx 出场），标题与正文都是纯文本，
-        与 Tk 版可见内容一致。
-        """
+        """业务提示（流程中断、完成）：用信息对话框显示纯文本标题与正文。"""
         from qt_ui import dialogs as qt_dialogs
         body = str(message or '')
-        # messagebox 的正文常带换行，InfoDialog 用段落列表承载
+        # 正文常带换行，InfoDialog 用段落列表承载
         sections = [('', body)] if body else []
         try:
             qt_dialogs.show_info(self.window, str(title or ''), sections)
@@ -535,7 +472,7 @@ class QtHost(core.Business, QObject):
 
     # 业务方法会调用 self.status.configure(...)
     def refresh_language(self):
-        """重绘所有文案。与原版同名，业务方法会调用它。"""
+        """重绘所有文案（业务方法在切换策略、载入方案后调用）。"""
         self.state.apply(
             appSubtitle=f'瑪奇 Mobile  /  by 南千和  ·  v{core.APP_VERSION}',
             appVersion=core.APP_VERSION,
@@ -599,13 +536,10 @@ class QtHost(core.Business, QObject):
         self.server_menu.set(dict(core.SERVER_OPTIONS)[self.server.get()])
 
     # ------------------------------------------------------------------
-    # 业务方法会用到的辅助入口（原版在 App 里）
+    # 业务方法会用到的辅助入口
     # ------------------------------------------------------------------
     def pick_color(self, callback):
-        """屏幕吸管（Qt 版）。签名与原 App.pick_color 一致。
-
-        安装期禁用与 busy 标记的守护逻辑与原版相同；取色本体在 qt_ui.eyedropper。
-        """
+        """屏幕吸管：安装更新期间禁用；取色本体在 qt_ui.eyedropper。"""
         updater = getattr(self, 'updater', None)
         if updater is not None and updater.service.state in ('installing', 'waiting_for_exit'):
             return
@@ -744,7 +678,7 @@ class QtHost(core.Business, QObject):
         ctx.setContextProperty('bridge', self.bridge)
         ctx.setContextProperty('pickerState', state)
         ctx.setContextProperty('pickerCardIndex', card.index)
-        engine.load(QUrl.fromLocalFile(str(_QML_DIR / 'ColorPicker.qml')))
+        engine.load(QUrl.fromLocalFile(str(QML_DIR / 'ColorPicker.qml')))
         roots = engine.rootObjects()
         if not roots:
             return
@@ -773,11 +707,7 @@ class QtHost(core.Business, QObject):
         window_fx.present(window, anchor)
 
     def pick_color_for(self, card):
-        """点目标色块：统一走自绘浮窗（设计稿 7.4），不再弹系统取色器。
-
-        原版这里是 ``tkinter.colorchooser``，迁移后由 ``open_color_picker`` 承担；
-        保留同名方法，是因为 ``QtCard.pick()`` 会调用它。
-        """
+        """点目标色块（QtCard.pick）：打开自绘目标色浮窗。"""
         self.open_color_picker(card)
 
     def open_github(self):
@@ -915,12 +845,7 @@ class QtHost(core.Business, QObject):
         return True
 
     def show_update_dialog(self):
-        """软件更新：打开 Qt 版对话框，状态由 UpdateRuntime 事件驱动。
-
-        原版 `UpdateUI` 同时负责顶栏按钮与窗口，这里拆成两处：
-        顶栏按钮在 `Main.qml`（文案读 `uiState.updateLabel`），
-        窗口由 `qt_ui.update.UpdatePanel` 承载。检查仍只在用户点「检查」时发起。
-        """
+        """软件更新对话框；状态由 UpdateRuntime 事件驱动。"""
         if getattr(self, 'updater', None) is None:
             return
         self.update_ui.open()
@@ -929,7 +854,7 @@ class QtHost(core.Business, QObject):
         self.refresh_language()
 
     def schedule_palette(self, card):
-        """色板预览：调用原版的计算链路，只把结果显示到 QML。"""
+        """色板预览：后台计算允许色集合，只把结果显示到 QML。"""
         key = card._palette_key
         try:
             target = core.normalize_hex(card.target.get())
@@ -986,28 +911,71 @@ class QtHost(core.Business, QObject):
 
     # ------------------------------------------------------------------
     def start_services(self):
-        if not self._update_health_pending:
-            self._hotkey_thread.start()
-        # tick 自己会用 after(60) 续期（与 Tk 版一致）。这里若再起一个
-        # 60ms 的 QTimer 驱动 tick，每个周期都会额外派生一条永久的 after 链，
-        # tick 频率随运行时长线性增长（实测 1s→135 次/秒、3s→595 次/秒），
-        # 这是「越用越卡」的根因。只踢一次，让它自续。
-        self._tick_timer = None
+        # tick 用 after(60) 自续，只启动一次；再叠一个周期定时器会让 tick 链成倍增长。
         self.after(60, self.tick)
-        # 与原版一致：仅打包运行（frozen）时静默检查更新，
-        # 结果只改顶栏按钮文案，不弹窗。
+        if self._update_health_pending:
+            self._begin_update_confirmation()
+            return
+        self._hotkey_thread.start()
+        # 仅打包运行时静默检查；结果只改顶栏按钮文案，不弹窗。
         if getattr(sys, 'frozen', False):
-            QTimer.singleShot(3000, lambda: self.updater.check())
+            self.after(3000, self.updater.check)
+
+    # ------------------------------------------------------------------
+    # 更新后首次启动：通知更新助手「界面已就绪」，等它提交后再开放操作
+    # ------------------------------------------------------------------
+    def _begin_update_confirmation(self):
+        from update_bootstrap import signal_ready
+        self.start.configure(state='disabled')
+        self.after_idle(lambda: signal_ready(self._update_transaction))
+        self.after(100, self._await_update_commit)
+
+    def _await_update_commit(self):
+        try:
+            state = json.loads((self._update_transaction / 'state.json').read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            state = {}
+        if state.get('status') == 'committed':
+            core.migrate_strategy_defaults(core.DATA)
+            self._update_health_pending = False
+            self._hotkey_thread.start()
+            if self.window is not None:
+                self.window.show()
+            self.start.configure(state='normal')
+            self.after(3000, self.updater.check)
+            return
+        from update_bootstrap import helper_alive
+        if not helper_alive(self._update_transaction):
+            # 助手已退出却没有提交：更新被回滚，本进程不应继续运行。
+            self.close()
+            return
+        self.after(100, self._await_update_commit)
+
+    # ------------------------------------------------------------------
+    # 关闭：标题栏按钮、任务栏关闭、Alt+F4 和安装更新都走这里
+    # ------------------------------------------------------------------
+    def close(self):
+        if self._closing:
+            return
+        self._closing = True
+        self.updater.cancel()
+        if self.busy:
+            # 先停寻色并释放鼠标，等工作线程结束后再退出。
+            self.stop(source='window_close')
+            self._closing = False
+            QTimer.singleShot(250, self.close)
+            return
+        self.shutdown()
+        QGuiApplication.quit()
 
     def shutdown(self):
+        """释放计时器与热键并保存设置；可重复调用（aboutToQuit 也会触发）。"""
         self._closing = True
         for timer in list(self._timers.values()):
             timer.stop()
         self._timers.clear()
-        if getattr(self, '_tick_timer', None) is not None:
-            self._tick_timer.stop()
         self._hotkeys_stop.set()
-        if not getattr(self, '_profile_read_failed', False) or self._autosave_job is not None:
+        if not self._profile_read_failed or self._autosave_job is not None:
             self.flush_autosave()
 
 

@@ -4,7 +4,7 @@ import QtQuick.Controls
 // 容差滑杆 —— ui-spec-v7.md 7.3 / 原型 .slider
 //   轨道高 3、圆角 2；已完成段 --green，未完成 #2A2C33
 //   滑块 13px 圆点 #E3E5EA；禁用时滑块 #5A616C、轨道全灰
-//   滚轮不改变数值（与原版 DeliberateSlider 一致）
+//   滚轮不改变数值，避免滚动页面时误改容差
 Item {
     id: slider
 

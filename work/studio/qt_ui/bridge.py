@@ -2,11 +2,9 @@
 
 **这个类不做任何业务判断。** 每个槽函数只做三件事：
 
-1. 把界面上的新值写进对应的 tk 变量替身（``VarShim``）；
-2. 调用 ``app.App`` 里原有的方法（``save`` / ``go`` / ``apply_profile`` …）；
+1. 把界面上的新值写进卡片变量（``VarShim``）；
+2. 调用 `QtHost` / `business.Business` 的方法（``save`` / ``go`` / ``apply_profile`` …）；
 3. 需要时把结果回写到 ``UiState``。
-
-因此寻色、判色、方案读写、事件分发的行为与原 Tk 版逐字节一致。
 """
 from __future__ import annotations
 
@@ -15,7 +13,6 @@ import re
 from PySide6.QtCore import QObject, Slot
 
 import business as core
-import i18n
 
 
 class Bridge(QObject):
@@ -210,7 +207,6 @@ class Bridge(QObject):
 
     @Slot(str)
     def languageChanged(self, value):
-        i18n.set_language(value)
         self._host.change_language(value)
         self._host.after_language_changed()
 
@@ -237,8 +233,8 @@ class Bridge(QObject):
 
     # -- 紧凑浮层：数据与动作 ------------------------------------------------
     #
-    # 每个浮层都复用原作者模块的判断（window_target / profile_store /
-    # result_history / ui_progress），这里只负责把结果整理成 QML 能吃的列表。
+    # 判断都在 window_target / profile_store / result_history 等模块，
+    # 这里只负责把结果整理成 QML 能吃的列表。
     @Slot(result='QVariantList')
     def windowRows(self):
         """自动检测：列出可选游戏窗口。"""
@@ -351,29 +347,6 @@ class Bridge(QObject):
             import webbrowser
             webbrowser.open(url)
 
-    @Slot(result='QVariantMap')
-    def updateInfo(self):
-        """更新浮层：只读 UpdatePanel 的当前状态。"""
-        panel = getattr(self._host, 'update_ui', None)
-        if panel is None:
-            return {'label': '当前版本已是最新', 'busy': False, 'canCheck': False}
-        event = dict(getattr(panel, 'last', {}) or {})
-        kind = event.get('kind', 'idle')
-        text = {
-            'idle': '当前版本已是最新',
-            'checking': '正在检查更新…',
-            'available': f"发现新版本 {event.get('version') or ''}".strip(),
-            'download': f"正在下载 {int(event.get('percent') or 0)}%",
-            'ready': '更新已下载，可安装',
-            'error': '检查更新失败，请稍后重试',
-        }.get(kind, '当前版本已是最新')
-        return {'label': text,
-                'busy': kind in ('checking', 'download'),
-                'canCheck': getattr(self._host, 'updater', None) is not None}
-
     @Slot()
-    def checkUpdate(self):
-        panel = getattr(self._host, 'update_ui', None)
-        if panel is not None:
-            # 复用 UpdatePanel 既有的动作分发，不新增业务分支
-            panel.act('check')
+    def requestClose(self):
+        self._host.close()

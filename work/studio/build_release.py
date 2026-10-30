@@ -6,7 +6,7 @@ workspace=root.parent.parent
 identity=source_identity(root)
 git_root=Path(__import__('os').environ.get('COLOR_STUDIO_GIT_ROOT',str(workspace)))
 def _git_commit():
-    # 源码包/离线导出目录没有 .git，此时 build-info 里留空即可，不能让打包中断。
+    # 源码导出目录没有 .git 时留空；verify_release 会拒绝没有提交号的发布包。
     try:return subprocess.check_output(['git','rev-parse','HEAD'],cwd=git_root,
         text=True,stderr=subprocess.DEVNULL).strip()
     except (OSError,subprocess.SubprocessError):return None
@@ -41,7 +41,7 @@ if trust_path:
     trust_args=['--add-data',str(bundled_trust)+';.']
 subprocess.run([sys.executable,'-m','PyInstaller','--noconfirm','--onefile','--windowed','--name','ColorStudioUpdater',
     '--distpath',str(out/'helper'),'--workpath',str(root/'build-updater'),'--specpath',str(root),
-    '--exclude-module','numpy','--exclude-module','cv2','--exclude-module','customtkinter',*trust_args,str(root/'update_helper.py')],check=True)
+    '--exclude-module','numpy','--exclude-module','cv2','--exclude-module','PySide6','--exclude-module','tkinter',*trust_args,str(root/'update_helper.py')],check=True)
 import hashlib
 recovery_identity=root/'update_recovery_identity.py'
 original_recovery_source=recovery_identity.read_text(encoding='utf-8')
@@ -56,19 +56,15 @@ if saved.exists():
     shutil.copytree(saved,root/'release-test-data',dirs_exist_ok=True)
     shutil.rmtree(saved)
 try:
-    # 界面入口：默认 Qt 版（run_qt.py）；设 COLOR_STUDIO_UI=tk 才回到 app.py。
-    # Qt 版需要把 QML 目录一起打包，并且不能再排除 PySide6。
-    _ui_mode=__import__('os').environ.get('COLOR_STUDIO_UI','qt').strip().lower()
-    if _ui_mode not in ('qt','tk'):
-        print(f'COLOR_STUDIO_UI={_ui_mode!r} 不是 qt / tk，按 qt 处理。')
-        _ui_mode='qt'
-    qt_ui_build=_ui_mode=='qt'
-    entry=str(workspace/'run_qt.py') if qt_ui_build else str(root/'app.py')
-    ui_args=(['--paths',str(root),'--add-data',str(root/'qt_ui/qml')+';qt_ui/qml',
-              '--collect-data','shiboken6','--hidden-import','PySide6.QtQuickControls2']
-             if qt_ui_build else ['--exclude-module','PySide6'])
-    subprocess.run([sys.executable,'-m','PyInstaller','--noconfirm','--onedir','--windowed','--name','ColorStudio','--distpath',str(out),'--workpath',str(root/'build'),'--specpath',str(root),'--collect-data','customtkinter','--collect-data','opencc','--add-data',str(ocr)+';ocr','--add-data',str(build_info)+';.','--add-data',str(root/'native_live/assets')+';native_live/assets',*ui_args,'--exclude-module','pandas','--exclude-module','matplotlib',*trust_args,entry],check=True)
+    # Qt 界面：QML 目录随包分发；Tk 不再使用，整体排除。
+    subprocess.run([sys.executable,'-m','PyInstaller','--noconfirm','--onedir','--windowed','--name','ColorStudio','--distpath',str(out),'--workpath',str(root/'build'),'--specpath',str(root),
+        '--collect-data','opencc','--add-data',str(ocr)+';ocr','--add-data',str(build_info)+';.','--add-data',str(root/'native_live/assets')+';native_live/assets',
+        '--add-data',str(root/'qt_ui/qml')+';qt_ui/qml','--hidden-import','PySide6.QtQuickControls2',
+        '--exclude-module','tkinter','--exclude-module','customtkinter','--exclude-module','pandas','--exclude-module','matplotlib',*trust_args,str(root/'app.py')],check=True)
 finally:recovery_identity.write_text(original_recovery_source,encoding='utf-8')
+import qt_bundle
+print('Pruned unused Qt modules:',qt_bundle.prune(out/'ColorStudio/_internal/PySide6')//2**20,'MiB')
+qt_bundle.check_dependencies(out/'ColorStudio/_internal')
 shutil.copy2(out/'helper/ColorStudioUpdater.exe',out/'ColorStudio/ColorStudioUpdater.exe')
 # PyInstaller does not create application data. If a previous build left it in
 # the target, remove it after preserving the backup above as well.
@@ -84,6 +80,16 @@ for package_name in ('cryptography','packaging','httpx','httpcore','anyio','cert
             if src.is_file():
                 destination=licenses/package_name/Path(file).name;destination.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(src,destination)
 if (source/'doc').exists():shutil.copytree(source/'doc',licenses/'tesseract',dirs_exist_ok=True)
+# The PySide6 wheels only carry a commercial-licence reference; the open-source
+# terms used here are LGPL-3.0, with Qt loaded as separate, replaceable DLLs.
+qt_version=importlib.metadata.version('PySide6')
+(licenses/'PySide6').mkdir(exist_ok=True)
+(licenses/'PySide6/NOTICE.txt').write_text(
+    f'Qt for Python (PySide6 / shiboken6) {qt_version} and the Qt libraries it bundles are used under\n'
+    'the GNU Lesser General Public License v3.0 (LGPL-3.0-only).\n'
+    'License text: https://www.gnu.org/licenses/lgpl-3.0.txt (and https://www.gnu.org/licenses/gpl-3.0.txt)\n'
+    'Source code: https://code.qt.io/cgit/pyside/pyside-setup.git and https://download.qt.io/official_releases/QtForPython/\n'
+    'The Qt DLLs in _internal/PySide6 are unmodified and may be replaced with compatible builds.\n',encoding='utf-8')
 from release_documents import package_documents
 package_documents(workspace,out/'ColorStudio')
 # Development validation reports remain in the workspace. Distributions

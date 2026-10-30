@@ -1,10 +1,9 @@
-"""Build deterministic signed GitHub and offline update assets."""
-import argparse,hashlib,json,shutil,zipfile
+"""Build deterministic signed GitHub update assets (manifest, signature and blobs)."""
+import argparse,hashlib,json,zipfile
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
-from updater.manifest import sign_ed25519,validate_relative_path,verify_manifest
-from updater.paths import checked_root,hash_file
+from updater.manifest import sign_ed25519,validate_relative_path
+from updater.paths import checked_root
 from release_documents import validate_package_documents
 
 def _zip_payload(path):
@@ -59,26 +58,14 @@ def build_assets(package,out,version,channel,private_seed,*,release_sequence=1,p
         'data_schema_read':[1],'data_schema_write':1,'key_id':key_id,'files':rows}
     raw=json.dumps(manifest,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode('utf-8')
     signature=sign_ed25519(raw,_hex_seed(private_seed));(out/'update-manifest.json').write_bytes(raw);(out/'update-manifest.sig').write_bytes(signature)
-    offline_name=f'UPDATE-ONLY-ColorStudio-{version}-win-x64.zip'
-    with zipfile.ZipFile(out/offline_name,'w',zipfile.ZIP_STORED) as archive:
-        for name,data in [('update-manifest.json',raw),('update-manifest.sig',signature),*blobs.items()]:
-            info=zipfile.ZipInfo(name,(1980,1,1,0,0,0));info.external_attr=0o600<<16;archive.writestr(info,data)
-    delta_name=None;changed=list(blobs)
+    changed=list(blobs)
     if previous_manifest:
-        prior=Path(previous_manifest).read_bytes();previous=json.loads(prior)
+        # Size of what an existing installation downloads; unchanged files are reused.
+        previous=json.loads(Path(previous_manifest).read_bytes())
         unchanged={(r['path'].casefold(),r['sha256']) for r in previous['files']}
         changed=sorted({r['blob'] for r in rows if (r['path'].casefold(),r['sha256']) not in unchanged})
-        delta_name=f"UPDATE-ONLY-ColorStudio-from-{previous['version']}-to-{version}-win-x64.zip"
-        delta=dict(schema=1,key_id=key_id,base_manifest_sha256=hashlib.sha256(prior).hexdigest(),
-            target_manifest_sha256=hashlib.sha256(raw).hexdigest())
-        delta_raw=json.dumps(delta,sort_keys=True,separators=(',',':')).encode('utf-8')
-        delta_sig=sign_ed25519(delta_raw,_hex_seed(private_seed))
-        with zipfile.ZipFile(out/delta_name,'w',zipfile.ZIP_STORED) as archive:
-            for name,data in [('update-manifest.json',raw),('update-manifest.sig',signature),
-                    ('offline-base.json',delta_raw),('offline-base.sig',delta_sig),*((n,blobs[n]) for n in changed)]:
-                info=zipfile.ZipInfo(name,(1980,1,1,0,0,0));info.external_attr=0o600<<16;archive.writestr(info,data)
     return {'version':version,'file_count':len(rows),'download_bytes':sum(len(data) for data in blobs.values()),
-            'offline_name':offline_name,'delta_name':delta_name,'changed_blobs':tuple(changed),
+            'changed_blobs':tuple(changed),
             'changed_bytes':sum(len(blobs[n]) for n in changed),'manifest_sha256':hashlib.sha256(raw).hexdigest(),'blobs':tuple(sorted(blobs))}
 
 def main(argv=None):

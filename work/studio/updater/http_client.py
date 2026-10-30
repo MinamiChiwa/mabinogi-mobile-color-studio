@@ -1,8 +1,15 @@
 """System proxy/certificates with separate connect/read timeouts and HTTPS redirects."""
 from urllib.parse import urlparse
-import httpx,ssl,os
+import httpx,ssl,os,time
 
-ALLOWED_HOSTS={'api.github.com','github.com','objects.githubusercontent.com','release-assets.githubusercontent.com','github-releases.githubusercontent.com'}
+# Release files are fetched through this mirror first. The mirror is only a
+# transport: manifests are Ed25519-verified and every blob is SHA-256 checked,
+# so a mirror cannot change what gets installed.
+MIRROR='https://v6.gh-proxy.org/'
+MIRROR_RETRY_AFTER=600
+
+ALLOWED_HOSTS={'api.github.com','github.com','objects.githubusercontent.com','release-assets.githubusercontent.com',
+    'github-releases.githubusercontent.com',urlparse(MIRROR).hostname}
 
 class Response:
     def __init__(self,response):self.response=response;self.status=response.status_code;self.headers=response.headers
@@ -30,3 +37,26 @@ class GitHubClient:
                 target=response.headers.get('Location','');response.close();url=__import__('urllib.parse',fromlist=['urljoin']).urljoin(url,target)
             raise ValueError('Too many redirects')
         except BaseException:client.close();raise
+
+class MirrorFirstClient:
+    """github.com release URLs try the mirror first and fall back to GitHub directly.
+
+    A mirror failure (connection error, unexpected status, or a broken body the
+    downloader reports) switches to direct GitHub for MIRROR_RETRY_AFTER seconds.
+    The GitHub API is never mirrored.
+    """
+    def __init__(self,direct=None,mirror=MIRROR,clock=time.monotonic):
+        self.direct=direct or GitHubClient();self.mirror=mirror;self.clock=clock;self._mirror_down_until=0.
+    def mirrored(self,url):
+        return url.startswith('https://github.com/') and self.clock()>=self._mirror_down_until
+    def report_failure(self,url):
+        if url.startswith('https://github.com/'):self._mirror_down_until=self.clock()+MIRROR_RETRY_AFTER
+    def get(self,url,headers=None,timeout=(5,15)):
+        if self.mirrored(url):
+            try:
+                response=self.direct.get(self.mirror+url,headers,timeout=(min(timeout[0],4),min(timeout[1],8)))
+                if int(response.status) in (200,206,304,416):return response
+                response.close()
+            except Exception:pass
+            self.report_failure(url)
+        return self.direct.get(url,headers,timeout)
