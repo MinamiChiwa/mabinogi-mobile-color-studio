@@ -15,7 +15,7 @@
 
 ## 生命周期约定
 
-- **关闭**：标题栏关闭、任务栏关闭、Alt+F4 都经过 `Main.qml` 的 `onClosing` → `bridge.requestClose()` → `QtHost.close()`。正在寻色时先 `stop(source='window_close')`，每 250ms 重试直到工作线程结束，再保存设置、停止热键并退出。不要在别处直接调用 `QGuiApplication.quit()`。
+- **关闭**：标题栏关闭、任务栏关闭、Alt+F4 都经过 `Main.qml` 的 `onClosing` → `bridge.requestClose()` → `QtHost.close()`。正在寻色时先 `stop(source='window_close')`，每 250ms 重试直到工作线程结束，再保存设置、停止热键。宿主随后设置主窗口的 `closeApproved` 并退出，允许 Qt 退出时再次关闭窗口；不能一直拒绝 `onClosing`，也不要在别处直接调用 `QGuiApplication.quit()`。测试必须覆盖真实事件循环退出，不能只模拟 `quit` 调用。
 - **更新后首次启动**（`--update-ready <事务目录>`）：窗口保持隐藏，开始按钮禁用；`signal_ready()` 通知更新助手，随后每 100ms 读取事务状态。`committed` 后迁移策略默认值、启动热键并显示窗口；助手已退出却未提交（已回滚）时直接关闭。
 - **安装更新**：更新器发出 `exit_requested` 时走同一个 `close()`。
 

@@ -93,9 +93,12 @@ Window {
     color: 'transparent'
     flags: Qt.Window | Qt.FramelessWindowHint | Qt.WindowMinimizeButtonHint
     // 标题栏关闭、任务栏关闭、Alt+F4 都交给 QtHost.close()：先停寻色、保存设置再退出
+    // Qt 的 quit 也会发起窗口关闭。宿主完成停止与保存后须放行，
+    // 否则第二次关闭仍被拒绝，按钮和更新器都无法让进程退出。
+    property bool closeApproved: false
     onClosing: (close) => {
-        close.accepted = false
-        bridge.requestClose()
+        close.accepted = root.closeApproved
+        if (!root.closeApproved) bridge.requestClose()
     }
     title: Loc.t('染色工坊 · 瑪奇 Mobile')
 
