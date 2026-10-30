@@ -12,6 +12,7 @@ from screenshot_samples import RawSamples
 from screenshot_search import solve,actual_result
 from screenshot_refinement import local_candidates
 from refinement_policy import compare_refinement
+from destination_policy import DestinationPolicy
 from screenshot_prediction import VisibleColorField,ObservedColorField
 from screenshot_text import read_timer,timer_bar_signal
 
@@ -288,10 +289,23 @@ def _search(c,samples):
         # A new global candidate may make the user's priority-ordered trade;
         # final-polish retention starts afresh only after its measured landing.
         c.refinement_anchor=None
-        positioned=c.move_to(candidate['matrix']);result=c.observe('candidate-actual')
-        if not positioned:
-            c.progress('observe','当前位置尚未完成图像定位，正在保留游戏实际颜色。')
-            break
+        fallback=c.best or c.current
+        # A partial visible field cannot predict an unsampled region. Keep
+        # that region's measured fallback as its floor, rather than rejecting
+        # all partial proposals or treating its unknown colour as an exact hit.
+        predicted=list(fallback['actual_colors']) if fallback else [None]*len(c.rules)
+        for i,rgb in zip(candidate['active_indices'],candidate['observed_rgb']):
+            predicted[i]='#'+''.join(f'{int(np.clip(round(v),0,255)):02X}' for v in rgb)
+        destination=(DestinationPolicy(c.rules,predicted,fallback['actual_colors'],preserve_baseline=False)
+            if fallback and fallback.get('verified') else None)
+        positioned=c.move_to(candidate['matrix']);result=c.observe('candidate-actual',destination=destination)
+        if not positioned or not result.get('destination_consistent',True):
+            c.progress('observe','实际落点与方案不符，正在校正并继续寻找较好的方案。')
+            c.refinement_anchor=c.best
+            c.restore()
+            # Failed positioning is not evidence that the global colour
+            # search is exhausted. Try another complete admitted proposal.
+            continue
         if result['accepted']:
             confirm=c.observe('match-confirmation')
             if confirm['accepted']:break
@@ -306,7 +320,8 @@ def _search(c,samples):
             if retained:
                 retained=(compare_refinement(recovered['actual_colors'],c.best['actual_colors'],c.rules)['not_worse']
                     if getattr(c,'refinement_anchor',None) is not None else recovered['rank']<=c.best['rank'])
-            if not retained:break
+            if not retained:
+                c.progress('observe','正在继续校正颜色，保留本轮已测得的较好结果。')
         if c.budget.remaining()<c.return_cost()+7:break
     return samples
 

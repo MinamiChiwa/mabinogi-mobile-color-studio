@@ -64,6 +64,7 @@ try:
 finally:recovery_identity.write_text(original_recovery_source,encoding='utf-8')
 import qt_bundle
 print('Pruned unused Qt modules:',qt_bundle.prune(out/'ColorStudio/_internal/PySide6')//2**20,'MiB')
+print('Removed incompatible PATH ICU copies:',qt_bundle.prefer_system_icu(out/'ColorStudio/_internal'))
 qt_bundle.check_dependencies(out/'ColorStudio/_internal')
 shutil.copy2(out/'helper/ColorStudioUpdater.exe',out/'ColorStudio/ColorStudioUpdater.exe')
 # PyInstaller does not create application data. If a previous build left it in

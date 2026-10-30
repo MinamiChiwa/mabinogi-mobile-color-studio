@@ -259,6 +259,7 @@ Rectangle {
                 }
 
                 UiField {
+                    objectName: 'targetField' + cardIndex
                     width: parent.width - 52 - 32 - 30 - 32
                     fieldHeight: 32
                     anchors.verticalCenter: parent.verticalCenter

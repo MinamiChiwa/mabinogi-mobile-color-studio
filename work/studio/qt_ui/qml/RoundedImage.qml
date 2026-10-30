@@ -26,8 +26,8 @@ Item {
     Canvas {
         id: canvas
         anchors.fill: parent
-        // 同步绘制：首帧就要有内容，避免先闪一下空框
-        renderStrategy: Canvas.Immediate
+        // Coalesce width/height/source updates into the next render frame.
+        renderStrategy: Canvas.Cooperative
 
         onPaint: {
             var ctx = getContext('2d')

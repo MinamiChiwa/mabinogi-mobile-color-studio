@@ -32,4 +32,4 @@ Keep the old folder until the new app starts and your settings are correct. Do n
 
 Check the current version and update records after a failed installation. Attach logs to [GitHub Issues](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/issues) if you need help.
 
-[Back to the user guide](../README.en.md) · [What's new in 0.4.9](release-notes-0.4.9.md)
+[Back to the user guide](../README.en.md) · [What's new in 0.4.10](release-notes-0.4.10.md)

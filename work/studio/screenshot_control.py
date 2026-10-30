@@ -242,7 +242,23 @@ class Controller:
             self.refresh_timer('pre-input-timer-confirm',force=True)
             if self.budget.pending_deadline is not None:raise TimeEnded()
         overhead=self.budget.estimate('capture')+self.budget.estimate('registration')
-        if not self.budget.can_input(seconds+overhead):raise TimeEnded()
+        needed=seconds+overhead
+        if self.budget.recovering:
+            needed+=max(1.5,self.budget.estimate('verify',1.5))
+        else:
+            target=getattr(self,'_motion_return_target',None) or self.refinement_anchor
+            if target is not None:
+                # Recheck at EACH gesture, not just before the whole trial.
+                # Repeated registration/scale corrections consume real time.
+                # Leave the measured return and HEX read outside trial work.
+                reserve=self.return_cost(target)
+                desired=getattr(self,'_motion_destination',None)
+                if desired is not None:reserve=max(reserve,self.return_cost(target,from_matrix=desired))
+                recent=self.budget.costs
+                feedback=sum(max(recent.get(name,[]) or [default])
+                    for name,default in (('capture',.2),('registration',.4),('verify',1.5)))
+                needed=seconds+feedback+reserve
+        if not self.budget.can_input(needed):raise TimeEnded()
         before=self.frame
         self.current=None
         self._completed_restore=None
@@ -350,6 +366,14 @@ class Controller:
         return max(self.budget.estimate('tree'),count*.0000004*max(1.,self.budget.estimate('assembly',.6)/.6))
 
     def move_to(self,desired,label='position',local=False):
+        previous=(getattr(self,'_motion_return_target',None),getattr(self,'_motion_destination',None))
+        if not self.budget.recovering:
+            self._motion_return_target=self.best
+            self._motion_destination=np.asarray(desired,float)
+        try:return self._move_to(desired,label,local)
+        finally:self._motion_return_target,self._motion_destination=previous
+
+    def _move_to(self,desired,label='position',local=False):
         desired=np.asarray(desired,float)
         if not self.relocalize():return False
         self.progress('position' if label!='return-best' else 'restore')
@@ -391,7 +415,7 @@ class Controller:
             if not self.relocalize():return False
         return True
 
-    def observe(self,label='actual',*,reuse_frame=False):
+    def observe(self,label='actual',*,reuse_frame=False,destination=None):
         started=time.monotonic()
         previous=self.current
         self.progress('verify')
@@ -420,11 +444,13 @@ class Controller:
         if anchor is not None:
             from refinement_policy import compare_refinement
             result['refinement_comparison']=compare_refinement(colors,anchor['actual_colors'],self.rules)
+        if destination is not None:
+            result['destination_consistent']=destination.allows(colors)
         self.current=result;self.observations.append(result);self.write('actual-hex.json',self.observations)
         self.owner.event('scene',colors=colors,seconds=int(self.budget.remaining()))
         improved=(result['refinement_comparison']['improved'] if anchor is not None
                   else self.best is None or result['rank']<self.best['rank'])
-        if improved and result['verified']:
+        if improved and result['verified'] and result.get('destination_consistent',True):
             self.best=dict(result);self.best['frame']=self.frame.copy()
             if anchor is not None:self.refinement_anchor=self.best
             self.owner.event('best',colors=colors,delta=max(v for v in result['actual_deltas'] if v is not None))

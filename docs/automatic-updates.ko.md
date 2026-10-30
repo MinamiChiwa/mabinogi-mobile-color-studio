@@ -32,4 +32,4 @@
 
 실패 후에는 현재 버전과 업데이트 기록을 먼저 확인하세요. 도움이 필요하면 [GitHub Issues](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/issues)에 로그를 첨부하세요.
 
-[사용 안내로 돌아가기](../README.ko.md) · [0.4.9 변경 내용](release-notes-0.4.9.md)
+[사용 안내로 돌아가기](../README.ko.md) · [0.4.10 변경 내용](release-notes-0.4.10.md)

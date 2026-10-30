@@ -65,6 +65,16 @@ class Reader:
    if parent!=cls:break
    result[self.cstring(namep)]=offset
   return result
+ def query_region(self,address):
+  """Recheck one range after a heap page changes during the census."""
+  m=MBI()
+  returned=K.VirtualQueryEx(self.h,address,ctypes.byref(m),ctypes.sizeof(m))
+  if returned!=ctypes.sizeof(m):
+   raise OSError(ctypes.get_last_error(),f'VirtualQueryEx {address:x} returned incomplete memory information')
+  base=m.BaseAddress or 0
+  if m.RegionSize<=0 or not base<=address<base+m.RegionSize:
+   raise OSError('Invalid memory query range')
+  return m
  def regions(self):
   info=SYSTEM_INFO();K.GetNativeSystemInfo(ctypes.byref(info))
   minimum=info.lpMinimumApplicationAddress;maximum=info.lpMaximumApplicationAddress

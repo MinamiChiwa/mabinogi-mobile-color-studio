@@ -128,6 +128,9 @@ def run_native_search(owner,rules,*,mode='search',target=None,activate=False,ser
             'refinement_trial':'refinement','refinement_retained':'refinement','refinement_return':'refinement'}.get(name)
         with (folder/'native-events.jsonl').open('a',encoding='utf-8') as stream:
             stream.write(json.dumps(row,ensure_ascii=False)+'\n')
+        if name in ('native_deadline_corrected','native_deadline_shortened'):
+            owner.event('native_timer',**{key:value for key,value in row.items() if key!='event'})
+            return
         if name=='native_observed':
             # Small actual-readback updates survive continuous routes, planning
             # references and full checks; predicted candidate colors stay out.

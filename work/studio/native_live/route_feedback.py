@@ -8,7 +8,7 @@ from native_palette_search import PoseGrid
 from native_periodic_route import compile_periodic_approach
 from native_input_pipeline import bind_native_route_seeds, search_native_input_pipeline
 from native_input_route_search import _needed
-from .compromise import predicted_quality
+from destination_policy import DestinationPolicy
 
 
 def correct_remaining_route(context, checkpoint, rules, suffix, *, expected_pose, target_pose,
@@ -36,12 +36,13 @@ def correct_remaining_route(context, checkpoint, rules, suffix, *, expected_pose
             prediction=score_native_pose(session,endpoint,rules,check=guard),
             needed=_needed(route,3.,.5),source='measured_destination_correction')
     routes=[suffix]
-    candidates=[]
+    candidates=[];original=None;target_prediction=None;destination=None
     l,t,r,b=geometry.board;uv=np.asarray(session['picker_uv'])
     markers=np.column_stack((l+uv[:,0]*(r-l),b-uv[:,1]*(b-t)))
     try:
         original=row(suffix)
         target_prediction=score_native_pose(session,target_pose,rules,check=guard)
+        destination=DestinationPolicy(rules,target_prediction['colors'],original['prediction']['colors'])
         # This is recovery of an already selected joint destination. Search
         # its colors first, instead of spending the short correction allowance
         # solving the user's global goal again. Publish/compare every completed
@@ -53,9 +54,9 @@ def correct_remaining_route(context, checkpoint, rules, suffix, *, expected_pose
         # already optimized remainder. Also compile the original destination
         # directly, since integer rounding can make the first option stall.
         destinations=((expected_pose,suffix),(target_pose,[])) if suffix else ((target_pose,[]),)
-        for destination,tail in destinations:
+        for intermediate,tail in destinations:
             guard()
-            compiled=compile_periodic_approach(destination,checkpoint['pose'],geometry,settings,markers,
+            compiled=compile_periodic_approach(intermediate,checkpoint['pose'],geometry,settings,markers,
                 wheel_delta_per_step=delta,time_budget_seconds=min(.5,max(.001,(deadline-clock())*.3)),
                 clock=clock,check=guard)
             if compiled['input_route']:routes.append(compiled['input_route']+tail)
@@ -78,7 +79,7 @@ def correct_remaining_route(context, checkpoint, rules, suffix, *, expected_pose
                 deadline=now+remaining+120.,time_budget_seconds=remaining,
                 seed_bundle=bundle,generate_target_seeds=False,
                 stage_fractions=(.01,.01,.01,.1,.4,.47),clock=clock,check=guard,
-                prediction_quality=lambda p:predicted_quality(p,restoration_rules),
+                prediction_quality=lambda p:destination.rank(p['colors']),
                 route_filter=lambda route:_research_route_allowed(route,geometry.board))
             for candidate in pipeline['candidates']:
                 candidate=copy.deepcopy(candidate)
@@ -90,11 +91,13 @@ def correct_remaining_route(context, checkpoint, rules, suffix, *, expected_pose
         # remain usable; caller's guard still owns F9 and the real cutoff.
         pass
     check()
+    if destination is None:return None
     best=None
     for candidate in candidates:
         if not candidate['input_route'] or not admission(candidate):continue
-        quality=predicted_quality(candidate['prediction'],rules)
-        if quality>=predicted_quality(original['prediction'],rules):continue
+        colors=candidate['prediction']['colors']
+        if not destination.improves(colors):continue
+        quality=destination.rank(colors)
         rank=(*quality,candidate['needed'],len(candidate['input_route']))
         if best is None or rank<best[0]:best=(rank,candidate)
     if best is None:return None

@@ -1438,7 +1438,8 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                     prediction=score_native_pose(session,replay['final_pose'],rules)
                     # A drifted forecast is a reason to restore the selected
                     # destination, not to abandon it for unrelated local work.
-                    if predicted_quality(prediction,rules)>predicted_quality(selected['prediction'],rules):
+                    if not RefinementPolicy(rules,selected['prediction']['colors']).assess(
+                            prediction['colors'])['not_worse']:
                         original_remainder=dict(input_route=suffix,needed=_needed(suffix,3.,.5))
                         until=min(clock()+(2. if suffix else 3.),
                             end-route_allowance(original_remainder)[0]-retry_recovery_allowance()[0])
@@ -1462,8 +1463,9 @@ def run_goal_loop(io,session,settings,rules,*,engineering_deadline,clock=time.mo
                 # the global destination. Run the admitted measured suffix.
                 replay=replay_native_route(cp['pose'],suffix,geometry,settings,
                     wheel_delta_per_step=1.,sample_policy='all_recorded_points') if suffix else None
-                retain_allowed=not warning or not suffix or predicted_quality(
-                    score_native_pose(session,replay['final_pose'],rules),rules)<=predicted_quality(selected['prediction'],rules)
+                retain_allowed=not warning or not suffix or RefinementPolicy(
+                    rules,selected['prediction']['colors']).assess(
+                        score_native_pose(session,replay['final_pose'],rules)['colors'])['not_worse']
                 cp,frames,feedback,retained=retain_superior_prefix(cp,frames,feedback,
                     suffix if retain_allowed else [],observed_quality(best_observed['checkpoint']['client_hex'],rules),
                     'candidate_'+str(number))
