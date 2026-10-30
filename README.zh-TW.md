@@ -8,8 +8,6 @@
 
 從 [GitHub Releases](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/releases) 下載 **`ColorStudio-v0.4.9-Windows-x64.zip`**，完整解壓縮後執行 `ColorStudio.exe`。請保留旁邊的 `_internal` 資料夾，不必另裝 Python 或 Tesseract。
 
-**`UPDATE-ONLY` 是更新專用套件，不能用來首次安裝，也不能直接解壓縮執行。** 已安裝的使用者請看下方「更新」。
-
 ## 2. 開始尋色
 
 1. 選擇**伺服器與遊戲視窗**。不必設定固定解析度；請先調整好視窗，再開始。
@@ -53,9 +51,9 @@
 
 在主畫面點選**檢查更新**，發現新版本後選擇**下載更新**，完成後再按**安裝並重新啟動**。更新會保留設定、方案及紀錄。
 
-無法連線至 GitHub 時，下載 `UPDATE-ONLY-ColorStudio-0.4.9-win-x64.zip`，在工具內選擇**匯入離線更新**。首次安裝仍使用完整套件。
+更新檔案優先透過鏡像站下載，鏡像無法使用時自動直連 GitHub；所有檔案都經過簽章與雜湊校驗。無法線上更新時，請用完整套件手動升級並保留 `data`。
 
-[線上、離線與手動更新指南](docs/automatic-updates.zh-TW.md) · [0.4.9 更新內容](docs/release-notes-0.4.9.md)
+[線上與手動更新指南](docs/automatic-updates.zh-TW.md) · [0.4.9 更新內容](docs/release-notes-0.4.9.md)
 
 ## 協助與回報
 

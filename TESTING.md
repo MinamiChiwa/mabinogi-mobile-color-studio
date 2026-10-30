@@ -1,50 +1,43 @@
-# 测试：只检查本次改动
+# 测试指南
 
-推荐入口是 `python run_tests.py`。先安装根目录 `requirements.txt`；在已激活的虚拟环境中运行。
+自动测试只覆盖**不需要游戏**就能确定对错的行为契约，整套在 2 秒内跑完，每次改动都可以完整运行。寻色效果只能在游戏里实测，不用自动测试冒充。
 
-## 日常操作
+## 运行
 
 ```powershell
-# 基础冒烟：颜色规则、停止状态、配置、优先级、窗口坐标和测试入口
-python run_tests.py
-
-# 改了停止处理，就只运行对应模块；支持多个名称
-python run_tests.py --modules test_run_stop test_hotkeys
-
-# 也可以只运行一个用例
-python run_tests.py --modules test_run_tests.RegressionEntryTests.test_duplicate_names_are_run_once
-
-# 查看选择，不执行；记录放在被忽略的 outputs 目录
-python run_tests.py --list
-python run_tests.py --modules test_run_stop --json outputs/stop-tests.json
+python -m pip install -r requirements.txt pytest
+python -m pytest                                   # 全部
+python -m pytest tests/test_qt_app.py              # 一个文件
+python -m pytest -k mirror                         # 按名称筛选
 ```
 
-`--modules` 不会再套用默认筛选，拼错名称或导入失败会报错。`run_tests.ps1 -Modules test_run_stop,test_hotkeys` 是同一入口的 Windows 包装。
+Qt 测试在 `offscreen` 模式下运行，不会弹出窗口、不注册全局热键、不读写 `work/studio/data`。推送和 Pull Request 由 GitHub Actions（`.github/workflows/tests.yml`）在 Windows 上运行同一命令。
 
-## 什么时候扩大范围
+## 覆盖范围
 
-| 范围 | 命令 | 用途 |
-| --- | --- | --- |
-| 基础冒烟 | `python run_tests.py` | 环境与核心规则快速检查；不含真实桌面操作 |
-| 指定模块 | `python run_tests.py --modules test_screenshot_live` | 日常修复首选；只导入指定模块及其依赖 |
-| 常用集成 | `python run_tests.py --suite quick` | 兼容旧入口，覆盖面较大，不是日常默认 |
-| 发布检查 | `python run_tests.py --suite release --json outputs/release-tests.json` | 打包前检查；包含真实 Tk/桌面检查，需要可用桌面 |
-| 历史回放 | `python run_tests.py --suite research` | 排查对应历史问题时才使用，部分依赖本地样本 |
-| 全部 | `python run_tests.py --suite full` | 大范围迁移才使用，禁止每次修改都运行 |
+| 文件 | 守住的契约 |
+| --- | --- |
+| `tests/test_rules_and_profile.py` | 卡片设置 → 送进引擎的规则字典；方案文件读写、旧格式迁移与非法输入 |
+| `tests/test_update_transport.py` | 镜像优先、失败自动直连 GitHub 并在一段时间内保持直连；API 不走镜像；镜像返回的损坏文件改从 GitHub 重下；篡改的清单被拒绝 |
+| `tests/test_update_assets.py` | 发布资产只有签名清单与 blob；校验能发现被改动的 blob；增量下载量统计 |
+| `tests/test_qt_app.py` | 全部 QML 可编译、主窗口无告警；寻色中关闭先停止再退出；空闲关闭保存设置；更新后首次启动等待提交、回滚时退出；安装更新时退出；顶栏可打开完整更新对话框 |
+| `tests/test_ui_translations.py` | QML 固定文案在英、日、韩界面都有翻译，不残留中文 |
 
-`--no-desktop` 可以排除真实桌面检查，但不能据此宣称发布验收完成。日志中的通过、跳过、失败分别统计；缺失的历史样本不算通过。离线测试不能证明实机颜色效果或 4K 性能。
+## 写新测试
 
-## 文件在哪里
+- **测玩家能遇到的行为、失败恢复和数据契约**。不要为“源码里出现某句话”“某个私有变量存在”写测试；不要为了变绿删除失败用例。
+- 先找对应的现有文件追加用例；只有出现新的契约领域才新建文件。修 bug 时先写一个能复现它的失败用例。
+- 网络、更新助手、游戏窗口一律用假对象替代（参照 `test_update_transport.py` 的 `Transport`、`test_qt_app.py` 的 `FakeRunner`）。测试不得访问网络、移动鼠标或操作游戏。
+- 共享夹具在 `tests/conftest.py`：`qapp`（Qt 应用）、`data_dir`（隔离的数据目录）、`wait_until`（驱动事件循环直到条件成立）。测试用签名密钥在 `tests/signing.py`，只用于测试，从不进入发布包。
+- 单个测试应在 1 秒内结束。需要真实桌面、真实游戏或打包产物的检查放到下方手动清单，不放进自动测试。
 
-- `tests/studio/`：应用行为测试和共享模拟器，已与生产源码分开。
-- `scripts/test_run_tests.py`：测试入口自身的检查。
-- 根目录 `fixtures/`：随仓库提供的小型样本。
-- `work/studio/fixtures/`、`work/studio/data/`：可选本地历史记录，不提交。
+## 不在自动测试里的检查
 
-测试文件名保留原名，方便从旧报告找到对应用例。`test_paths.py` 统一生产源码位置，移动测试不会改变本地样本的读取位置。
+| 场景 | 做法 |
+| --- | --- |
+| 寻色效果、耗时、4K 表现 | 在游戏内分别实测截图寻色与精准寻色，如实记录未测项 |
+| 打包内容 | `python scripts/verify_release.py <包目录> --json <报告>`：字节码与源码一致、QML 完整、未打入 Tk 与个人数据 |
+| 更新资产 | `python scripts/verify_update_assets.py <资产目录> --package <包目录> --public-keys <公钥JSON>` |
+| 真实升级演练 | `python scripts/smoke_frozen_update.py --old-package <旧版包> --assets <新版资产> --keys <测试公钥JSON> --out <空目录>`：在隔离目录里用测试签名完成一次冻结程序升级，覆盖健康检查与首次启动确认 |
 
-如使用 pytest，显式文件或用例会直接执行，不再被隐藏的默认分组筛掉；不带路径时默认只选基础冒烟。日常优先使用上述入口，避免 pytest 为筛选而先收集全库。
-
-## 添加或删除测试
-
-先复用现有模拟器和用例。新增测试应能解释“玩家遇到什么问题，错误行为是什么”。同一行为的重复检查应合并；仅检查源码字符串的旧检查应在有行为覆盖后删除。保留仍在使用的历史策略测试，按需执行，不用测试总数衡量质量。
+发布流程见[发布指南](docs/development/release-tooling.md)。
