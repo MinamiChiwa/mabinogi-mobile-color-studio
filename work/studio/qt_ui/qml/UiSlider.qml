@@ -11,6 +11,7 @@ Item {
     property real from: 1
     property real to: 35
     property real value: 8
+    property real stepSize: 1
     property bool enabled: true
 
     signal moved(real value)
@@ -89,7 +90,9 @@ Item {
         function apply(posX) {
             var r = Math.min(1, Math.max(0, posX / track.width))
             var v = slider.from + r * (slider.to - slider.from)
-            slider.moved(Math.round(v))
+            if (slider.stepSize > 0)
+                v = slider.from + Math.round((v - slider.from) / slider.stepSize) * slider.stepSize
+            slider.moved(Math.max(slider.from, Math.min(slider.to, v)))
         }
 
         onPressed: function(m) { apply(m.x) }

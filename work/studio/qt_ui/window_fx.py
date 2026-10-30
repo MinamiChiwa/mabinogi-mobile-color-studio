@@ -117,6 +117,13 @@ def slide_in(window, x: int | None = None, y: int | None = None, *,
         pass
 
 
+def stop_fade(window) -> None:
+    """用户调整透明度时停止淡入，保留位置动画。"""
+    animations = _ANIMS.get(id(window))
+    if animations:
+        animations[1].stop()
+
+
 def present(window, parent=None) -> None:
     """按父窗口居中 + 滑动出现。"""
     x, y = place(window, parent)

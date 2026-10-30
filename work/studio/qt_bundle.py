@@ -7,6 +7,7 @@ QtQuick.Layouts and QtQuick.Window, so everything matched below is removed.
 that is no longer in the package.
 """
 import fnmatch
+import os
 import shutil
 from pathlib import Path
 
@@ -81,3 +82,52 @@ def check_dependencies(internal):
         pe.close()
     if missing:
         raise RuntimeError('Pruned Qt package is missing DLLs: ' + repr(missing))
+
+
+def prefer_system_icu(internal, system_dir=None):
+    """Remove incompatible PATH ICU copies that shadow Windows' ICU API.
+
+    Qt can link against Windows' unversioned ICU exports. A build machine's
+    PATH may instead make PyInstaller collect e.g. Poppler's version-suffixed
+    icuuc.dll. The filename matches, but importing QtCore then fails with 127.
+    Never remove a DLL until the system library satisfies every consumer.
+    OCR is a separate process with its own library directory.
+    """
+    import pefile
+    internal = Path(internal)
+    system_dir = Path(system_dir) if system_dir else Path(os.environ['SystemRoot']) / 'System32'
+    removed = []
+    for name in ('icuuc.dll', 'icuin.dll', 'icudt.dll'):
+        copies = [p for p in (internal / name, internal / 'PySide6' / name) if p.is_file()]
+        if not copies:
+            continue
+        needed = set()
+        for binary in internal.rglob('*'):
+            if binary.suffix.lower() not in ('.dll', '.pyd') or not binary.is_file():
+                continue
+            if binary.relative_to(internal).parts[0].lower() == 'ocr':
+                continue
+            pe = pefile.PE(str(binary), fast_load=True)
+            try:
+                pe.parse_data_directories(directories=[1])
+                for entry in getattr(pe, 'DIRECTORY_ENTRY_IMPORT', []):
+                    if entry.dll.decode().lower() == name:
+                        needed.update(symbol.name for symbol in entry.imports if symbol.name)
+            finally:
+                pe.close()
+        def exports(path):
+            pe = pefile.PE(str(path), max_symbol_exports=200000)
+            try:
+                return {s.name for s in getattr(getattr(pe, 'DIRECTORY_ENTRY_EXPORT', None), 'symbols', [])}
+            finally:
+                pe.close()
+        incompatible = [p for p in copies if not needed.issubset(exports(p))]
+        if not incompatible:
+            continue
+        system = system_dir / name
+        if not system.is_file() or not needed.issubset(exports(system)):
+            raise RuntimeError(f'Incompatible {name}; no compatible system runtime found')
+        for path in incompatible:
+            path.unlink()
+            removed.append(path.relative_to(internal).as_posix())
+    return removed

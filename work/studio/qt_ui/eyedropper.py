@@ -11,8 +11,8 @@
   取的是冻结瞬间的像素，取色过程中画面变化不影响结果。
 * **精度**：**物理像素级**。全程在 PMv2 物理像素上下文里读坐标与截图，
   不经过任何 UI 缩放换算，因此 125% / 150% 缩放下也能命中单个物理像素。
-* **不抢焦点**：窗口注册 `WS_EX_NOACTIVATE`，取色期间原前台窗口保持前台，
-  不会打断全屏游戏。
+* **窗口切换**：先隐藏工具并激活选定的游戏，再冻结画面；取色层本身不激活。
+  取消、选中或失败后恢复工具窗口，不移动或改变游戏尺寸。
 
 ## 调用方式
 
@@ -40,7 +40,7 @@ from ctypes import wintypes as W
 
 from PIL import ImageGrab
 from PySide6.QtCore import QObject, Slot, QTimer, QUrl
-from PySide6.QtGui import QImage
+from PySide6.QtGui import QImage, QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtQuick import QQuickImageProvider
 
@@ -115,12 +115,38 @@ class QtEyedropper(QObject):
         self._bounds = None
         self._dpr = 1.0
         self._finished = False
+        self._hidden_windows = []
         self._escape_timer = QTimer(self)
         self._escape_timer.setInterval(30)
         self._escape_timer.timeout.connect(self._poll_escape)
 
     # -- 生命周期 -----------------------------------------------------------
     def start(self):
+        try:
+            self._prepare_desktop()
+            # Let hiding/foreground activation reach the compositor before
+            # freezing pixels; do not capture the tool over the game.
+            QTimer.singleShot(150, self._capture)
+        except Exception as exc:
+            self._finish(error=exc)
+
+    def _prepare_desktop(self):
+        import window_target
+        host=self._host
+        try:
+            target=window_target.resolve_target(getattr(host,'selected_window',None),
+                server=host.server.get())
+        except window_target.WindowUnavailable:
+            target=None  # Screen sampling is also available without a game.
+        for window in QGuiApplication.topLevelWindows():
+            if window.isVisible():
+                self._hidden_windows.append(window)
+                window.hide()
+        if target is not None and not window_target.activate_target_window(target):
+            raise OSError('请先返回游戏窗口，再点击重试。')
+
+    def _capture(self):
+        if self._finished:return
         try:
             self._bounds = native.desktop_bounds()
             with physical_pixel_context(native._u):
@@ -285,6 +311,12 @@ class QtEyedropper(QObject):
                     pass
             # 到这里才真正释放 engine
             holder.clear()
+            for hidden in self._hidden_windows:
+                try:
+                    if not getattr(self._host,'_closing',False):hidden.show()
+                except RuntimeError:
+                    pass
+            self._hidden_windows.clear()
 
         QTimer.singleShot(0, teardown)
 
@@ -309,6 +341,8 @@ class QtEyedropper(QObject):
 def pick_screen(host, callback):
     """Qt 版入口，签名与原 ``eyedropper.pick_screen(root, callback)`` 一致。"""
     if getattr(host, 'picking', False) or getattr(host, 'busy', False):
+        updater=getattr(host,'updater',None)
+        if updater is not None:updater.set_busy(bool(getattr(host,'busy',False) or getattr(host,'picking',False)))
         return
     host.picking = True
     session = QtEyedropper(host, callback)

@@ -1,5 +1,6 @@
 """Preflight bounded scan for valid dye instances and live Unity native textures."""
 import struct,sys,time,json,datetime
+from collections import deque
 import numpy as np
 from pathlib import Path
 from .runtime_read import Reader
@@ -87,6 +88,29 @@ class IncrementalDyeScan:
   self.read_seconds=0.;self.search_seconds=0.;self.inspection_seconds=0.
   self.exact_search_blocks=0
   self.aligned_search_blocks=0;self.aligned_matches=None;self.aligned_window_end=0
+  self.pending_reads=deque();self.unresolved_reads={}
+  self.read_errors_seen=0;self.repaired_ranges=0;self.changed_ranges_excluded=0
+
+ @staticmethod
+ def _scan_region(region):
+  return (region.State==0x1000 and region.Type==0x20000 and not region.Protect&0x100
+          and region.Protect&0xff in (4,8,0x40,0x80))
+
+ def _split_pending(self,start,length,cut):
+  error=self.unresolved_reads.pop((start,length))
+  for address,size in ((start,cut),(start+cut,length-cut)):
+   self.unresolved_reads[address,size]=error
+   self.pending_reads.append((address,size,0))
+
+ def _failed_read(self,start,length,error,attempt):
+  self.read_errors_seen+=1;self.last_read_error=str(error)
+  self.unresolved_reads[start,length]=str(error)
+  if attempt<1:
+   self.pending_reads.append((start,length,attempt+1))
+  elif length>4096:
+   # Every possible object header is 8-byte aligned. Aligned splits preserve
+   # all full headers without reading across an unreadable page boundary.
+   self._split_pending(start,length,((length//2)//8)*8)
 
  def _inspect(self,address,check,*,validating=False):
   check();began=self.clock();unreadable=False
@@ -188,7 +212,26 @@ class IncrementalDyeScan:
     # cancellation/deadline cannot discard a candidate or the remaining buffer.
     self._inspect(address,check);self.seen.add(address)
     self.find_position=position+8;inspected+=1;continue
-   if self.region is None or self.next_address>=self.region.BaseAddress+self.region.RegionSize:
+   repairing=bool(self.pending_reads)
+   if repairing:
+    start,length,attempt=self.pending_reads.popleft();visited+=1
+    query=getattr(self.reader,'query_region',None)
+    if callable(query):
+     try:
+      check();current=query(start);check()
+      base=current.BaseAddress or 0;extent=base+current.RegionSize
+      if not base<=start<extent:raise OSError('Invalid repair memory range')
+      if extent<start+length:
+       self._split_pending(start,length,extent-start);continue
+      if not self._scan_region(current):
+       # Only an actual query can establish that a former scan page is no
+       # longer eligible. Unresolved readable holes still block uniqueness.
+       self.unresolved_reads.pop((start,length));self.changed_ranges_excluded+=1
+       continue
+     except (InterruptedError,TimeoutError):raise
+     except OSError:
+      check() # Try the read; a failed query alone cannot prove absence.
+   elif self.region is None or self.next_address>=self.region.BaseAddress+self.region.RegionSize:
     try:region=next(self.regions)
     except StopIteration:
      self.phase='validating'
@@ -200,22 +243,25 @@ class IncrementalDyeScan:
      self.read_failures+=1;self.last_read_error=type(exc).__name__+': '+str(exc);check()
      raise
     self.regions_visited+=1;visited+=1
-    if region.State!=0x1000 or region.Type!=0x20000 or region.Protect&0x100 or region.Protect&0xff not in (4,8,0x40,0x80):
+    if not self._scan_region(region):
      self.region=None;continue
     self.region=region;self.next_address=region.BaseAddress
-   start=self.next_address
-   length=min(8*1024*1024+8,self.region.BaseAddress+self.region.RegionSize-start)
+   if not repairing:
+    start=self.next_address
+    length=min(8*1024*1024+8,self.region.BaseAddress+self.region.RegionSize-start)
+    self.next_address+=8*1024*1024
    read_began=self.clock()
-   try:buffer=self.reader.read(start,length)
+   try:
+    buffer=self.reader.read(start,length)
+    if len(buffer)!=length:raise OSError('Short process read')
    except (InterruptedError,TimeoutError):raise
    except OSError as exc:
-    check();self.read_failures+=1;self.last_read_error=type(exc).__name__+': '+str(exc)
-    self.next_address+=8*1024*1024;continue
+    check();self._failed_read(start,length,type(exc).__name__+': '+str(exc),attempt if repairing else -1)
+    continue
    finally:self.read_seconds+=max(0.,self.clock()-read_began)
    check()
-   if len(buffer)!=length:
-    self.read_failures+=1;self.last_read_error='Short process read'
-    self.next_address+=8*1024*1024;continue
+   if repairing:
+    self.unresolved_reads.pop((start,length));self.repaired_ranges+=1
    self.buffer=buffer;self.buffer_start=start;self.find_position=0
    self.aligned_matches=None;self.aligned_window_end=0
    self.aligned_search_blocks+=len(buffer)>=self.aligned_search_min_bytes
@@ -227,14 +273,14 @@ class IncrementalDyeScan:
    self.buffer_search_pattern=self.search_pattern if zero_density >= .5 else self.pattern
    self.exact_search_blocks += self.buffer_search_pattern==self.pattern
    self.buffer_prefix_collisions=0
-   self.next_address+=8*1024*1024
    self.bytes_scanned+=len(buffer);read_bytes+=len(buffer);self.chunks_scanned+=1
   return self.diagnostic()
 
  def diagnostic(self):
   rows=self.validated if self.phase=='complete' else self.hits
   eligible=sorted(address for address,hit in rows.items() if hit['capture_eligible'])
-  complete=self.phase=='complete' and self.read_failures==0 and not self.candidate_read_errors
+  unresolved=self.read_failures+len(self.unresolved_reads)
+  complete=self.phase=='complete' and unresolved==0 and not self.candidate_read_errors
   elapsed=max(0.,self.clock()-self.started)
   return dict(status='coverage_incomplete' if self.phase=='complete' and not complete else self.phase,
    scan_complete=complete,heap_scan_complete=self.phase in ('validating','complete'),
@@ -243,7 +289,11 @@ class IncrementalDyeScan:
    candidate_count=len(self.seen|set(self.known)),typed_candidate_count=len(rows),
    eligible_addresses=[hex(address) for address in eligible],
    first_eligible_seen_monotonic=min((self.first_eligible_seen[address] for address in eligible),default=None),
-   read_failures=self.read_failures,last_read_error=self.last_read_error,
+   read_failures=unresolved,last_read_error=self.last_read_error,
+   read_errors_seen=self.read_errors_seen,repaired_ranges=self.repaired_ranges,
+   changed_ranges_excluded=self.changed_ranges_excluded,pending_read_repairs=len(self.pending_reads),
+   unresolved_read_ranges=[dict(address=hex(a),size=n,error=e)
+                           for (a,n),e in list(self.unresolved_reads.items())[:16]],
    candidate_read_failures=len(self.candidate_read_errors),
    inactive_read_failures={hex(a):e for a,e in self.inactive_read_failures.items()},
    candidate_retries={hex(a):n for a,n in self.candidate_retries.items()},

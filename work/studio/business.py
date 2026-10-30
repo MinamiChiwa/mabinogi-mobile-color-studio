@@ -195,10 +195,10 @@ class Business:
         self._retry_enabled = False
         self._bound_target = None
         self.start.configure(state='normal')
+        if self.overlay is not None:
+            self.overlay.dismiss()
         if stopped:
             self.status.configure(text='已停止自动染色，可重新开始。')
-            if self.overlay is not None:
-                self.overlay.dismiss()
 
     def select_candidate(self, batch_id, candidate_id):
         if self.runner:

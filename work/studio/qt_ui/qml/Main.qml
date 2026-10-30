@@ -459,48 +459,23 @@ Window {
                     Layout.fillWidth: true
                     implicitHeight: root.threeCol
                                     ? root.cardsH
-                                    : cardColumn.implicitHeight
+                                    : cardGrid.implicitHeight
                     Layout.preferredHeight: implicitHeight
 
-                    // 三列：grid repeat(3, minmax(0,1fr)) gap 10
-                    Row {
-                        id: cardRow
-                        anchors.fill: parent
-                        visible: root.threeCol
-                        spacing: 10
-
-                        // 只在三列模式创建；visible:false 的 Row 仍会布局 delegate
-                        Repeater {
-                            model: root.threeCol ? [0, 1, 2] : []
-                            delegate: RegionCard {
-                                width: Math.max(0, (cardRow.width - 20) / 3)
-                                height: cardRow.height
-                                cardIndex: modelData
-                                uiBridge: bridge
-                            }
-                        }
-                    }
-
-                    // 单列：容器最大 620（由外层约束），卡片纵向堆叠
-                    Column {
-                        id: cardColumn
-                        width: Math.min(parent.width, 620)
+                    // Resize only rearranges these three instances: no delegate
+                    // destruction, focus loss or repeated entry animations.
+                    Grid {
+                        id: cardGrid
+                        columns: root.threeCol ? 3 : 1
+                        width: root.threeCol ? parent.width : Math.min(parent.width, 620)
                         anchors.horizontalCenter: parent.horizontalCenter
-                        visible: !root.threeCol
                         spacing: 10
-
                         Repeater {
-                            model: root.threeCol ? [] : [0, 1, 2]
+                            model: [0, 1, 2]
                             delegate: RegionCard {
-                                // 单列高度按内容算：固定行高之和 + 缩略图（688:265）
-                                // 与 481 的三列基准同源，避免用魔法数字 580 撑出空白。
-                                // 与 RegionCard 的纵向节奏同源：12+34+44+49+24+30+43+42+12
-                                readonly property int rows: 290
-                                readonly property int thumb:
-                                    1 + 12 + 14 + 5
-                                    + Math.round((cardColumn.width - 28) * 265 / 688)
-                                width: cardColumn.width
-                                height: rows + thumb
+                                width: Math.max(0, (cardGrid.width - (cardGrid.columns - 1) * 10) / cardGrid.columns)
+                                height: root.threeCol ? root.cardsH
+                                    : 322 + Math.round((width - 28) * 265 / 688)
                                 cardIndex: modelData
                                 uiBridge: bridge
                             }
@@ -788,25 +763,50 @@ Window {
         }
 
         // -----------------------------------------------------------------
-        // 右下角缩放把手
+        // Native resizing uses stable screen coordinates and OS DPI handling.
         // -----------------------------------------------------------------
-        MouseArea {
-            width: 16
-            height: 16
-            anchors.right: parent.right
-            anchors.bottom: parent.bottom
-            cursorShape: Qt.SizeFDiagCursor
-            property point pressPoint
-            property size startSize
-
-            onPressed: function(m) {
-                pressPoint = Qt.point(m.x, m.y)
-                startSize = Qt.size(root.width, root.height)
-            }
-            onPositionChanged: function(m) {
-                if (!pressed) return
-                root.width = Math.max(root.minimumWidth, startSize.width + (m.x - pressPoint.x))
-                root.height = Math.max(root.minimumHeight, startSize.height + (m.y - pressPoint.y))
+        Repeater {
+            model: [Qt.LeftEdge, Qt.RightEdge, Qt.TopEdge, Qt.BottomEdge,
+                    Qt.LeftEdge | Qt.TopEdge, Qt.RightEdge | Qt.TopEdge,
+                    Qt.LeftEdge | Qt.BottomEdge, Qt.RightEdge | Qt.BottomEdge]
+            delegate: MouseArea {
+                required property int modelData
+                objectName: 'resizeEdge_' + modelData
+                readonly property bool leftEdge: (modelData & Qt.LeftEdge) !== 0
+                readonly property bool rightEdge: (modelData & Qt.RightEdge) !== 0
+                readonly property bool topEdge: (modelData & Qt.TopEdge) !== 0
+                readonly property bool bottomEdge: (modelData & Qt.BottomEdge) !== 0
+                readonly property bool corner: (leftEdge || rightEdge) && (topEdge || bottomEdge)
+                z: corner ? 102 : 101
+                width: corner ? 12 : ((leftEdge || rightEdge) ? 6 : parent.width - 24)
+                height: corner ? 12 : ((topEdge || bottomEdge) ? 6 : parent.height - 24)
+                x: rightEdge ? parent.width - width : (leftEdge ? 0 : 12)
+                y: bottomEdge ? parent.height - height : (topEdge ? 0 : 12)
+                cursorShape: corner ? ((leftEdge === topEdge) ? Qt.SizeFDiagCursor : Qt.SizeBDiagCursor)
+                                    : ((leftEdge || rightEdge) ? Qt.SizeHorCursor : Qt.SizeVerCursor)
+                property bool fallbackResize: false
+                property point pointerOrigin
+                property rect geometryOrigin
+                onPressed: function(mouse) {
+                    fallbackResize = !root.startSystemResize(modelData)
+                    if (fallbackResize) {
+                        pointerOrigin = mapToGlobal(mouse.x, mouse.y)
+                        geometryOrigin = Qt.rect(root.x, root.y, root.width, root.height)
+                    }
+                }
+                onPositionChanged: function(mouse) {
+                    if (!pressed || !fallbackResize) return
+                    var pointer = mapToGlobal(mouse.x, mouse.y)
+                    var dx = pointer.x - pointerOrigin.x, dy = pointer.y - pointerOrigin.y
+                    var w = Math.max(root.minimumWidth, geometryOrigin.width + (rightEdge ? dx : leftEdge ? -dx : 0))
+                    var h = Math.max(root.minimumHeight, geometryOrigin.height + (bottomEdge ? dy : topEdge ? -dy : 0))
+                    root.width = w
+                    root.height = h
+                    if (leftEdge) root.x = geometryOrigin.x + geometryOrigin.width - w
+                    if (topEdge) root.y = geometryOrigin.y + geometryOrigin.height - h
+                }
+                onReleased: fallbackResize = false
+                onCanceled: fallbackResize = false
             }
         }
     }

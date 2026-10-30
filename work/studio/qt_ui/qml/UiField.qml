@@ -8,7 +8,7 @@ import QtQuick.Controls
 Item {
     id: field
 
-    property string text: ''
+    property alias text: input.text
     property string placeholder: ''
     property bool enabled: true
     property bool invalid: false
@@ -47,6 +47,7 @@ Item {
 
         TextInput {
             id: input
+            objectName: 'fieldEditor'
             anchors.fill: parent
             anchors.leftMargin: 12
             anchors.rightMargin: 12
@@ -61,21 +62,9 @@ Item {
             selectionColor: '#2F4C36'
             selectedTextColor: uiState.themeColor('text', uiState.appearance)
 
-            // 输入即回写：外部读 `field.text` 才能拿到用户刚输入的内容。
-            // 只发信号不回写，会让「添加替代色」这类按钮读到的永远是空串。
-            text: field.text
-            onTextEdited: {
-                field.text = text
-                field.edited(text)
-            }
-
-            // 外部改 text（清空、回填、重置）时同步到输入框
-            Connections {
-                target: field
-                function onTextChanged() {
-                    if (input.text !== field.text) input.text = field.text
-                }
-            }
+            // Alias exposes the current edit without assigning over the
+            // caller's model binding. Picker/profile updates remain live.
+            onTextEdited: field.edited(text)
 
             Text {
                 anchors.fill: parent

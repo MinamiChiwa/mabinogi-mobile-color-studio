@@ -7,13 +7,14 @@
 ``SetWindowDisplayAffinity(hwnd, 0x11)``（截图排除）、
 ``WS_EX_NOACTIVATE``（不抢焦点）、``WS_EX_TOPMOST``（置顶）。
 
-按需求**不做整窗透明度**；圆角通过透明窗口 + 圆角矩形实现。
+支持 65%–100% 不透明度；圆角通过透明窗口 + 圆角矩形实现。
 """
 from __future__ import annotations
 
 from pathlib import Path
+import math
 
-from PySide6.QtCore import QObject, QTimer, Signal, Slot
+from PySide6.QtCore import QObject, Property, QTimer, Signal, Slot
 from PySide6.QtQml import QQmlApplicationEngine
 
 import overlay_native
@@ -204,6 +205,9 @@ class OverlayState(QObject):
 class QtOverlay(QObject):
     """寻色浮窗：把寻色事件投影到 QML，Win32 注册交给 `overlay_native`。"""
 
+    alphaChanged = Signal()
+    alpha = Property(float, lambda self: self._alpha, notify=alphaChanged)
+
     def __init__(self, host, stop, select_candidate=None, settings_path=None):
         super().__init__()
         self.host = host
@@ -228,13 +232,19 @@ class QtOverlay(QObject):
         self._preferences = read_settings(settings_path) if settings_path else {}
         self._position = self._load_position()
         self._alpha = self._load_alpha()
-        self._alpha_timer = None
+        self._alpha_timer = QTimer(self)
+        self._alpha_timer.setSingleShot(True)
+        self._alpha_timer.timeout.connect(self._save_alpha)
         # 计时（对齐 search_overlay.py:99 的同名字段）
         self._started = 0.0
         self._stage_started = 0.0
         self._stage = None
         self._deadline = None
         self._heartbeat_timer = None
+        self._terminal = False
+        self._position_timer = QTimer(self)
+        self._position_timer.setSingleShot(True)
+        self._position_timer.timeout.connect(self.save_position)
 
     # -- 设置存取（对齐 search_overlay.py:181-185）----------------------------
     def _load_position(self):
@@ -246,7 +256,8 @@ class QtOverlay(QObject):
 
     def _load_alpha(self):
         try:
-            return max(0.65, min(1.0, float(self._preferences.get('overlay_alpha', 0.92))))
+            value = float(self._preferences.get('overlay_alpha', 0.92))
+            return max(0.65, min(1.0, value)) if math.isfinite(value) else 0.92
         except (TypeError, ValueError):
             return 0.92
 
@@ -263,21 +274,30 @@ class QtOverlay(QObject):
     def set_opacity(self, value):
         """设置浮窗不透明度；250ms 防抖写盘。"""
         try:
-            value = max(0.65, min(1.0, float(value)))
+            value = float(value)
+            if not math.isfinite(value):
+                return
+            value = max(0.65, min(1.0, value))
         except (TypeError, ValueError):
             return
+        changed = self._alpha != value
         self._alpha = value
         if self._window is not None:
+            from qt_ui import window_fx
+            window_fx.stop_fade(self._window)
             self._window.setOpacity(value)
+        if changed:
+            self.alphaChanged.emit()
         if not self.settings_path:
             return
-        if self._alpha_timer is not None:
-            self._alpha_timer.stop()
-        self._alpha_timer = QTimer(self)
-        self._alpha_timer.setSingleShot(True)
-        self._alpha_timer.timeout.connect(
-            lambda: save_settings(self.settings_path, overlay_alpha=float(self._alpha)))
         self._alpha_timer.start(250)
+
+    def _save_alpha(self):
+        if self.settings_path:
+            try:
+                save_settings(self.settings_path, overlay_alpha=float(self._alpha))
+            except OSError:
+                pass
 
     # -- 窗口 ---------------------------------------------------------------
     def _ensure_window(self):
@@ -297,6 +317,8 @@ class QtOverlay(QObject):
         window = roots[0]
         self._engine = engine
         self._window = window
+        window.xChanged.connect(self._schedule_position_save)
+        window.yChanged.connect(self._schedule_position_save)
 
         # 不透明度在窗口真正显示后再应用（见 _apply_alpha）：
         # QWindow 尚未 shown 时设置会被平台的 native handler 忽略。
@@ -341,7 +363,9 @@ class QtOverlay(QObject):
         if self.native is not None:
             overlay_native.unregister_overlay(self.native['hwnd'])
             self.native = None
-        self.native = overlay_native.configure_overlay(int(hwnd), passive=True)
+        # Planning remains interactive. input_scope hides this surface during
+        # game gestures without taking focus away from the game.
+        self.native = overlay_native.configure_overlay(int(hwnd), passive=False)
 
     # -- 与 App 约定的接口 --------------------------------------------------
     def begin(self, rules, *, passive=False):
@@ -355,7 +379,10 @@ class QtOverlay(QObject):
         self.state.set_retryEnabled(False)
         self.state.set_running(True)
         self.state.set_stopped(False)
+        self.state.set_warn(False)
         self.state.set_candidates([])
+        self.state.set_stageMeta('')
+        self._terminal = False
 
         # 计时起点：对齐 search_overlay.py:239
         self._started = _time.monotonic()
@@ -414,10 +441,22 @@ class QtOverlay(QObject):
             self.phase = 'waiting' if stage == 'waiting' else 'computing'
             self.state.set_stage(_stage_label(stage))
 
-        if 'remaining' in data and data['remaining'] is not None:
-            self._deadline = _time.monotonic() + float(data['remaining'])
-            # 立刻反映到界面，避免出现「已给出剩余时间但还显示 --:--」的空档
-            left = max(0, int(round(float(data['remaining']))))
+        now = _time.monotonic()
+        budget = data.get('budget')
+        budget = budget if isinstance(budget, dict) else {}
+        def finite(value):
+            return type(value) in (int, float) and math.isfinite(value)
+        # These are game/session deadlines, never initial discovery deadlines.
+        deadline = data.get('effective_deadline', budget.get('effective_deadline'))
+        if not finite(deadline):
+            deadline = data.get('session_deadline_monotonic')
+        if not finite(deadline):
+            remaining = data.get('remaining', data.get('remaining_seconds', budget.get('remaining_seconds')))
+            captured = data.get('captured_monotonic', data.get('at_monotonic', budget.get('at_monotonic', now)))
+            deadline = captured + remaining if finite(remaining) and finite(captured) else None
+        if finite(deadline):
+            self._deadline = deadline
+            left = max(0, int(deadline - now))
             self.state.set_remaining(f'{left // 60:02d}:{left % 60:02d}', low=left <= 10)
 
         total = data.get('total')
@@ -432,12 +471,14 @@ class QtOverlay(QObject):
         # 阶段内步骤：设计稿右侧的「步骤 3 / 8」
         if total:
             self.state.set_stageMeta(f'{int(data.get("current", 0))} / {int(total)}')
+        else:
+            self.state.set_stageMeta('')
 
     def heartbeat(self):
         """每秒刷新「已用 / 本阶段」与倒计时（移植 search_overlay.py:215-225）。"""
         import time as _time
 
-        if getattr(self, '_dismissed', True):
+        if getattr(self, '_dismissed', True) or self._terminal:
             return
         now = _time.monotonic()
         text = f'已用 {int(now - self._started)} 秒 · 本阶段 {int(now - self._stage_started)} 秒'
@@ -555,6 +596,30 @@ class QtOverlay(QObject):
             return
         if not isinstance(data, dict):
             data = {}
+        if self._terminal and kind != 'finished':
+            return
+
+        if kind in ('native_retry_available', 'native_retry_reset', 'native_timer'):
+            self.update_activity(data)
+            if kind == 'native_retry_available':
+                self._retry_pending = False
+                self._retry_enabled = bool(data.get('enabled')) and not self._terminal
+                self.state.set_retryEnabled(self._retry_enabled)
+                if data.get('waiting_for_retry'):
+                    from native_status import retry_reason_text
+                    self.render('本轮寻色已完成',
+                                '可按 F7 或点击重试；实际颜色请以游戏为准。' if self._retry_enabled
+                                else retry_reason_text(data.get('reason')))
+            elif kind == 'native_retry_reset':
+                self._retry_enabled = False
+                self._retry_pending = data.get('status') == 'zooming'
+                self.state.set_retryEnabled(False)
+                if data.get('status') == 'rejected':
+                    from native_status import retry_reason_text
+                    self.render('暂时无法重试', retry_reason_text(data.get('reason')))
+                else:
+                    self.render('正在重试', '正在缩小画板并重新搜索。')
+            return
 
         # 进度事件：对齐 search_overlay.py:544-546
         #   phase 切换 + 刷新进度/阶段/剩余 + 用原作者的 progress_text 写标题与正文
@@ -572,8 +637,7 @@ class QtOverlay(QObject):
         # 结束态：对齐 search_overlay.handle 的收尾分支。
         # 注意：这里只改浮窗的显示状态，业务收尾仍由 business.handle_event 负责。
         if kind in ('error', 'done', 'interrupted', 'wait_timeout', 'worker_failed'):
-            self.state.set_running(False)
-            self._stop_heartbeat()
+            self._finish()
             if kind in ('error', 'worker_failed'):
                 message = data.get('message') or ''
                 self.render('已停止', message or '本轮未能继续，请查看主窗口提示。')
@@ -588,18 +652,16 @@ class QtOverlay(QObject):
                 self.state.set_stopped(True)
             else:                                            # done
                 self.render('本轮结束', data.get('message') or
-                            '全部目标达标，请在游戏内手动确认是否套用。')
+                            '自动操作已结束，请在游戏内查看当前颜色。')
                 self.state.set_progress(1.0)
                 self.state.set_stopped(True)
             return
 
         if kind == 'finished':
-            # native 运行结束时直接收起浮窗
-            if getattr(self, '_native_run', False):
-                self.dismiss()
-                return
-            self.state.set_running(False)
-            self._stop_heartbeat()
+            if not self._terminal:
+                self.render('本轮结束', '自动操作已结束，请在游戏内查看当前颜色。')
+            self._finish()
+            self.dismiss()
             return
 
         if kind in ('native_candidates', 'candidates'):
@@ -623,14 +685,46 @@ class QtOverlay(QObject):
             self.phase = 'positioning'
             return
         if kind in ('native_result', 'single_verified', 'screenshot_result'):
-            self.state.set_running(False)
+            if kind == 'native_result':
+                from native_status import result_text
+                title, body = result_text(data)
+            else:
+                from ui_progress import single_result_presentation
+                title, body = single_result_presentation(data)
+            self.render(title, body)
+            self.state.set_warn(not bool(data.get('verified')))
+            # A result can be provisional while the worker waits for F7.
+            # Only worker completion or a real palette end closes the run.
+            provisional=(kind=='screenshot_result' and data.get('stop_reason') in (None,'time_used')
+                and data.get('outcome') in ('matched','compromise','unverified'))
+            if not provisional:self._finish()
+            if data.get('stop_reason') == 'palette_ended':
+                self.dismiss()
             return
+
+    def _finish(self):
+        self._terminal = True
+        self.phase = 'stopped'
+        self._retry_enabled = self._retry_pending = False
+        self.state.set_retryEnabled(False)
+        self.state.set_running(False)
+        self.state.set_stopped(True)
+        self._stop_heartbeat()
+
+    def _schedule_position_save(self, *_args):
+        self._position_timer.start(300)
 
     # -- QML 回调 ----------------------------------------------------------
     @Slot()
     def requestStop(self):
         if callable(self.stop_action):
             self.stop_action()
+
+    @Slot()
+    def requestClose(self):
+        if not self._terminal and not self._dismissed and callable(self.stop_action):
+            self.stop_action()
+        self.dismiss()
 
     @Slot()
     def requestRetry(self):

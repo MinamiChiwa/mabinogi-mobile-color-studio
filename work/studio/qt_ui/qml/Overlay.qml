@@ -21,8 +21,13 @@ Window {
     color: 'transparent'
     flags: Qt.Window | Qt.FramelessWindowHint | Qt.WindowDoesNotAcceptFocus | Qt.WindowStaysOnTopHint
     title: Loc.t('寻色浮窗')
+    onClosing: function(event) {
+        event.accepted = false
+        overlayBridge.requestClose()
+    }
 
-    Behavior on height { NumberAnimation { duration: uiState.motion('mid') } }
+    // Keep hit boxes and rendered buttons aligned when retry becomes visible.
+    // Animating a window whose layout fills it temporarily compresses rows.
 
     // 状态点呼吸（1.8s，原型 @keyframes breathe）
     SequentialAnimation on dotHalo {
@@ -50,6 +55,7 @@ Window {
             // ================= 标题栏（拖动把手） =================
             Item {
                 id: titleBar
+                objectName: 'overlayTitleBar'
                 Layout.fillWidth: true
                 implicitHeight: 22
 
@@ -89,7 +95,7 @@ Window {
                         font.pixelSize: 15
                         font.weight: Font.DemiBold
                         elide: Text.ElideRight
-                        width: Math.max(80, root.width - 210)
+                        width: Math.max(60, root.width - 238)
                         anchors.verticalCenter: parent.verticalCenter
                     }
                 }
@@ -140,6 +146,7 @@ Window {
                         MouseArea {
                             anchors.fill: parent
                             cursorShape: Qt.PointingHandCursor
+                            objectName: 'overlayOpacityButton'
                             onClicked: opacityPanel.visible = !opacityPanel.visible
                         }
                     }
@@ -160,13 +167,32 @@ Window {
                             onClicked: overlayBridge.toggleCollapse()
                         }
                     }
+                    Item {
+                        width: 22
+                        height: 22
+                        Text {
+                            anchors.centerIn: parent
+                            text: '×'
+                            color: uiState.themeColor('muted', uiState.appearance)
+                            font.pixelSize: 18
+                        }
+                        MouseArea {
+                            objectName: 'overlayCloseButton'
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: overlayBridge.requestClose()
+                        }
+                    }
                 }
 
                 // 拖动：仅标题栏
                 DragHandler {
                     target: null
                     acceptedDevices: PointerDevice.Mouse
-                    onActiveChanged: if (active) root.startSystemMove()
+                    onActiveChanged: {
+                        if (active) root.startSystemMove()
+                        else overlayBridge.commitPosition()
+                    }
                 }
             }
 
@@ -338,10 +364,12 @@ Window {
 
                     UiSlider {
                         id: alphaSlider
+                        objectName: 'overlayOpacitySlider'
                         Layout.fillWidth: true
                         from: 0.65
                         to: 1.0
-                        value: overlayBridge.opacity()
+                        stepSize: 0.01
+                        value: overlayBridge.alpha
                         onMoved: function(v) { overlayBridge.setOpacity(v) }
                     }
                 }
@@ -533,7 +561,7 @@ Window {
                         anchors.centerIn: parent
                         spacing: 6
                         Text {
-                            text: overlayState.stopped ? Loc.t('已停止') : Loc.t('停止')
+                            text: overlayState.stopped ? Loc.t('关闭') : Loc.t('停止')
                             color: overlayState.stopped ? uiState.themeColor('muted', uiState.appearance)
                                                         : uiState.themeColor('text', uiState.appearance)
                             font.pixelSize: 12
@@ -550,10 +578,10 @@ Window {
                     HoverHandler { id: stopHover }
 
                     MouseArea {
+                        objectName: 'overlayStopButton'
                         anchors.fill: parent
                         cursorShape: Qt.PointingHandCursor
-                        enabled: !overlayState.stopped
-                        onClicked: overlayBridge.requestStop()
+                        onClicked: overlayState.stopped ? overlayBridge.requestClose() : overlayBridge.requestStop()
                     }
                 }
 
@@ -586,6 +614,7 @@ Window {
                     HoverHandler { id: retryHover }
 
                     MouseArea {
+                        objectName: 'overlayRetryButton'
                         anchors.fill: parent
                         cursorShape: Qt.PointingHandCursor
                         onClicked: overlayBridge.requestRetry()
