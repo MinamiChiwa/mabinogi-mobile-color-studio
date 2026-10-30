@@ -1,5 +1,8 @@
 """Qt application lifecycle: QML integrity, closing safely, update confirmation, update dialog."""
 import json
+import os
+from pathlib import Path
+import subprocess
 import sys
 
 import pytest
@@ -22,6 +25,9 @@ class FakeWindow:
 
     def show(self):
         self.shown = True
+
+    def setProperty(self, name, value):
+        setattr(self, name, value)
 
 
 class FakeRunner:
@@ -99,6 +105,41 @@ def test_close_when_idle_saves_profile_and_quits(qapp, make_host, quits, data_di
     host.close()
     assert quits == [True]
     assert json.loads((data_dir / 'profile.json').read_text(encoding='utf-8'))['regions'][0]['target'] == '#123456'
+
+
+@pytest.mark.parametrize('trigger', ['window', 'button'])
+def test_real_qt_loop_exits_after_close_request(tmp_path, trigger):
+    """Do not mock quit: a rejecting QML window can prevent Qt from exiting."""
+    script = '''
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path.cwd() / 'work/studio'))
+from PySide6.QtCore import QTimer, QUrl
+from PySide6.QtGui import QGuiApplication
+from PySide6.QtQml import QQmlApplicationEngine
+from PySide6.QtQuickControls2 import QQuickStyle
+QQuickStyle.setStyle('Basic')
+app = QGuiApplication(['test-close'])
+app.setQuitOnLastWindowClosed(False)
+import business
+business.DATA = Path(sys.argv[1]); business.DATA.mkdir()
+from qt_ui.host import QtHost
+from qt_ui import QML_DIR
+host = QtHost()
+engine = QQmlApplicationEngine()
+for name, value in dict(uiState=host.state, bridge=host.bridge, launchVisible=True).items():
+    engine.rootContext().setContextProperty(name, value)
+engine.load(QUrl.fromLocalFile(str(QML_DIR / 'Main.qml')))
+assert engine.rootObjects()
+window = engine.rootObjects()[0]; host.window = window
+QTimer.singleShot(20, window.close if sys.argv[2] == 'window' else host.bridge.requestClose)
+QTimer.singleShot(2000, lambda: app.exit(71))
+sys.exit(app.exec())
+'''
+    result = subprocess.run([sys.executable, '-c', script, str(tmp_path/'data'), trigger],
+        cwd=Path(__file__).resolve().parents[1], env={**os.environ, 'QT_QPA_PLATFORM': 'offscreen'},
+        capture_output=True, text=True, timeout=20)
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def update_transaction(tmp_path, status):

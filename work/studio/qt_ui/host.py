@@ -967,6 +967,8 @@ class QtHost(core.Business, QObject):
             QTimer.singleShot(250, self.close)
             return
         self.shutdown()
+        if self.window is not None:
+            self.window.setProperty('closeApproved', True)
         QGuiApplication.quit()
 
     def shutdown(self):

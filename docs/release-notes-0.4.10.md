@@ -2,7 +2,7 @@
 
 ## 简体中文
 
-- 界面迁移至 Qt/QML，改善窗口缩放、布局和浮窗体验；修复浮窗点击、拖动、透明度与倒计时更新。
+- 界面迁移至 Qt/QML，改善窗口缩放、布局和浮窗体验；修复无法正常关闭工具，以及浮窗点击、拖动、透明度与倒计时更新问题。
 - 修复选色或吸管取色后 HEX 输入框不更新的问题；吸管取色前会隐藏工具并切换到游戏窗口。
 - 改善精准寻色的启动读取；修正两种模式中偏离目标后的调整逻辑，减少某一区域改善却让其他区域大幅变差的情况。
 - 截图寻色的末尾微调会计入操作、回读与返回所需时间；本轮结束后自动关闭浮窗，也可手动关闭。
@@ -20,7 +20,7 @@
 
 ## 繁體中文
 
-- 介面改用 Qt/QML，改善視窗縮放、版面與浮窗體驗；修正浮窗點擊、拖曳、透明度及倒數更新。
+- 介面改用 Qt/QML，改善視窗縮放、版面與浮窗體驗；修正工具無法正常關閉，以及浮窗點擊、拖曳、透明度與倒數更新問題。
 - 修正選色或吸管取色後 HEX 輸入欄未更新的問題；使用吸管前會隱藏工具並切換至遊戲視窗。
 - 改善精準尋色的啟動讀取；修正兩種模式偏離目標後的調整邏輯，減少單一區域改善卻讓其他區域明顯變差的情況。
 - 截圖尋色末段微調會計入操作、讀回與返回所需時間；本輪結束後自動關閉浮窗，也可手動關閉。
@@ -38,7 +38,7 @@
 
 ## English
 
-- Moved the interface to Qt/QML, improving window resizing, layout and the overlay. Fixed overlay clicks, dragging, opacity and countdown updates.
+- Moved the interface to Qt/QML, improving window resizing, layout and the overlay. Fixed the tool failing to close, as well as overlay clicks, dragging, opacity and countdown updates.
 - Fixed HEX fields not updating after color selection or eyedropper use. The eyedropper now hides the tool and brings the game window forward before capture.
 - Improved Precise Search startup reads. Corrected off-target adjustments in both search modes to reduce improvements in one region at the expense of large regressions in others.
 - Screenshot Search now accounts for input, feedback and return time before late adjustments. The overlay closes when the run ends and can also be closed manually.
@@ -56,7 +56,7 @@
 
 ## 日本語
 
-- UI を Qt/QML に移行し、ウィンドウのサイズ変更やレイアウト、フローティングウィンドウの操作を改善しました。クリック・ドラッグ・不透明度・残り時間の表示を修正しました。
+- UI を Qt/QML に移行し、ウィンドウのサイズ変更やレイアウト、フローティングウィンドウの操作を改善しました。ツールを終了できない問題と、フローティングウィンドウのクリック・ドラッグ・不透明度・残り時間の表示を修正しました。
 - 色の選択やスポイト使用後に HEX 入力欄が更新されない問題を修正しました。スポイト使用時はツールを一時的に隠し、ゲームを前面に表示してから画面を取得します。
 - 精密検索の起動時の読み取りを改善しました。両検索モードで目標からずれた際の補正を見直し、ある領域の改善によって他の領域が大きく悪化するケースを減らしました。
 - スクリーンショット検索の終了間際の微調整では、操作・再読み取り・戻す操作に必要な時間を考慮します。検索終了時はフローティングウィンドウを閉じ、手動でも閉じられるようにしました。
@@ -74,7 +74,7 @@
 
 ## 한국어
 
-- UI를 Qt/QML로 전환하고 창 크기 조절, 레이아웃과 플로팅 창 조작을 개선했습니다. 플로팅 창의 클릭·드래그·불투명도·남은 시간 표시를 수정했습니다.
+- UI를 Qt/QML로 전환하고 창 크기 조절, 레이아웃과 플로팅 창 조작을 개선했습니다. 도구가 종료되지 않는 문제와 플로팅 창의 클릭·드래그·불투명도·남은 시간 표시를 수정했습니다.
 - 색상 선택이나 스포이트 사용 후 HEX 입력란이 갱신되지 않는 문제를 수정했습니다. 스포이트 사용 시 도구를 잠시 숨기고 게임 창을 앞으로 가져온 뒤 화면을 캡처합니다.
 - 정밀 검색 시작 시의 읽기 처리를 개선했습니다. 두 검색 모드에서 목표를 벗어난 뒤의 보정 방식을 수정하여, 한 영역이 나아지는 대신 다른 영역의 색상이 크게 나빠지는 경우를 줄였습니다.
 - 스크린샷 검색의 마지막 미세 조정에서는 조작·재확인·복귀에 필요한 시간을 고려합니다. 검색이 끝나면 플로팅 창이 닫히며, 직접 닫을 수도 있습니다.
