@@ -26,6 +26,7 @@ python -m pip install pytest; python -m pytest
 | 停止来源与快捷键 | `run_stop.py`、`hotkeys.py` |
 | 浮窗 | `qt_ui/overlay.py`、`qt_ui/qml/Overlay.qml` |
 | 颜色规则与优先级 | `color_matching.py`、`region_priority.py` |
+| 已选多区域方案的落点纠偏 | `destination_policy.py`、`native_live/route_feedback.py`；全局优先级仍由搜索层决定 |
 | 配置与方案保存 | `profile_store.py` |
 | 五语文案 | `i18n.py`、`locale_ja.py`、`locale_ko.py`、界面短标签 `qt_ui/i18n_qt.py` |
 | 自动更新（镜像优先、直连回退） | `updater/`、根目录 `release/release-config.json` |

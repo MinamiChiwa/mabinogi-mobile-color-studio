@@ -5,8 +5,8 @@ import json
 from pathlib import Path
 import sys
 
-APP_VERSION = '0.4.9'
-POLICY_REVISION = 'native-screenshot-hue-recovery-v5'
+APP_VERSION = '0.4.10'
+POLICY_REVISION = 'native-screenshot-joint-destination-v6'
 
 
 def source_identity(root):
@@ -15,6 +15,8 @@ def source_identity(root):
     root=Path(root)
     files=list(root.glob('*.py'))+list((root/'native_live').rglob('*.py'))+list((root/'updater').rglob('*.py'))
     files+=list((root/'native_live/assets').glob('*'))
+    files+=list((root/'qt_ui').glob('*.py'))+list((root/'qt_ui/qml').glob('*.qml'))
+    files+=list((root/'qt_ui/qml').glob('qmldir'))
     for path in sorted(p for p in files if p.is_file()):
         if path.name.startswith(('test_','_updater_test_')) or path.name=='update_recovery_identity.py':
             continue

@@ -21,10 +21,10 @@ python work/studio/build_release.py
 python scripts/build_update_assets.py --package <干净包目录> --out <资产目录> --version <版本> --channel stable --key-file <仓库外私钥文件> --key-id <现有公钥ID> --release-sequence <递增序号> --previous-manifest <上一版签名清单>
 python scripts/verify_update_assets.py <资产目录> --package <干净包目录> --public-keys <公开公钥JSON>
 python scripts/verify_release.py <干净包目录> --json <报告文件>
-python scripts/smoke_frozen_update.py --old-package <上一版包> --assets <资产目录> --keys <测试公钥JSON> --out <空目录>
+python scripts/smoke_frozen_update.py --old-package <上一版包> --assets <资产目录> --keys <对应公钥JSON> --out <空目录>
 ```
 
-`verify_release.py` 检查冻结包的字节码、QML 与源码一致，且未打入 Tk 与个人数据。`smoke_frozen_update.py` 用测试签名的资产在隔离目录完成一次真实升级，覆盖更新健康检查与首次启动确认；它只读本地资产，不访问网络。`--previous-manifest` 用于统计已安装用户实际需要下载的大小，需保留上一正式版本的签名清单。
+`verify_release.py` 检查冻结包的字节码、QML 与源码一致，且未打入 Tk 与个人数据。`smoke_frozen_update.py` 在隔离目录完成一次真实升级，覆盖更新健康检查与首次启动确认；它只读本地资产，不访问网络。测试资产使用测试公钥，正式资产使用既有生产公钥。`--previous-manifest` 用于统计已安装用户实际需要下载的大小，需保留上一正式版本的签名清单。
 
 ## 用户包应包含什么
 

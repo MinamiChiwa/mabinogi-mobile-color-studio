@@ -32,4 +32,4 @@
 
 安装失败时先查看当前版本和更新记录；需要协助可在 [GitHub Issues](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/issues) 附日志。
 
-[返回使用说明](../README.md) · [0.4.9 更新内容](release-notes-0.4.9.md)
+[返回使用说明](../README.md) · [0.4.10 更新内容](release-notes-0.4.10.md)

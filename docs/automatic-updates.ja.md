@@ -32,4 +32,4 @@
 
 失敗後は現在のバージョンと更新記録を確認してください。問い合わせはログを添えて [GitHub Issues](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/issues) へ。
 
-[使い方に戻る](../README.ja.md) · [0.4.9 の変更内容](release-notes-0.4.9.md)
+[使い方に戻る](../README.ja.md) · [0.4.10 の変更内容](release-notes-0.4.10.md)

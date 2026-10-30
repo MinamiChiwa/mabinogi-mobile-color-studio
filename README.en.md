@@ -2,11 +2,11 @@
 
 [简体中文](README.md) · [繁體中文](README.zh-TW.md) · [English](README.en.md) · [日本語](README.ja.md) · [한국어](README.ko.md)
 
-**ColorStudio 0.4.9** is a Windows color search tool for the Taiwan server of Mabinogi Mobile. Korean and Japanese support is in testing. It adjusts the palette for your selected targets; you decide whether to apply the result in the game.
+**ColorStudio 0.4.10** is a Windows color search tool for the Taiwan server of Mabinogi Mobile. Korean and Japanese support is in testing. It adjusts the palette for your selected targets; you decide whether to apply the result in the game.
 
 ## 1. Install
 
-Download **`ColorStudio-v0.4.9-Windows-x64.zip`** from [GitHub Releases](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/releases), extract the whole archive, and run `ColorStudio.exe`. Keep `_internal` beside the executable. No separate Python or Tesseract installation is needed.
+Download **`ColorStudio-v0.4.10-Windows-x64.zip`** from [GitHub Releases](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/releases), extract the whole archive, and run `ColorStudio.exe`. Keep `_internal` beside the executable. No separate Python or Tesseract installation is needed.
 
 ## 2. Start searching
 
@@ -53,7 +53,7 @@ Choose **Check for updates** in the main window, then **Download update** when a
 
 Update files are fetched through a mirror first and directly from GitHub when the mirror is unavailable; every file is signature- and hash-checked. If online update is not possible, upgrade manually with the full package and keep `data`.
 
-[Online and manual updates](docs/automatic-updates.en.md) · [What's new in 0.4.9](docs/release-notes-0.4.9.md)
+[Online and manual updates](docs/automatic-updates.en.md) · [What's new in 0.4.10](docs/release-notes-0.4.10.md)
 
 ## Help and feedback
 
