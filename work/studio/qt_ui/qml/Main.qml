@@ -146,7 +146,8 @@ Window {
                         anchors.left: parent.left
                         anchors.top: parent.top
                         anchors.bottom: parent.bottom
-                        width: Math.max(0, parent.width - actionsRow.width - 40)
+                        width: Math.max(0, parent.width - windowControls.width
+                                        - (root.narrow ? 0 : actionsRow.width + 6) - 40)
                         z: -1
 
                         DragHandler {
@@ -214,7 +215,9 @@ Window {
 
                     Row {
                         id: actionsRow
-                        anchors.right: parent.right
+                        // 宽屏排在窗口控制左侧；窄屏换到第二行右对齐
+                        anchors.right: root.narrow ? parent.right : windowControls.left
+                        anchors.rightMargin: root.narrow ? 0 : 6
                         anchors.top: root.narrow ? brandRow.bottom : parent.top
                         anchors.topMargin: root.narrow ? 2 : 0
                         height: root.narrow ? 30 : 40
@@ -264,8 +267,16 @@ Window {
                                 }
                             }
                         }
+                    }
 
-                        // 窗口控制：无边框窗口需要自带最小化与关闭
+                    // 窗口控制：无边框窗口自带最小化与关闭，始终固定在右上角
+                    Row {
+                        id: windowControls
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        height: 40
+                        spacing: 6
+
                         Item {
                             width: minBtn.implicitWidth
                             height: 30

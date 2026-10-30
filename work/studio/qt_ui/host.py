@@ -516,15 +516,16 @@ class QtHost(core.Business, QObject):
 
     def refresh_window_label(self):
         target = self.selected_window
-        if target is None:
+        # 自动检测时显示检测到的窗口标题；没有唯一窗口时 title 留空，由 QML 显示翻译后的提示
+        if target is not None:
+            title = target.title
+            text = '游戏窗口 · ' + title
+        else:
             try:
                 title = core.resolve_target(server=self.server.get()).title
             except RuntimeError:
-                title = '未检测到唯一窗口'
-            text = '自动检测' + ' · ' + title
-        else:
-            text = '游戏窗口 · ' + target.title
-        title = target.title if target is not None else ''
+                title = ''
+            text = '自动检测 · ' + (title or '未检测到唯一窗口')
         self.state.apply(
             windowLabel=text if len(text) <= 34 else text[:31] + '…',
             windowTitle=title,

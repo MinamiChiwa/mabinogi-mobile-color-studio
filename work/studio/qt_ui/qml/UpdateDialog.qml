@@ -61,6 +61,8 @@ Window {
 
                 Text {
                     Layout.fillWidth: true
+                    // 没有新版本时标题与窗口标题相同，不重复显示
+                    visible: root.d.heading !== root.d.title
                     text: root.d.heading
                     color: uiState.themeColor('text', uiState.appearance)
                     font.pixelSize: 15
@@ -159,6 +161,8 @@ Window {
             // ---- 脚注 ----
             Text {
                 Layout.fillWidth: true
+                // 空闲时正文就是这句说明，不重复显示
+                visible: root.d.notice !== root.d.body
                 text: root.d.notice
                 color: uiState.themeColor('faint', uiState.appearance)
                 font.pixelSize: 10

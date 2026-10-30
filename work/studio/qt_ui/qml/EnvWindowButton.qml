@@ -44,7 +44,7 @@ Rectangle {
             // 组合文案在 QML 里拼，语言切换才能整句跟着换
             text: uiState.windowBound
                   ? Loc.t('游戏窗口 · ') + uiState.windowTitle
-                  : Loc.t('自动检测') + ' · ' + uiState.windowTitle
+                  : Loc.t('自动检测') + ' · ' + (uiState.windowTitle || Loc.t('未检测到唯一窗口'))
             color: uiState.themeColor('muted_2', uiState.appearance)
             font.pixelSize: 11
             elide: Text.ElideRight
