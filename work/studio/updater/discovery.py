@@ -114,7 +114,7 @@ def check_release(current_version,channel,cache,cancel,*,client,trusted_keys,man
                 cache['release']=release;cache['api_etag']=etag
             elif channel=='stable':
                 if response is not None and status!=304:read(response,1024*1024)
-                # Official fixed repository fallback, never a public proxy.
+                # The API is only a fallback discovery path; release files go through the mirror-first client.
                 return result('unavailable',f'http_{status}')
             else:return result('unavailable','network')
         response=get(manifest_url,{'If-None-Match':cache['etag']} if cache.get('etag') else {})

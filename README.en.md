@@ -8,8 +8,6 @@
 
 Download **`ColorStudio-v0.4.9-Windows-x64.zip`** from [GitHub Releases](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/releases), extract the whole archive, and run `ColorStudio.exe`. Keep `_internal` beside the executable. No separate Python or Tesseract installation is needed.
 
-**`UPDATE-ONLY` packages are for updating an existing installation. They are not first-install packages and cannot be extracted and run directly.** See Updates below.
-
 ## 2. Start searching
 
 1. Select the **server and game window**. No fixed resolution is required; adjust the window before starting.
@@ -53,9 +51,9 @@ The tool does not open dyeing, confirm, apply or cancel a result automatically.
 
 Choose **Check for updates** in the main window, then **Download update** when a new version is available. Once downloaded, choose **Install and restart**. Settings, presets and records are kept.
 
-If you cannot reach GitHub, obtain `UPDATE-ONLY-ColorStudio-0.4.9-win-x64.zip` and choose **Import offline update** in the app. Use the full installation package for a first install.
+Update files are fetched through a mirror first and directly from GitHub when the mirror is unavailable; every file is signature- and hash-checked. If online update is not possible, upgrade manually with the full package and keep `data`.
 
-[Online, offline and manual updates](docs/automatic-updates.en.md) · [What's new in 0.4.9](docs/release-notes-0.4.9.md)
+[Online and manual updates](docs/automatic-updates.en.md) · [What's new in 0.4.9](docs/release-notes-0.4.9.md)
 
 ## Help and feedback
 

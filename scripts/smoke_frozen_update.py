@@ -1,12 +1,28 @@
-"""Isolated test-signed frozen upgrade. Never targets the desktop installation."""
-import argparse,hashlib,json,shutil,subprocess,sys,time
+"""Isolated test-signed frozen upgrade. Never targets the desktop installation.
+
+Release assets (manifest, signature, blobs from build_update_assets) are served
+from a local folder through the normal download path, so no network is used.
+"""
+import argparse,json,shutil,subprocess,sys,time
 from pathlib import Path
 from unittest.mock import patch
+from updater.discovery import CheckResult
+from updater.manifest import verify_manifest
 from updater.runtime import UpdateRuntime
 from updater.paths import hash_file
 
+class LocalResponse:
+    def __init__(self,data):self.status=200;self.headers={};self.data=data
+    def iter_bytes(self):yield self.data
+    def close(self):pass
+
+class LocalAssets:
+    """Answers release URLs from the asset folder (ignores Range; the downloader accepts 200)."""
+    def __init__(self,folder):self.folder=Path(folder)
+    def get(self,url,headers=None,timeout=None):return LocalResponse((self.folder/url.rsplit('/',1)[-1]).read_bytes())
+
 def main(argv=None):
-    p=argparse.ArgumentParser();p.add_argument('--old-package',type=Path,required=True);p.add_argument('--offline',type=Path,required=True)
+    p=argparse.ArgumentParser();p.add_argument('--old-package',type=Path,required=True);p.add_argument('--assets',type=Path,required=True)
     p.add_argument('--keys',type=Path,required=True);p.add_argument('--out',type=Path,required=True)
     p.add_argument('--expect-rollback',action='store_true');p.add_argument('--crash-after-backup',action='store_true');a=p.parse_args(argv)
     out=a.out.resolve();out.mkdir(parents=True,exist_ok=True);root=out/'测试 安装/ColorStudio'
@@ -19,8 +35,13 @@ def main(argv=None):
     (root/'personal.txt').write_bytes(b'unknown user file')
     before={str(p.relative_to(root)):hash_file(p) for p in root.rglob('*') if p.is_file() and (p.is_relative_to(data) or p.name=='personal.txt')}
     old=json.loads((root/'update-manifest.json').read_text());keys=json.loads(a.keys.read_text())
-    events=[];runtime=UpdateRuntime(root,data,old['version'],events.append,keys=keys)
-    runtime.offline(a.offline);runtime.worker.join(30)
+    events=[];runtime=UpdateRuntime(root,data,old['version'],events.append,keys=keys,client=LocalAssets(a.assets))
+    raw=(a.assets/'update-manifest.json').read_bytes();signature=(a.assets/'update-manifest.sig').read_bytes()
+    manifest=verify_manifest(raw,signature,keys)
+    runtime.result=CheckResult('available',manifest=manifest,raw=raw,signature=signature,
+        assets={r.blob:'https://github.com/local/'+r.blob for r in manifest.files})
+    runtime.service.manifest=manifest;runtime.service.state='available'
+    runtime.download();runtime.worker.join(300)
     if runtime.worker.is_alive() or runtime.service.state!='ready':raise RuntimeError(str(events))
     with patch('updater.runtime.sys.frozen',True,create=True),patch('updater.runtime.launch_helper'):
         runtime.prepare_install(runtime.service.plan)

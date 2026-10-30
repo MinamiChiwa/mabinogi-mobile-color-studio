@@ -21,3 +21,10 @@
 ## 后续维护
 
 每个改动只验证直接受影响的行为。新故障报告保持短小：现象、原因、修复、证据、未确认事项即可。不要复制旧报告制造新的“当前状态”文档，也不要把历史测试总数当成质量指标。
+
+# Qt 界面替换（2026-10-30）
+
+- 界面整体改为 Qt Quick（PR #10 合入后修复）：`work/studio/app.py` 现为 Qt 入口，CustomTkinter 界面、相关窗口与 Tk 研究查看器（`atlas_trial`、`preview_atlas_results`、`capture_color_check`、`review_ui`、`atlas_search_review`）已删除，`customtkinter` 不再是依赖。
+- 自动更新取消离线更新包（`UPDATE-ONLY-*`、增量包与导入入口）；在线更新优先经 `v6.gh-proxy.org` 镜像，失败自动直连 GitHub，内容仍由签名清单和逐文件 SHA-256 保证。
+- 原 `tests/studio/` 的 245 个测试与 `run_tests.py` 入口按维护者决定整体退役：其中一部分直接测试已删除的 Tk 界面，其余以大量重复的流程回放为主。替代的轻量测试集见 `TESTING.md`，覆盖规则字典、方案格式、更新传输与资产、Qt 生命周期和界面翻译；寻色算法效果改由实机测试确认，不再用离线回放代替。
+- `scripts/smoke_frozen_update.py` 保留为发布前的冻结升级演练，改为读取本地签名资产目录。

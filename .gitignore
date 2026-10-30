@@ -19,6 +19,15 @@ VALIDATION.md
 !/work/studio/*.py
 !/work/studio/*.md
 !/work/studio/screenshot_text_fixture.png
+
+# Qt Quick 界面层：/work/studio/* 默认整体忽略，这里按层放行 py / qml / qmldir
+!/work/studio/qt_ui/
+/work/studio/qt_ui/*
+!/work/studio/qt_ui/*.py
+!/work/studio/qt_ui/qml/
+/work/studio/qt_ui/qml/*
+!/work/studio/qt_ui/qml/*.qml
+!/work/studio/qt_ui/qml/qmldir
 /work/studio/data/
 /work/studio/release-test-data/
 
@@ -76,3 +85,6 @@ debug-screenshots/
 *.pem
 *.p12
 *.pfx
+
+# Local AI tool notes
+.workbuddy/

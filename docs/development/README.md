@@ -8,7 +8,8 @@
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
-python work/studio/app.py
+python work/studio/app.py          # 或双击 run_studio.bat
+python -m pip install pytest; python -m pytest
 ```
 
 若 OCR 不在默认安装目录，按应用设置指定路径。开发环境也不要自动进入染色或套用结果。
@@ -17,15 +18,17 @@ python work/studio/app.py
 
 | 想改什么 | 主要入口 |
 | --- | --- |
-| 主窗口、色卡、按钮和任务状态 | `work/studio/app.py` |
+| 启动、更新确认与关闭 | `app.py`、`qt_ui/host.py`，见 [Qt 界面说明](qt-ui.md) |
+| 主窗口、色卡、按钮（QML） | `qt_ui/qml/Main.qml`、`qt_ui/qml/RegionCard.qml` |
+| 寻色流程、事件分发与结果显示 | `business.py` |
 | 截图寻色流程与结果展示 | `screenshot_live.py`、`screenshot_presentation.py` |
 | 精准寻色接入与数据读取 | `native_live/service.py`、`native_live/scan_live_dye.py` |
 | 停止来源与快捷键 | `run_stop.py`、`hotkeys.py` |
-| 浮窗 | `search_overlay.py` |
+| 浮窗 | `qt_ui/overlay.py`、`qt_ui/qml/Overlay.qml` |
 | 颜色规则与优先级 | `color_matching.py`、`region_priority.py` |
 | 配置与方案保存 | `profile_store.py` |
-| 五语文案 | `i18n.py`、`locale_ja.py`、`locale_ko.py` 及对应 UI 文案模块 |
-| 自动更新 | `updater/`、根目录 `release/release-config.json` |
+| 五语文案 | `i18n.py`、`locale_ja.py`、`locale_ko.py`、界面短标签 `qt_ui/i18n_qt.py` |
+| 自动更新（镜像优先、直连回退） | `updater/`、根目录 `release/release-config.json` |
 
 表中未写目录的 Python 文件均在 `work/studio/`。截图模式从画面获得数据；精准模式读取游戏进程，二者不是同一数据来源。“精准 HEX”是颜色要求，不能与“精准寻色”模式混用。
 
@@ -47,4 +50,4 @@ python work/studio/app.py
 
 ## 如何找旧资料
 
-当前开发只需本页、测试指南和发布指南。`docs/research/` 与 `docs/server-adaptation/` 的日期报告是当时的故障证据；请勿直接照抄旧命令或旧预算。已被实现取代的逐步计划和旧实验副本从当前树移除，可从 Git 历史找回，见[整理记录](maintenance.md)。
+当前开发只需本页、[Qt 界面说明](qt-ui.md)、测试指南和发布指南。`docs/research/` 与 `docs/server-adaptation/` 的日期报告是当时的故障证据；请勿直接照抄旧命令或旧预算。已被实现取代的逐步计划和旧实验副本从当前树移除，可从 Git 历史找回，见[整理记录](maintenance.md)。

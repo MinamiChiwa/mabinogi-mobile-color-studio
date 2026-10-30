@@ -1,4 +1,4 @@
-"""Run before importing Tk, OpenCV or any replaceable application dependency."""
+"""Run before importing Qt, OpenCV or any replaceable application dependency."""
 import json,os,sys,subprocess
 from pathlib import Path
 
@@ -26,6 +26,24 @@ def active_data_directory(root):
     if not data.is_absolute():data=Path(root)/data
     return data
 
+def qml_health_check():
+    """Compile every QML file without showing a window; raise on the first broken one."""
+    from PySide6.QtCore import QUrl
+    from PySide6.QtGui import QGuiApplication
+    from PySide6.QtQml import QQmlComponent,QQmlEngine
+    from PySide6.QtQuickControls2 import QQuickStyle
+    from qt_ui import QML_DIR
+    QQuickStyle.setStyle('Basic')
+    app=QGuiApplication.instance() or QGuiApplication([sys.argv[0]])
+    engine=QQmlEngine();engine.addImportPath(str(QML_DIR))
+    files=sorted(QML_DIR.glob('*.qml'))
+    if not files or not (QML_DIR/'qmldir').is_file():raise RuntimeError('QML files missing')
+    for path in files:
+        component=QQmlComponent(engine,QUrl.fromLocalFile(str(path)))
+        if component.status()!=QQmlComponent.Status.Ready:
+            raise RuntimeError(f'QML {path.name}: '+'; '.join(e.toString() for e in component.errors()))
+    del engine,app
+
 def health_check(transaction):
     # This mode never opens a game, starts hotkeys or writes player settings.
     tx=Path(transaction);record=json.loads((tx/'transaction.json').read_text(encoding='utf-8'))
@@ -39,10 +57,10 @@ def health_check(transaction):
     for row in manifest.files:
         path=safe_path(root,row.path)
         if not path.is_file() or path.stat().st_size!=row.size or hash_file(path)!=row.sha256:raise RuntimeError('Health file check failed')
-    import cv2,numpy,PIL,customtkinter,tkinter
+    import cv2,numpy,PIL
     from vision import configure_ocr
     configure_ocr(strict=True)
-    win=tkinter.Tk();win.withdraw();win.update_idletasks();win.destroy()
+    qml_health_check()
     atomic_json(tx/'health.json',dict(token=record['token'],version=manifest.version))
     return 0
 
@@ -71,7 +89,7 @@ def dispatch(argv=None):
             return 1
     tx=pending_transaction(root)
     if tx is not None and '--update-ready' not in argv:
-        # This code must work while crypto/OpenCV/Tk files are half-replaced.
+        # This code must work while crypto/OpenCV/Qt files are half-replaced.
         # The expected helper digest is embedded in the executable at build
         # time, independent of mutable installation/transaction metadata.
         import hashlib,stat

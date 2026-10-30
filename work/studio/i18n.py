@@ -1,6 +1,5 @@
 """Local, offline UI translations. Profile mode identifiers stay stable."""
 import re
-import weakref
 from functools import lru_cache
 from opencc import OpenCC
 language='简体中文'
@@ -319,8 +318,6 @@ _locales={'日本語':JA,'한국어':KO}
 _locale_patterns={name:re.compile('|'.join(re.escape(key) for key in sorted(values,key=len,reverse=True)))
                   for name,values in _locales.items()}
 _english_parts=sorted(EN,key=len,reverse=True)
-_widgets=weakref.WeakSet()
-_refreshers=weakref.WeakKeyDictionary()
 
 
 class DisplayText(str):
@@ -352,43 +349,45 @@ def tr(text):
     return DisplayText(_translate(source,language),source)
 
 
-def on_language(widget,callback):
-    _refreshers[widget]=callback.__name__
-
-
 def set_language(value):
     global language
     if value not in LANGUAGES:raise ValueError('Unknown language')
     language=value
-    for widget in list(_widgets):
-        if not widget.winfo_exists():continue
-        if hasattr(widget,'_i18n_text'):widget.configure(text=widget._i18n_text)
-        if hasattr(widget,'_i18n_title'):widget.title(widget._i18n_title)
-    for widget,name in list(_refreshers.items()):
-        if widget.winfo_exists():getattr(widget,name)()
 
-def install_widgets(ct):
-    """Translate display text only; identifiers and HEX values are never changed."""
-    if getattr(ct,'_studio_i18n',False):return
-    ct._studio_i18n=True
-    for cls in (ct.CTkLabel,ct.CTkButton,ct.CTkCheckBox,ct.CTkSwitch):
-        original_init=cls.__init__;original_config=cls.configure
-        def init(self,*args,_original=original_init,**kwargs):
-            if 'text' in kwargs:
-                self._i18n_text=getattr(kwargs['text'],'source',kwargs['text'])
-                kwargs['text']=tr(kwargs['text'])
-            _original(self,*args,**kwargs)
-            _widgets.add(self)
-        def configure(self,*args,_original=original_config,**kwargs):
-            if 'text' in kwargs:
-                self._i18n_text=getattr(kwargs['text'],'source',kwargs['text'])
-                kwargs['text']=tr(kwargs['text'])
-            return _original(self,*args,**kwargs)
-        cls.__init__=init;cls.configure=configure
-    for cls in (ct.CTk,ct.CTkToplevel):
-        original=cls.title
-        def title(self,string=None,_original=original):
-            if string is None:return _original(self)
-            self._i18n_title=getattr(string,'source',string);_widgets.add(self)
-            return _original(self,tr(string))
-        cls.title=title
+# ---------------------------------------------------------------------------
+# 紧凑浮层（QuickPanel）新增文案
+#   小面板专用词，主词典里没有；集中补在这里。
+# ---------------------------------------------------------------------------
+EN.update({
+    '游戏窗口': 'Game window',
+    '刷新': 'Refresh',
+    '未检测到游戏窗口': 'No game window found',
+    '新方案名称': 'New preset name',
+    '保存': 'Save',
+    '已保存': 'Saved',
+    '载入': 'Load',
+    '删除': 'Delete',
+    '还没有保存的方案': 'No presets yet',
+    '还没有寻色记录': 'No results yet',
+    '检查更新': 'Check for updates',
+    '赞助完全自愿，不论是否赞助都能使用全部功能。':
+        'Sponsorship is voluntary; all features work either way.',
+    '提交问题 / Issues': 'Report an issue',
+})
+
+TW.update({
+    '游戏窗口': '遊戲視窗',
+    '刷新': '重新整理',
+    '未检测到游戏窗口': '未偵測到遊戲視窗',
+    '新方案名称': '新方案名稱',
+    '保存': '儲存',
+    '已保存': '已儲存',
+    '载入': '載入',
+    '删除': '刪除',
+    '还没有保存的方案': '尚未儲存任何方案',
+    '还没有寻色记录': '尚無尋色紀錄',
+    '检查更新': '檢查更新',
+    '赞助完全自愿，不论是否赞助都能使用全部功能。':
+        '贊助完全自願，無論是否贊助都能使用全部功能。',
+    '提交问题 / Issues': '回報問題',
+})

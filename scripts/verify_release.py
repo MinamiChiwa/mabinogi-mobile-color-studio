@@ -24,8 +24,8 @@ def verify(release,source):
     assert all(manifest.get(k)==v for k,v in identity.items()),(manifest,identity)
     assert manifest.get('git_commit'), 'Git commit missing from build manifest'
     archive=CArchiveReader(str(release/'ColorStudio.exe'));pyz=archive.open_embedded_archive('PYZ.pyz')
-    required={'app','engine','hotkeys','run_stop','vision','build_info','profile_store','strategy_defaults','ui_presets','ui_dialogs','ui_strings','region_priority','dye_regions','process_access',
-              'locale_ja','locale_ko','user_copy','candidate_ranking','resize_surface','native_status','native_input_compile','eyedropper','eyedropper_native','screen_mapping',
+    required={'app','business','engine','hotkeys','run_stop','vision','build_info','profile_store','strategy_defaults','ui_strings','region_priority','dye_regions','process_access',
+              'locale_ja','locale_ko','user_copy','candidate_ranking','native_status','native_input_compile','eyedropper_native','screen_mapping',
               'native_live.retry','native_live.retry_recovery','native_live.session_deadline','native_live.time_policy','native_live.session_status',
               'native_live.controller','native_live.same_session_dye_planner','native_live.compromise',
               'native_live.route_feedback','input_gestures','screenshot_text','native_live.game_font_reader',
@@ -35,12 +35,15 @@ def verify(release,source):
               'native_live.read_dye_input_backend','native_periodic_route',
               'native_live.native_provider_backend','native_live.scan_live_dye',
               'native_live.project_probe_io','native_live.project_closed_loop_io','native_live.service',
-              'native_live.read_dye_window_mapping','native_live.runtime_read','overlay_native','search_overlay'}
+              'native_live.read_dye_window_mapping','native_live.runtime_read','overlay_native',
+              'qt_ui','qt_ui.host','qt_ui.bridge','qt_ui.core','qt_ui.overlay','qt_ui.dialogs','qt_ui.update',
+              'qt_ui.eyedropper','qt_ui.picker','qt_ui.window_fx','qt_ui.i18n_qt'}
     comparisons={}
     required.update({'update_bootstrap','updater.runtime','updater.manifest','updater.trust','updater.ui_update',
-        'updater.download','updater.discovery','updater.offline','updater.paths','native_live.build_adapters'})
-    for path in [*source.glob('*.py'),*(source/'native_live').rglob('*.py'),*(source/'updater').rglob('*.py')]:
-        if path.name.startswith(('test_','_updater_test_')) or path.name=='update_recovery_identity.py':continue
+        'updater.download','updater.discovery','updater.http_client','updater.paths','native_live.build_adapters'})
+    assert not {'tkinter','customtkinter'}&set(pyz.toc),'Tk must not be bundled'
+    for path in [*source.glob('*.py'),*(source/'native_live').rglob('*.py'),*(source/'updater').rglob('*.py'),*(source/'qt_ui').glob('*.py')]:
+        if path.name=='update_recovery_identity.py':continue
         name=path.relative_to(source).with_suffix('').as_posix().replace('/','.')
         if name.endswith('.__init__'):name=name[:-9]
         if name!='app' and name not in pyz.toc:continue
@@ -51,6 +54,12 @@ def verify(release,source):
     assets={p.name:(release/'_internal/native_live/assets'/p.name).read_bytes()==p.read_bytes()
             for p in (source/'native_live/assets').glob('*') if p.is_file()}
     assert all(assets.values()),assets
+    qml={p.name:(release/'_internal/qt_ui/qml'/p.name).is_file() and (release/'_internal/qt_ui/qml'/p.name).read_bytes()==p.read_bytes()
+         for p in (source/'qt_ui/qml').iterdir() if p.is_file()}
+    assert qml and all(qml.values()),qml
+    from qt_bundle import check_dependencies
+    check_dependencies(release/'_internal')
+    assert not (release/'_internal/PySide6/Qt6WebEngineCore.dll').exists(),'Unused Qt modules were not pruned'
     prohibited={'profile.json','settings.json','presets.json','history.json','native-result.json','native-baseline.json'}
     private=[p.relative_to(release).as_posix() for p in release.rglob('*') if p.is_file() and
              (p.name in prohibited or p.name.endswith(('.checkpoint.json','.input.json','.visual_failure.json')))]
@@ -61,7 +70,7 @@ def verify(release,source):
     helper_digest=hashlib.sha256((release/'ColorStudioUpdater.exe').read_bytes()).hexdigest()
     assert helper_digest in recovery_code.co_consts,'Embedded recovery helper identity mismatch'
     return dict(build=manifest,production_modules=len(comparisons),module_comparisons=comparisons,
-                assets_match=assets,personal_data_absent=True,development_documents_absent=True,
+                assets_match=assets,qml_match=qml,personal_data_absent=True,development_documents_absent=True,
                 executable_sha256=hashlib.sha256((release/'ColorStudio.exe').read_bytes()).hexdigest())
 
 
