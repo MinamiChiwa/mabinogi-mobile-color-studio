@@ -16,7 +16,7 @@
 
 **贡献致谢**
 
-- 感谢 **@Marythore** 在 [PR #10](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/pull/10) 中贡献完整 Qt/QML 界面重构；由 **@MinamiChiwa** 在 [PR #11](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/pull/11) 中整合，并继续修复交互、寻色与发布流程。
+- 感谢 **@Marythore** 在 [PR #10](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/pull/10) 中贡献完整 Qt/QML 界面重构。
 
 ## 繁體中文
 
@@ -34,7 +34,7 @@
 
 **貢獻致謝**
 
-- 感謝 **@Marythore** 在 [PR #10](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/pull/10) 貢獻完整 Qt/QML 介面重構；由 **@MinamiChiwa** 在 [PR #11](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/pull/11) 整合，並持續修正互動、尋色與發布流程。
+- 感謝 **@Marythore** 在 [PR #10](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/pull/10) 貢獻完整 Qt/QML 介面重構。
 
 ## English
 
@@ -52,7 +52,7 @@
 
 **Contributors**
 
-- Thanks to **@Marythore** for the complete Qt/QML interface rewrite in [PR #10](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/pull/10). **@MinamiChiwa** integrated it in [PR #11](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/pull/11) and continued the interaction, search and release fixes.
+- Thanks to **@Marythore** for the complete Qt/QML interface rewrite in [PR #10](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/pull/10).
 
 ## 日本語
 
@@ -70,7 +70,7 @@
 
 **貢献者への謝辞**
 
-- [PR #10](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/pull/10) で Qt/QML による全面的な UI 改修を行った **@Marythore** さんに感謝します。**@MinamiChiwa** が [PR #11](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/pull/11) で統合し、操作・検索・リリース処理の修正を続けました。
+- [PR #10](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/pull/10) で Qt/QML による全面的な UI 改修を行った **@Marythore** さんに感謝します。
 
 ## 한국어
 
@@ -88,4 +88,4 @@
 
 **기여자 감사**
 
-- [PR #10](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/pull/10)에서 Qt/QML UI 전면 개편을 기여한 **@Marythore** 님께 감사드립니다. **@MinamiChiwa**가 [PR #11](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/pull/11)에서 통합하고 조작·검색·릴리스 관련 수정을 이어 갔습니다.
+- [PR #10](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/pull/10)에서 Qt/QML UI 전면 개편을 기여한 **@Marythore** 님께 감사드립니다.
