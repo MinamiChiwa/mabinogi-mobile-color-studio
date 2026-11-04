@@ -24,6 +24,7 @@ class LocalAssets:
 def main(argv=None):
     p=argparse.ArgumentParser();p.add_argument('--old-package',type=Path,required=True);p.add_argument('--assets',type=Path,required=True)
     p.add_argument('--keys',type=Path,required=True);p.add_argument('--out',type=Path,required=True)
+    p.add_argument('--legacy-preferences',action='store_true',help='Verify the documented one-time screenshot preference migration')
     p.add_argument('--expect-rollback',action='store_true');p.add_argument('--crash-after-backup',action='store_true');a=p.parse_args(argv)
     out=a.out.resolve();out.mkdir(parents=True,exist_ok=True);root=out/'测试 安装/ColorStudio'
     if root.exists():raise RuntimeError('Use a fresh isolated smoke directory')
@@ -31,7 +32,13 @@ def main(argv=None):
     data=root/'data';data.mkdir();(data/'sessions/old').mkdir(parents=True);(data/'sessions/old/keep.bin').write_bytes(bytes(range(256))*20)
     profile={'schema':1,'regions':[dict(enabled=True,target='#000000',alt='',mode='精准 HEX',tolerance=8.) for _ in range(3)],
         'priority_order':[0,1,2],'search_strategy':'native'}
-    (data/'profile.json').write_text(json.dumps(profile),encoding='utf-8');(data/'settings.json').write_text('{}')
+    settings=dict(search_strategy='native',server='tw',language='en')
+    presets=dict(schema=1,presets=[dict(id='smoke-preset',name='Saved colors',profile=json.loads(json.dumps(profile)))])
+    if not a.legacy_preferences:
+        for value in (profile,settings,presets):value['screenshot_default_revision']=1
+    preferences={'profile.json':profile,'settings.json':settings,'presets.json':presets}
+    for name,value in preferences.items():(data/name).write_text(json.dumps(value),encoding='utf-8')
+    (data/'history.json').write_text('[]',encoding='utf-8')
     (root/'personal.txt').write_bytes(b'unknown user file')
     before={str(p.relative_to(root)):hash_file(p) for p in root.rglob('*') if p.is_file() and (p.is_relative_to(data) or p.name=='personal.txt')}
     old=json.loads((root/'update-manifest.json').read_text());keys=json.loads(a.keys.read_text())
@@ -63,10 +70,25 @@ def main(argv=None):
             if state['status'] in ('recovered','committed'):break
             time.sleep(.1)
     state=json.loads((tx/'state.json').read_text());after={path:hash_file(root/path) for path in before}
+    changed=[path for path in before if before[path]!=after[path]]
+    expected=json.loads(json.dumps(preferences))
+    if a.legacy_preferences and not a.expect_rollback:
+        for name,value in expected.items():
+            value['screenshot_default_revision']=1
+            if name=='presets.json':
+                for row in value['presets']:row['profile']['search_strategy']='screenshot'
+            else:value['search_strategy']='screenshot'
+    preferences_verified=all(json.loads((data/name).read_text(encoding='utf-8'))==value for name,value in expected.items())
+    allowed_changes={str((data/name).relative_to(root)) for name in preferences} if a.legacy_preferences and not a.expect_rollback else set()
+    records_unchanged=all(before[path]==after[path] for path in before if path not in allowed_changes)
+    data_contract_preserved=preferences_verified and records_unchanged
     manifest=json.loads((root/'update-manifest.json').read_text())
     verified=all(hash_file(root/r['path'])==r['sha256'] for r in manifest['files'])
     report=dict(exit_code=code,status=state['status'],version=manifest['version'],elapsed=time.monotonic()-started,
-        user_data_unchanged=before==after,application_files_verified=verified,download_bytes=runtime.service.plan.download_bytes,
+        user_data_unchanged=before==after,data_contract_preserved=data_contract_preserved,
+        preferences_verified=preferences_verified,records_unchanged=records_unchanged,
+        legacy_preferences=a.legacy_preferences,changed_user_files=changed,
+        application_files_verified=verified,download_bytes=runtime.service.plan.download_bytes,
         total_files=len(manifest['files']),transaction=str(tx),installation=str(root))
     (out/'report.json').write_text(json.dumps(report,indent=2),encoding='utf-8');print(json.dumps(report,indent=2))
     # Shut down only the frozen UI launched by this isolated helper. It has not
@@ -84,7 +106,7 @@ def main(argv=None):
             return True
         user.EnumWindows(close,0)
     expected='recovered' if a.expect_rollback else 'committed'
-    if (state['status']!=expected or not a.expect_rollback and code!=0 or before!=after or not verified
+    if (state['status']!=expected or not a.expect_rollback and code!=0 or not data_contract_preserved or not verified
             or a.expect_rollback and manifest['version']!=old['version']):raise RuntimeError('Frozen update verification failed')
     return 0
 if __name__=='__main__':raise SystemExit(main())

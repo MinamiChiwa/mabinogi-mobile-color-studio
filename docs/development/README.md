@@ -18,7 +18,7 @@ python -m pip install pytest pefile==2024.8.26; python -m pytest
 
 | 想改什么 | 主要入口 |
 | --- | --- |
-| 启动、更新确认与关闭 | `app.py`、`qt_ui/host.py`，见 [Qt 界面说明](qt-ui.md) |
+| 启动、更新确认与关闭 | `app.py`、`qt_ui/host.py`，见 [Qt 界面说明](qt-ui.md)和[关闭残留修复](shutdown-lifecycle.md) |
 | 主窗口、色卡、按钮（QML） | `qt_ui/qml/Main.qml`、`qt_ui/qml/RegionCard.qml` |
 | 寻色流程、事件分发与结果显示 | `business.py` |
 | 截图寻色流程与结果展示 | `screenshot_live.py`、`screenshot_presentation.py`；反复缩放见[原因与优化方案](screenshot-zoom-optimization.md) |
@@ -57,5 +57,7 @@ python -m pip install pytest pefile==2024.8.26; python -m pytest
 ## 当前版本与规格
 
 当前版本为 [0.5.0](../release-notes-0.5.0.md)。本地交付统一使用根目录 `构建测试包.bat`，产物在 `发布包/`。OpenSpec 已初始化，运行 `openspec list` 查看变更，`openspec validate release-0-5-0 --strict` 检查本次交付规格。
+
+本次交付与验证范围见 [0.5.0 发布验证](release-0.5.0-validation.md)。
 
 会话默认按数量保留最近 10 次完成记录，不设 30 天期限；活跃和近五分钟写入的会话暂不清理。
