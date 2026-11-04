@@ -354,9 +354,9 @@ def scan(r,capture=False,*,adapter=None):
  if adapter is None:
   import hashlib
   from .build_layout import resolve_build_files
-  from .build_adapters import select_adapter
+  from .adaptive_build import resolve_adapter
   files=resolve_build_files(r.module_files)
-  adapter=select_adapter({name:hashlib.sha256(path.read_bytes()).hexdigest() for name,path in files.items()})
+  adapter=resolve_adapter(files,{name:hashlib.sha256(path.read_bytes()).hexdigest() for name,path in files.items()})
  cls=r.u64(r.base+adapter.palette_class_rva);hits=[];saved=[];seen=set();total=0;t=time.perf_counter()
  if cls in (0,adapter.palette_uninitialized_marker):return hits,saved,total,time.perf_counter()-t
  _pointer(cls,'dye class',class_pointer=True)

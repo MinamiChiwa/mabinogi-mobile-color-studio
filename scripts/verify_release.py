@@ -40,7 +40,8 @@ def verify(release,source):
               'qt_ui.eyedropper','qt_ui.picker','qt_ui.window_fx','qt_ui.i18n_qt'}
     comparisons={}
     required.update({'update_bootstrap','updater.runtime','updater.manifest','updater.trust','updater.ui_update',
-        'updater.download','updater.discovery','updater.http_client','updater.paths','native_live.build_adapters'})
+        'updater.download','updater.discovery','updater.http_client','updater.paths','native_live.build_adapters',
+        'native_live.adaptive_build','native_live.il2cpp_discovery','native_live.managed_layout_contract'})
     assert not {'tkinter','customtkinter'}&set(pyz.toc),'Tk must not be bundled'
     for path in [*source.glob('*.py'),*(source/'native_live').rglob('*.py'),*(source/'updater').rglob('*.py'),*(source/'qt_ui').glob('*.py')]:
         if path.name=='update_recovery_identity.py':continue

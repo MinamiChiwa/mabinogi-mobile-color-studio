@@ -3,7 +3,7 @@
 The title/locale is a hint only. A fingerprint is required before any static
 address or input backend is allowed to run.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass,field
 
 TW_BUILD='1675c2131534d0ab2fc053af8a2e394d326ba7d22eff0019734be96b1808678f'
 TW_METADATA='3f6827a41d26ab50ef0051b881cb2c6dcab0c12aab5e95cc7da0071fae63a847'
@@ -39,12 +39,15 @@ class BuildAdapter:
     managed_layout_id:str='dye-managed-v31-v1'
     managed_layout_evidence_sha256:str='tw-original-verified-runtime-layouts'
     unity_layout:UnityLayout=UNITY_LAYOUT
+    _discovery_authority:object=field(default=None,repr=False,compare=False)
 
     @property
     def input_verified(self):return self.capability=='input_verified'
 
     def diagnostic(self):
+        from .adaptive_build import is_adaptive
         return dict(adapter_id=self.adapter_id,capability=self.capability,input_verified=self.input_verified,
+            adaptive_discovery_verified=is_adaptive(self),
             managed_layout_id=self.managed_layout_id,managed_layout_evidence_sha256=self.managed_layout_evidence_sha256,
             unity_layout_id=self.unity_layout.layout_id,region_layouts=list(self.region_layouts))
 
@@ -70,8 +73,8 @@ SERVER_ADAPTERS=dict(tw=TW_ADAPTER,kr=KR_ADAPTER,jp=JP_ADAPTER)
 SERVER_BUILD_ADAPTERS=dict(tw=(TW_ADAPTER,),kr=(KR_ADAPTER,KR_20261016_ADAPTER),jp=(JP_ADAPTER,))
 
 class BuildUnsupported(ValueError):
-    def __init__(self,hashes):
-        self.hashes=dict(hashes);super().__init__('Unsupported game/metadata build for static object walk')
+    def __init__(self,hashes,message='Unsupported game/metadata build for static object walk'):
+        self.hashes=dict(hashes);super().__init__(message)
 
 def select_adapter(hashes):
     for adapter in KNOWN:
@@ -81,9 +84,10 @@ def select_adapter(hashes):
 
 
 def input_is_allowed(backend):
+    from .adaptive_build import session_input_allowed
     adapter=getattr(backend,'adapter',None)
     return adapter is None or adapter.input_verified or (
-        adapter in VALIDATION_ADAPTERS and getattr(backend,'validation_input_enabled',False) is True)
+        adapter in VALIDATION_ADAPTERS and getattr(backend,'validation_input_enabled',False) is True) or session_input_allowed(backend)
 
 
 def require_input_capability(backend):
@@ -100,8 +104,15 @@ def enable_known_validation_input(backend,adapter_id):
 
 
 def enable_selected_server_input(backend,server):
-    """Use the selected server's exact registered build with shared input logic."""
+    """Bind a registered build or arm session verification for shared TW/KR discovery."""
     expected=getattr(backend,'adapter',None)
+    from .adaptive_build import is_adaptive
+    if is_adaptive(expected):
+        if server not in ('tw','kr'):
+            raise ValueError('所选服务器与客户端版本不匹配，请检查服务器和游戏窗口。')
+        backend._adaptive_selected_server=server
+        backend._adaptive_input_session=None
+        return
     if expected not in SERVER_BUILD_ADAPTERS.get(server,()):
         raise ValueError('所选服务器与客户端版本不匹配，请检查服务器和游戏窗口。')
     if not expected.input_verified:enable_known_validation_input(backend,expected.adapter_id)

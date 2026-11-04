@@ -85,14 +85,25 @@ class Budget:
         self.deadline=proposed;self.work_deadline=proposed;self.initial_uncertain=False
         return 'text_and_bar_agree'
 
-def scale_work(factor):
+SCALE_PAIR_BATCH=16
+
+def scale_route(factor):
+    """Whole-wheel route shared by execution and its feedback budget."""
     up=max(0,math.ceil(math.log(factor)/math.log(1.01)))
     remainder=factor/1.01**up
     down=max(0,int(math.log(remainder)/math.log(.99)))
     remainder/= .99**down
-    pairs=max(0,math.ceil(math.log(remainder)/math.log(.9999)))
-    batches=math.ceil(up/32)+math.ceil(down/32)+math.ceil(pairs/120)
-    return (up+down)*.045+pairs*.13,batches
+    pairs=max(0,round(math.log(remainder)/math.log(.9999)))
+    route=[]
+    for kind,count,limit,sign in (('wheel',up,32,1),('wheel',down,32,-1),
+                                  ('pairs',pairs,SCALE_PAIR_BATCH,1)):
+        while count:
+            batch=min(count,limit);route.append((kind,sign*batch));count-=batch
+    return route
+
+def scale_work(factor):
+    route=scale_route(factor)
+    return sum(abs(n)*(.045 if kind=='wheel' else .13) for kind,n in route),len(route)
 
 def scale_seconds(factor):
     work,batches=scale_work(factor)
@@ -375,34 +386,51 @@ class Controller:
 
     def _move_to(self,desired,label='position',local=False):
         desired=np.asarray(desired,float)
-        if not self.relocalize():return False
+        def finish(ok,reason):
+            self.last_position=dict(label=label,converged=ok,reason=reason,
+                desired=desired,measured=self.pose.copy() if self.pose_known else None)
+            self.write('position-result.json',self.last_position)
+            return ok
+        if not self.relocalize():return finish(False,'pose_unknown')
         self.progress('position' if label!='return-best' else 'restore')
         markers=np.asarray(self.scene.markers,float).reshape(-1,2)-self.scene.board[:2]
         radius=marker_radius(markers)
         precision=.08 if label.startswith('return-') else .12
         tolerance=precision/radius
-        for _ in range(8):
+        for _ in range(32):
             delta=desired@np.linalg.inv(self.pose);factor=float(np.hypot(delta[0,0],delta[1,0]))
             if abs(math.log(factor))<tolerance:break
-            if factor>1:
-                if label.startswith('return-') and not self.budget.can_input(scale_seconds(factor)+2):break
-                self.wheel(min(32,max(1,math.ceil(math.log(factor)/math.log(1.01)))),label+'-scale')
-            else:
-                ticks=int(math.log(factor)/math.log(.99))
-                if ticks:self.wheel(-min(32,ticks),label+'-scale')
-                else:
-                    count=min(120,max(1,round(math.log(factor)/math.log(.9999))))
-                    before=self.pose.copy();self.pairs(count,label+'-fine-scale')
-                    response=self.pose@np.linalg.inv(before)
-                    if abs(math.log(float(np.hypot(response[0,0],response[1,0]))))<.00003:break
-            if not self.relocalize():return False
+            route=scale_route(factor)
+            if not route:return finish(False,'scale_resolution')
+            feedback=self.budget.estimate('capture',.2)+self.budget.estimate('registration',.4)
+            required=scale_seconds(factor)+max(0.,feedback-.35)*len(route)+2
+            if not self.budget.recovering:
+                target=getattr(self,'_motion_return_target',None) or self.refinement_anchor
+                if target is not None:required+=self.return_cost(target,from_matrix=desired)
+            # Admit the complete scale correction before crossing a coarse
+            # wheel step. A cheap first step can have an expensive fine return.
+            if not self.budget.can_input(required):return finish(False,'scale_budget')
+            before=self.pose.copy();kind,count=route[0]
+            if kind=='wheel':self.wheel(count,label+'-scale')
+            else:self.pairs(count,label+'-fine-scale')
+            if not self.relocalize():return finish(False,'pose_unknown')
+            response=self.pose@np.linalg.inv(before)
+            measured=math.log(float(np.hypot(response[0,0],response[1,0])))
+            remaining=math.log(float(np.hypot(*(desired@np.linalg.inv(self.pose))[:2,0])))
+            if abs(measured)<.00003:return finish(False,'scale_no_response')
+            if abs(remaining)>=abs(math.log(factor))-tolerance*.1:
+                # The first up-step deliberately overshoots for tiny increases;
+                # its planned paired correction must remain available.
+                if not (factor>1 and kind=='wheel' and remaining<0):
+                    return finish(False,'scale_no_progress')
+        else:return finish(False,'scale_iterations')
         for _ in range(5):
             delta=desired@np.linalg.inv(self.pose);angle=math.degrees(math.atan2(delta[1,0],delta[0,0]))
             if abs(math.radians(angle))*radius<precision:break
             response=self.rotate(float(np.clip(angle,-60,60)),label+'-rotate')
             if response is not None and abs(math.degrees(math.atan2(response[1,0],response[0,0])))<.01:break
-            if not self.relocalize():return False
-        if not len(markers):return True
+            if not self.relocalize():return finish(False,'pose_unknown')
+        if not len(markers):return finish(True,'converged')
         for _ in range(2):
             source=(markers-self.pose[:2,2])@np.linalg.inv(self.pose[:2,:2]).T
             shift=np.mean(source@desired[:2,:2].T+desired[:2,2]-markers,axis=0)
@@ -412,8 +440,13 @@ class Controller:
             if np.linalg.norm(shift)<.07:break
             if max(abs(shift))<2.5:self.fine_shift(shift,label+'-fine-translate')
             else:self.drag(shift,label+'-translate')
-            if not self.relocalize():return False
-        return True
+            if not self.relocalize():return finish(False,'pose_unknown')
+        source=(markers-self.pose[:2,2])@np.linalg.inv(self.pose[:2,:2]).T
+        residual=source@desired[:2,:2].T+desired[:2,2]-markers
+        if self.period:
+            lattice=desired[:2,:2]*self.period
+            residual-=lattice@np.rint(np.linalg.solve(lattice,residual.mean(axis=0)))
+        return finish(bool(np.max(np.linalg.norm(residual,axis=1))<=precision),'endpoint_checked')
 
     def observe(self,label='actual',*,reuse_frame=False,destination=None):
         started=time.monotonic()
@@ -490,13 +523,8 @@ class Controller:
                 # Nested callers share one completed recovery. A new frame,
                 # input, retry or best target automatically invalidates it.
                 self.check()
-                if not polishing:return self.current
-                # A held, measured fallback may be revisited by nested finish
-                # callers. Resume only if another complete outward-and-return
-                # can fit; an ordinary failed read never creates this hold.
-                required=self.return_cost(target)+self.return_cost(self.current,from_matrix=target.get('matrix'))
-                if not self.budget.can_input(required):return self.current
-        attempt=0;corrections=0;motionless=False;result=self.current
+                return self.current
+        attempt=0;corrections=0;motionless=False;result=self.current;stagnant=0
         nearest=None;nearest_rank=None
         def retain_return_landing(value):
             nonlocal nearest,nearest_rank
@@ -509,7 +537,9 @@ class Controller:
         while self.budget.can_input(.6):
             self.check()
             if not polishing and attempt>=3:break
+            if stagnant>=4:break
             attempt+=1
+            prior_rank=nearest_rank
             # Reanchor every correction to the measured best image, including
             # when a previous read was incomplete. Do not probe away from it.
             direct,_=self.register(self.frame,target['frame'])
@@ -521,6 +551,7 @@ class Controller:
                 if result['verified'] and self.at_least_best(result,target):return result
                 if not polishing:return result
                 retain_return_landing(result)
+                stagnant=0 if nearest_rank is not None and (prior_rank is None or nearest_rank<prior_rank) else stagnant+1
                 self.capture('return-remeasure',save=False)
                 continue
             desired=direct@self.pose if direct is not None and self.pose_known else target.get('matrix')
@@ -550,6 +581,7 @@ class Controller:
             result=self.observe('return-best-actual')
             if result['verified'] and self.at_least_best(result,target):return result
             retain_return_landing(result)
+            stagnant=0 if nearest_rank is not None and (prior_rank is None or nearest_rank<prior_rank) else stagnant+1
             if result['verified'] and len(self.actions)==before_actions:
                 if polishing:
                     motionless=True
@@ -573,6 +605,11 @@ class Controller:
                         result['actual_colors'],target['actual_colors'],self.rules)<=nearest_rank:
                     self._completed_restore=(target,np.array(target.get('matrix'),copy=True),
                         self.current,self.frame,len(self.actions),self.pose.copy(),self.pose_known)
+        if result is not None and result.get('verified'):
+            # Hold a measured fallback after bounded recovery. This is not a
+            # claim of success: new input/frame/target still invalidates it.
+            self._completed_restore=(target,np.array(target.get('matrix'),copy=True),
+                self.current,self.frame,len(self.actions),self.pose.copy(),self.pose_known)
         return result
 
     def at_least_best(self,result,target):

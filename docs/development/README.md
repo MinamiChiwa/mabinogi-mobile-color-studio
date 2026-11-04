@@ -21,8 +21,9 @@ python -m pip install pytest pefile==2024.8.26; python -m pytest
 | 启动、更新确认与关闭 | `app.py`、`qt_ui/host.py`，见 [Qt 界面说明](qt-ui.md) |
 | 主窗口、色卡、按钮（QML） | `qt_ui/qml/Main.qml`、`qt_ui/qml/RegionCard.qml` |
 | 寻色流程、事件分发与结果显示 | `business.py` |
-| 截图寻色流程与结果展示 | `screenshot_live.py`、`screenshot_presentation.py` |
+| 截图寻色流程与结果展示 | `screenshot_live.py`、`screenshot_presentation.py`；反复缩放见[原因与优化方案](screenshot-zoom-optimization.md) |
 | 精准寻色接入与数据读取 | `native_live/service.py`、`native_live/scan_live_dye.py` |
+| 台服、韩服更新后的自动适配 | `native_live/adaptive_build.py`，见[客户端适配说明](client-adaptation.md) |
 | 停止来源与快捷键 | `run_stop.py`、`hotkeys.py` |
 | 浮窗 | `qt_ui/overlay.py`、`qt_ui/qml/Overlay.qml` |
 | 颜色规则与优先级 | `color_matching.py`、`region_priority.py` |
@@ -37,7 +38,7 @@ python -m pip install pytest pefile==2024.8.26; python -m pytest
 
 1. 根据故障日志找到流程入口，先区分读取、搜索、输入、结果显示哪个阶段出错。
 2. 修改最小必要范围，复用现有测试。执行受影响用例，见[测试指南](../../TESTING.md)。
-3. 报告真实验证范围，不把离线回放写成实机测试。日志保留到本地 `outputs/`。
+3. 报告真实验证范围，不把离线回放写成实机测试。会话位于运行程序的 `data/sessions/`；诊断启动器见 [scripts/diagnostics](../../scripts/diagnostics/README.md)，新诊断输出进入本地 `runtime/diagnostics/`。
 4. 更新当前说明；历史实验报告无需逐份改成最新版。正式发布按[发布指南](release-tooling.md)。
 
 ## 停止与结果的开发约束
@@ -52,3 +53,9 @@ python -m pip install pytest pefile==2024.8.26; python -m pytest
 ## 如何找旧资料
 
 当前开发只需本页、[Qt 界面说明](qt-ui.md)、测试指南和发布指南。`docs/research/` 与 `docs/server-adaptation/` 的日期报告是当时的故障证据；请勿直接照抄旧命令或旧预算。已被实现取代的逐步计划和旧实验副本从当前树移除，可从 Git 历史找回，见[整理记录](maintenance.md)。
+
+## 当前版本与规格
+
+当前版本为 [0.5.0](../release-notes-0.5.0.md)。本地交付统一使用根目录 `构建测试包.bat`，产物在 `发布包/`。OpenSpec 已初始化，运行 `openspec list` 查看变更，`openspec validate release-0-5-0 --strict` 检查本次交付规格。
+
+会话默认按数量保留最近 10 次完成记录，不设 30 天期限；活跃和近五分钟写入的会话暂不清理。

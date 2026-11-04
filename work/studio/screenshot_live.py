@@ -10,7 +10,7 @@ from screenshot_control import Controller,Budget,TimeEnded,PaletteEnded,RetryReq
 from screenshot_registration import period_from_image
 from screenshot_samples import RawSamples
 from screenshot_search import solve,actual_result
-from screenshot_refinement import local_candidates
+from screenshot_refinement import local_candidates,prefer_reachable_scale
 from refinement_policy import compare_refinement
 from destination_policy import DestinationPolicy
 from screenshot_prediction import VisibleColorField,ObservedColorField
@@ -215,6 +215,9 @@ def _refine(c,max_rounds=None):
             exclude=attempted,check=lambda:_sampling_check(c),baseline=reference['actual_colors'])
         candidate=None
         for row in candidates:
+            row=prefer_reachable_scale(row,c.pose,markers,c.rules,
+                getattr(c.samples,'visible_field',getattr(c.samples,'color_field',None)),c.check)
+            if row.get('signature') in attempted:continue
             cost=c.return_cost(dict(matrix=row['matrix']))
             recovery=c.return_cost(reference,from_matrix=row['matrix'])
             if c.budget.can_input(cost+recovery+1.5):candidate=row;break
@@ -238,7 +241,8 @@ def _refine(c,max_rounds=None):
         if c.current and c.current['accepted']:return
         unchanged=0 if improved else unchanged+1
         if unchanged>=4:
-            step=step/2 if step>.08 else .8;unchanged=0
+            if step<=.1:break
+            step/=2;unchanged=0
     if c.best and (c.current is None or not compare_refinement(
             c.current['actual_colors'],c.best['actual_colors'],c.rules)['not_worse']):c.restore()
 
@@ -284,6 +288,7 @@ def _search(c,samples):
     if not found['candidates']:return samples
     for candidate in found['candidates']:
         if c.owner.consume_retry_request():raise RetryRequested()
+        candidate=prefer_reachable_scale(candidate,c.pose,markers,c.rules,sample_at,check)
         estimate=c.return_cost(dict(matrix=candidate['matrix']))
         if c.budget.remaining()<estimate+c.return_cost(from_matrix=candidate['matrix'])+5:continue
         # A new global candidate may make the user's priority-ordered trade;

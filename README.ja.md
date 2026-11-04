@@ -2,11 +2,13 @@
 
 [简体中文](README.md) · [繁體中文](README.zh-TW.md) · [English](README.en.md) · [日本語](README.ja.md) · [한국어](README.ko.md)
 
-**ColorStudio 0.4.10** は、マビノギモバイル台湾版に対応する Windows 用のカラー検索ツールです。韓国版・日本版はテスト中です。指定した色に合わせてパレットを操作し、結果の適用はゲーム内でユーザーが決めます。
+**ColorStudio 0.5.0** は、マビノギモバイル台湾版に対応する Windows 用のカラー検索ツールです。韓国版・日本版はテスト中です。指定した色に合わせてパレットを操作し、結果の適用はゲーム内でユーザーが決めます。
+
+互換性のある台湾版・韓国版の更新ではアドレスを自動検出し、現在のパレットの検証に通った場合に精密検索を続行します。非互換のクライアントでは停止します。スクリーンショット検索の終盤のズームと復元を改善しました。診断ログは完了した直近10回分を保持し、書き込み中や更新直後のログは一時的に保護します。
 
 ## 1. インストール
 
-[GitHub Releases](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/releases) から **`ColorStudio-v0.4.10-Windows-x64.zip`** をダウンロードし、すべて展開して `ColorStudio.exe` を実行してください。`_internal` フォルダーは実行ファイルの隣に置いたままにします。Python や Tesseract を別途インストールする必要はありません。
+[GitHub Releases](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/releases) から **`ColorStudio-v0.5.0-Windows-x64.zip`** をダウンロードし、すべて展開して `ColorStudio.exe` を実行してください。`_internal` フォルダーは実行ファイルの隣に置いたままにします。Python や Tesseract を別途インストールする必要はありません。
 
 ## 2. 色を検索する
 
@@ -53,7 +55,7 @@
 
 更新ファイルはまずミラー経由で取得し、ミラーが使えない場合は自動的に GitHub へ直接接続します。すべてのファイルは署名とハッシュで検証されます。オンライン更新ができない場合は、完全パッケージで手動更新し `data` を引き継いでください。
 
-[オンライン・手動更新](docs/automatic-updates.ja.md) · [0.4.10 の変更内容](docs/release-notes-0.4.10.md)
+[オンライン・手動更新](docs/automatic-updates.ja.md) · [0.5.0 の変更内容](docs/release-notes-0.5.0.md)
 
 ## ヘルプと問題の報告
 

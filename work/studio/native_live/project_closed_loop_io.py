@@ -61,7 +61,9 @@ class ProjectClosedLoopIO(ProjectProbeIO):
     def __init__(self,*args,**kwargs):
         from .build_adapters import require_input_capability
         backend=args[0] if args else kwargs['backend']
-        require_input_capability(backend)
+        from .adaptive_build import is_adaptive
+        if not is_adaptive(getattr(backend,'adapter',None)):require_input_capability(backend)
+        else:backend._adaptive_input_session=None
         prepare_hex_assets()
         super().__init__(*args,**kwargs);self.input_reference=None;self.input_attempts=0;self.hex_fallback=read_card_glyphs
         self._planning_probe_at=None
@@ -84,9 +86,27 @@ class ProjectClosedLoopIO(ProjectProbeIO):
         return record
     def planning_frames(self,label,deadline):
         """Fresh visible geometry for planning; no independent HEX claim."""
-        return self.frames(label,deadline,read_colors=False)
+        from .adaptive_build import is_adaptive,session_input_allowed
+        needs_proof=is_adaptive(getattr(self.backend,'adapter',None)) and not session_input_allowed(self.backend)
+        return self.frames(label,deadline,read_colors=needs_proof)
     def frames(self,label,deadline,*,read_colors=True):
-        try:return super().frames(label,deadline,read_colors=read_colors)
+        try:
+            frames=super().frames(label,deadline,read_colors=read_colors)
+            from .adaptive_build import is_adaptive,enable_session_input,session_input_allowed
+            if is_adaptive(getattr(self.backend,'adapter',None)) and not session_input_allowed(self.backend):
+                if any(frame.get('screenshot_hex_verified') is not True
+                       or frame.get('hex_source')!=['screenshot']*len(self.last_client_hex or []) for frame in frames):
+                    raise VisualNotReady('Adaptive build requires complete independent screenshot HEX')
+                enable_session_input(self.backend,self.reference,
+                    dict(self.last_observation,client_hex=self.last_client_hex),frames)
+                self.backend.build_diagnostic['session_capability']='model_verified'
+                (self.folder/'adaptive-session.json').write_text(json.dumps(dict(
+                    build=self.backend.adapter.diagnostic(),capability='model_verified',
+                    process_identity=self.last_observation['process_identity'],
+                    session_token=self.last_observation['session_token'],
+                    screenshot_hex_verified=True,inputs_sent=self.input_attempts,
+                    input_response_verified=False),indent=2),encoding='utf-8')
+            return frames
         except SessionStatusError:raise
         except ValueError as exc:
             retryable=isinstance(exc,VisualNotReady) or str(exc) in (*INITIAL_LAYOUT_ERRORS,'Screenshot and checkpoint HEX disagree')
@@ -138,6 +158,8 @@ class ProjectClosedLoopIO(ProjectProbeIO):
         fresh=self.backend.observe_motion(self.reference['instance_address'],self.deadline,self._input_guard,
             include_geometry=True,include_window=True)
         fresh=self._check_observed_session(fresh,'pre_input',expected=self.last_observation,full_binding=True)
+        from .adaptive_build import require_session_input
+        require_session_input(self.backend,fresh)
         if (fresh.get('active') is not True or _binding(fresh)!=_binding(self.last_observation)
             or fresh['motion']['pose']!=self.last_observation['motion']['pose']
             or fresh['geometry_diagnostic']!=self.last_observation['geometry_diagnostic']

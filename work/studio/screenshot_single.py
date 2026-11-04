@@ -140,5 +140,8 @@ def search(c):
         matched,known=inspect()
         if matched or not known:return None
     if nearest is not None:attempt(nearest)
+    # Single-region exact targets need the same measured colour recovery as
+    # joint polishing; geometric proximity alone cannot complete the return.
+    c.refinement_anchor=c.best
     c.restore()
     return None

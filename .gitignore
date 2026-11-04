@@ -88,3 +88,15 @@ debug-screenshots/
 
 # Local AI tool notes
 .workbuddy/
+
+# Local project layout: binaries, records, references and archives stay on this machine.
+/.local/
+/artifacts/
+/archive/
+/runtime/
+/references/
+/PROJECT_LAYOUT.md
+/*.lnk
+/发布包/
+/待删文件夹/
+/.agents/

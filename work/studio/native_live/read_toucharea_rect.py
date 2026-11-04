@@ -10,9 +10,14 @@ SUPPORTED_METADATA = '3f6827a41d26ab50ef0051b881cb2c6dcab0c12aab5e95cc7da0071fae
 
 def read_toucharea_rect_cache(reader, slot_address, *, gameassembly_sha256,
                              metadata_sha256, unityplayer_sha256,
-                             expected_touch_area=None, check=lambda: None):
+                             expected_touch_area=None, check=lambda: None, adapter=None):
     try:
-        adapter=select_adapter(dict(gameassembly=gameassembly_sha256,metadata=metadata_sha256,unityplayer=unityplayer_sha256))
+        hashes=dict(gameassembly=gameassembly_sha256,metadata=metadata_sha256,unityplayer=unityplayer_sha256)
+        if adapter is None:adapter=select_adapter(hashes)
+        else:
+            from .adaptive_build import is_adaptive,matches_fingerprints
+            if not matches_fingerprints(adapter,hashes) or not (is_adaptive(adapter) or adapter==select_adapter(hashes)):
+                raise ValueError('Unsupported TouchArea/native layout build')
     except BuildUnsupported as exc:raise ValueError('Unsupported TouchArea/native layout build') from exc
     if adapter.managed_layout_id!='dye-managed-v31-v1':raise ValueError('Unsupported TouchArea/native layout build')
     observed = {}

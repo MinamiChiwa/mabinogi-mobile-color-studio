@@ -2,11 +2,13 @@
 
 [简体中文](README.md) · [繁體中文](README.zh-TW.md) · [English](README.en.md) · [日本語](README.ja.md) · [한국어](README.ko.md)
 
-**ColorStudio 0.4.10**는 마비노기 모바일 대만 서버를 지원하는 Windows용 색상 검색 도구입니다. 한국·일본 서버는 테스트 중입니다. 설정한 목표 색상에 맞춰 팔레트를 조작하며, 결과를 적용할지는 게임에서 직접 결정합니다.
+**ColorStudio 0.5.0**는 마비노기 모바일 대만 서버를 지원하는 Windows용 색상 검색 도구입니다. 한국·일본 서버는 테스트 중입니다. 설정한 목표 색상에 맞춰 팔레트를 조작하며, 결과를 적용할지는 게임에서 직접 결정합니다.
+
+호환되는 대만·한국 클라이언트 업데이트에서는 주소를 자동 탐색하고 현재 팔레트 검증을 통과한 경우에만 정밀 검색을 계속합니다. 호환되지 않는 클라이언트는 중지합니다. 스크린샷 검색의 후반 확대·축소와 복원 수렴을 개선했습니다. 진단 로그는 완료된 최근 10회분을 보관하며, 쓰는 중이거나 방금 갱신된 로그는 일시적으로 보호합니다.
 
 ## 1. 설치
 
-[GitHub Releases](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/releases)에서 **`ColorStudio-v0.4.10-Windows-x64.zip`**을 받아 전체 압축을 푼 뒤 `ColorStudio.exe`를 실행하세요. `_internal` 폴더는 실행 파일 옆에 그대로 두세요. Python이나 Tesseract를 따로 설치할 필요는 없습니다.
+[GitHub Releases](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/releases)에서 **`ColorStudio-v0.5.0-Windows-x64.zip`**을 받아 전체 압축을 푼 뒤 `ColorStudio.exe`를 실행하세요. `_internal` 폴더는 실행 파일 옆에 그대로 두세요. Python이나 Tesseract를 따로 설치할 필요는 없습니다.
 
 ## 2. 색상 검색 시작
 
@@ -53,7 +55,7 @@
 
 업데이트 파일은 먼저 미러를 통해 받고, 미러를 사용할 수 없으면 자동으로 GitHub에 직접 연결합니다. 모든 파일은 서명과 해시로 검증됩니다. 온라인 업데이트를 할 수 없으면 전체 패키지로 수동 업그레이드하고 `data`를 유지하세요.
 
-[온라인·수동 업데이트](docs/automatic-updates.ko.md) · [0.4.10 변경 내용](docs/release-notes-0.4.10.md)
+[온라인·수동 업데이트](docs/automatic-updates.ko.md) · [0.5.0 변경 내용](docs/release-notes-0.5.0.md)
 
 ## 도움말과 문제 제보
 

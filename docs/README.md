@@ -3,12 +3,12 @@
 ## 使用工具
 
 - 使用说明：[简体中文](../README.md) · [繁體中文](../README.zh-TW.md) · [English](../README.en.md) · [日本語](../README.ja.md) · [한국어](../README.ko.md)
-- [自动更新](automatic-updates.md) · [服务器选择](server-adaptation/server-selection.md) · [0.4.10 更新内容](release-notes-0.4.10.md)
+- [自动更新](automatic-updates.md) · [服务器选择](server-adaptation/server-selection.md) · [0.5.0 更新内容](release-notes-0.5.0.md)
 
 ## 开发维护
 
 - [开发指南](development/README.md)：环境、代码入口、修改流程。
-- [测试指南](../TESTING.md)：默认小型冒烟，日常按模块检查。
+- [测试指南](../TESTING.md)：默认运行完整离线测试，日常也可按模块检查。
 - [发布指南](development/release-tooling.md)：构建、签名、资产与更新验证。
 - [整理记录](development/maintenance.md)：哪些资料已退役、什么文件应留在本地。
 

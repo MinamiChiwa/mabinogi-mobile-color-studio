@@ -7,9 +7,10 @@ from .read_toucharea_rect import read_toucharea_rect_cache
 
 def read_toucharea_geometry_cache(reader, slot_address, *, gameassembly_sha256,
                                   metadata_sha256, unityplayer_sha256,
-                                  expected_touch_area=None, check=lambda: None):
+                                  expected_touch_area=None, check=lambda: None, adapter=None):
     build = dict(gameassembly_sha256=gameassembly_sha256, metadata_sha256=metadata_sha256,
                  unityplayer_sha256=unityplayer_sha256)
+    if adapter is not None:build['adapter']=adapter
     first_rect = read_toucharea_rect_cache(reader, slot_address, **build,
         expected_touch_area=expected_touch_area, check=check)
     managed = first_rect['binding']['managed_rect_address']

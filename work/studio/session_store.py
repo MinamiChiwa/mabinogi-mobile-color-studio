@@ -7,10 +7,7 @@ LIMIT=200*1024*1024
 MARKER='.color-studio-diagnostics'
 SESSION_MARKER='.color-studio-session'
 ACTIVE_MARKER='.color-studio-active'
-SESSION_RETENTION_DAYS=30
-# Keep only a small diagnostic history. Running/recent sessions are protected
-# separately below so reducing this count never removes the current run.
-SESSION_RETENTION_COUNT=3
+SESSION_RETENTION_COUNT=10
 # There is deliberately no default aggregate byte cap. A single atlas
 # capture can legitimately be larger than a convenient cache budget; count-
 # based retention must not delete it before it can be inspected.
@@ -42,14 +39,13 @@ def start_session_cleanup(root):
     worker.start()
     return worker
 
-def cleanup_sessions(root, now=None, keep_days=SESSION_RETENTION_DAYS,
-                     keep_count=SESSION_RETENTION_COUNT,
+def cleanup_sessions(root, now=None, keep_count=SESSION_RETENTION_COUNT,
                      max_bytes=SESSION_RETENTION_BYTES):
     """Bound normal atlas session storage without touching unrelated files.
 
     Only timestamp-named child directories created by the studio are eligible.
-    Active/recent sessions are always retained. The newest three completed
-    sessions are kept as a small history. There is no aggregate byte limit by
+    Keep the newest ten completed sessions, without an age limit. Active/recent
+    sessions are protected and may temporarily exceed this count. There is no aggregate byte limit by
     default: a large single capture remains available for inspection. A
     caller may still pass ``max_bytes`` for an explicit maintenance operation;
     even then the retained newest sessions are never sacrificed. Unexpected
@@ -136,9 +132,7 @@ def cleanup_sessions(root, now=None, keep_days=SESSION_RETENTION_DAYS,
             if entry[1] in newest:continue
             remove_entry(entry)
 
-    # Enforce the small history window after any optional maintenance pass.
-    # This is deliberately a count rule rather than an age-only rule so old
-    # captures do not accumulate indefinitely when they are small.
+    # Retention is a count limit, independent of the age of completed runs.
     for entry in entries:
         stamp,folder,files,size=entry
         if not folder.exists() or is_protected(entry):continue

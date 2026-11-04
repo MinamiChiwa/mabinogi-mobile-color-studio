@@ -2,11 +2,13 @@
 
 [简体中文](README.md) · [繁體中文](README.zh-TW.md) · [English](README.en.md) · [日本語](README.ja.md) · [한국어](README.ko.md)
 
-**ColorStudio 0.4.10** 是 Windows 自动寻色工具，支持台服，韩服和日服仍在测试中。工具按您设置的目标颜色操作色板，结果由您在游戏内手动确认。
+**ColorStudio 0.5.0** 是 Windows 自动寻色工具，支持台服，韩服和日服仍在测试中。工具按您设置的目标颜色操作色板，结果由您在游戏内手动确认。
+
+兼容的台服、韩服客户端更新可自动发现地址，并在当前色板验证通过后继续精准寻色；不兼容版本会停止。截图模式改进了后期缩放与恢复的收敛。诊断会话保留最近 10 次完成记录，正在写入和刚更新的会话暂不清理。
 
 ## 1. 安装
 
-从 [GitHub Releases](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/releases) 下载 **`ColorStudio-v0.4.10-Windows-x64.zip`**，完整解压后运行 `ColorStudio.exe`。保留旁边的 `_internal` 文件夹，无需另装 Python 或 Tesseract。
+从 [GitHub Releases](https://github.com/MinamiChiwa/mabinogi-mobile-color-studio/releases) 下载 **`ColorStudio-v0.5.0-Windows-x64.zip`**，完整解压后运行 `ColorStudio.exe`。保留旁边的 `_internal` 文件夹，无需另装 Python 或 Tesseract。
 
 ## 2. 开始寻色
 
@@ -53,7 +55,7 @@
 
 更新文件优先经镜像站下载，镜像不可用时自动直连 GitHub；所有文件都经过签名与哈希校验。无法在线更新时，用完整包手动升级并保留 `data`。
 
-[在线与手动更新指南](docs/automatic-updates.md) · [0.4.10 更新内容](docs/release-notes-0.4.10.md)
+[在线与手动更新指南](docs/automatic-updates.md) · [0.5.0 更新内容](docs/release-notes-0.5.0.md)
 
 ## 帮助与反馈
 

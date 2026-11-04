@@ -17,6 +17,9 @@ Qt 测试在 `offscreen` 模式下运行，不会弹出窗口、不注册全局�
 
 | 文件 | 守住的契约 |
 | --- | --- |
+| `tests/test_build_adaptation.py` | 台韩兼容地址发现、结构契约与当前会话验证，不等于新客户端实机验收 |
+| `tests/test_screenshot_convergence.py`、`test_session_retention.py` | 分段缩放、短预算、无响应与恢复停滞；最近 10 次完成会话保留及活跃保护 |
+| `tests/test_local_package_delivery.py` | 新包替换时的旧生成物清理、个人记录保留、文件冲突和修改文件保护 |
 | `tests/test_rules_and_profile.py` | 卡片设置 → 送进引擎的规则字典；方案文件读写、旧格式迁移与非法输入 |
 | `tests/test_update_transport.py` | 镜像优先、失败自动直连 GitHub 并在一段时间内保持直连；API 不走镜像；镜像返回的损坏文件改从 GitHub 重下；篡改的清单被拒绝 |
 | `tests/test_update_assets.py` | 发布资产只有签名清单与 blob；校验能发现被改动的 blob；增量下载量统计 |

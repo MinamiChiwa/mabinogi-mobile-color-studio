@@ -1,10 +1,10 @@
 {
-  "version": "0.4.10",
-  "tag": "v0.4.10",
+  "version": "0.5.0",
+  "tag": "v0.5.0",
   "channel": "stable",
-  "release_sequence": 11,
+  "release_sequence": 12,
   "key_id": "colorstudio-production-2026-10",
-  "previous_version": "0.4.9",
-  "full_package": "ColorStudio-v0.4.10-Windows-x64.zip",
+  "previous_version": "0.4.10",
+  "full_package": "ColorStudio-v0.5.0-Windows-x64.zip",
   "update_format": "signed-manifest-and-blobs"
 }

@@ -17,7 +17,8 @@ from .read_dye_window_mapping import read_pixel_mapping,validate_pixel_mapping
 from .read_native_mouse_diagnostic import read_native_mouse_cache
 from .map_unity_window import map_unity_geometry_to_client
 from .build_layout import resolve_build_files
-from .build_adapters import select_adapter,BuildUnsupported,TW_ADAPTER
+from .build_adapters import BuildUnsupported,TW_ADAPTER
+from .adaptive_build import resolve_adapter
 from ctypes import wintypes
 
 EXPECTED_BUILD='1675c2131534d0ab2fc053af8a2e394d326ba7d22eff0019734be96b1808678f'
@@ -73,7 +74,8 @@ class CurrentBuildBackend:
             self.version = _hash_build_file(self.build_files['gameassembly'],check)
             self.metadata_version = _hash_build_file(self.build_files['metadata'],check)
             self.unityplayer_version = _hash_build_file(self.build_files['unityplayer'],check)
-            self.adapter=select_adapter(dict(gameassembly=self.version,metadata=self.metadata_version,unityplayer=self.unityplayer_version))
+            self.adapter=resolve_adapter(self.build_files,
+                dict(gameassembly=self.version,metadata=self.metadata_version,unityplayer=self.unityplayer_version),check)
         except BuildUnsupported as exc:
             self.build_diagnostic={'hashes':exc.hashes,'adapter':'unsupported','inputs_sent':0}
             self.reader.close();raise
@@ -409,6 +411,7 @@ class CurrentBuildBackend:
             geometry=read_toucharea_geometry_cache(self.reader,motion['binding']['ui_slot'],
                 gameassembly_sha256=self.version,metadata_sha256=self.metadata_version,
                 unityplayer_sha256=self.unityplayer_version,
+                adapter=self.adapter,
                 expected_touch_area=motion['binding']['touch_area_address'],check=guard)
             if read_dye_motion(self.reader,address,check=guard)!=motion:
                 raise ValueError('Motion changed during geometry observation')

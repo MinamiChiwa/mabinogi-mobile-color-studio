@@ -187,7 +187,8 @@ def run_native_search(owner,rules,*,mode='search',target=None,activate=False,ser
         if selected_adapter is not None:
             result['build_adapter']=dict(selected_adapter.diagnostic(),
                 validation_input_enabled=getattr(backend,'validation_input_enabled',False) is True)
-        require_input_capability(backend)
+        from .adaptive_build import is_adaptive
+        if not is_adaptive(getattr(backend,'adapter',None)):require_input_capability(backend)
         baseline=collect_validation_session(backend,wait_seconds=300.,session_seconds=SESSION_MAX_SECONDS,check=check,event=event)
         (folder/'native-baseline.json').write_text(json.dumps(baseline,indent=2),encoding='utf-8')
         if baseline['stop_reason']!='passive_baseline_collected':

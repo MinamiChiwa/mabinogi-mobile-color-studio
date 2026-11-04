@@ -58,7 +58,7 @@ if saved.exists():
 try:
     # Qt 界面：QML 目录随包分发；Tk 不再使用，整体排除。
     subprocess.run([sys.executable,'-m','PyInstaller','--noconfirm','--onedir','--windowed','--name','ColorStudio','--distpath',str(out),'--workpath',str(root/'build'),'--specpath',str(root),
-        '--collect-data','opencc','--add-data',str(ocr)+';ocr','--add-data',str(build_info)+';.','--add-data',str(root/'native_live/assets')+';native_live/assets',
+        '--collect-data','opencc','--collect-all','capstone','--add-data',str(ocr)+';ocr','--add-data',str(build_info)+';.','--add-data',str(root/'native_live/assets')+';native_live/assets',
         '--add-data',str(root/'qt_ui/qml')+';qt_ui/qml','--hidden-import','PySide6.QtQuickControls2',
         '--exclude-module','tkinter','--exclude-module','customtkinter','--exclude-module','pandas','--exclude-module','matplotlib',*trust_args,str(root/'app.py')],check=True)
 finally:recovery_identity.write_text(original_recovery_source,encoding='utf-8')
@@ -73,7 +73,7 @@ packaged_data=out/'ColorStudio/data'
 if packaged_data.exists():shutil.rmtree(packaged_data)
 licenses=out/'ColorStudio/THIRD_PARTY';licenses.mkdir(exist_ok=True)
 import importlib.metadata
-for package_name in ('cryptography','packaging','httpx','httpcore','anyio','certifi','cffi','scipy'):
+for package_name in ('cryptography','packaging','httpx','httpcore','anyio','certifi','cffi','scipy','pefile','capstone'):
     distribution=importlib.metadata.distribution(package_name)
     for file in distribution.files or ():
         if 'license' in str(file).casefold() or str(file).casefold().endswith('copying'):
