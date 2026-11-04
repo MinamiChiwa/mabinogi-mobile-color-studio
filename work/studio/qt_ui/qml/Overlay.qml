@@ -21,9 +21,10 @@ Window {
     color: 'transparent'
     flags: Qt.Window | Qt.FramelessWindowHint | Qt.WindowDoesNotAcceptFocus | Qt.WindowStaysOnTopHint
     title: Loc.t('寻色浮窗')
+    property bool closeApproved: false
     onClosing: function(event) {
-        event.accepted = false
-        overlayBridge.requestClose()
+        event.accepted = root.closeApproved
+        if (!root.closeApproved) overlayBridge.requestClose()
     }
 
     // Keep hit boxes and rendered buttons aligned when retry becomes visible.

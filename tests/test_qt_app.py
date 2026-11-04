@@ -108,7 +108,8 @@ def test_close_when_idle_saves_profile_and_quits(qapp, make_host, quits, data_di
 
 
 @pytest.mark.parametrize('trigger', ['window', 'button'])
-def test_real_qt_loop_exits_after_close_request(tmp_path, trigger):
+@pytest.mark.parametrize('overlay_status', ['unused', 'result', 'dismissed'])
+def test_real_qt_loop_exits_after_close_request(tmp_path, trigger, overlay_status):
     """Do not mock quit: a rejecting QML window can prevent Qt from exiting."""
     script = '''
 import sys
@@ -132,11 +133,18 @@ for name, value in dict(uiState=host.state, bridge=host.bridge, launchVisible=Tr
 engine.load(QUrl.fromLocalFile(str(QML_DIR / 'Main.qml')))
 assert engine.rootObjects()
 window = engine.rootObjects()[0]; host.window = window
+if sys.argv[3] != 'unused':
+    # Display a completed search result without running a search or game inputs.
+    host.overlay._prepare_native = lambda: None
+    host.overlay._ensure_window().show()
+    host.overlay._finish()
+    if sys.argv[3] == 'dismissed':
+        host.overlay.dismiss()
 QTimer.singleShot(20, window.close if sys.argv[2] == 'window' else host.bridge.requestClose)
 QTimer.singleShot(2000, lambda: app.exit(71))
 sys.exit(app.exec())
 '''
-    result = subprocess.run([sys.executable, '-c', script, str(tmp_path/'data'), trigger],
+    result = subprocess.run([sys.executable, '-c', script, str(tmp_path/'data'), trigger, overlay_status],
         cwd=Path(__file__).resolve().parents[1], env={**os.environ, 'QT_QPA_PLATFORM': 'offscreen'},
         capture_output=True, text=True, timeout=20)
     assert result.returncode == 0, result.stdout + result.stderr

@@ -978,6 +978,8 @@ class QtHost(core.Business, QObject):
             timer.stop()
         self._timers.clear()
         self._hotkeys_stop.set()
+        if self.overlay is not None:
+            self.overlay.shutdown()
         if not self._profile_read_failed or self._autosave_job is not None:
             self.flush_autosave()
 

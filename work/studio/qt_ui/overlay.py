@@ -520,6 +520,12 @@ class QtOverlay(QObject):
         if self._window is not None:
             self._window.hide()
 
+    def shutdown(self):
+        """主程序退出时放行 Qt 的关闭事件；普通关闭仍只收起浮窗。"""
+        if self._window is not None:
+            self._window.setProperty('closeApproved', True)
+        self.dismiss()
+
     def _candidate_rows(self, data):
         """把引擎的候选数据投影成 QML 卡片。
 

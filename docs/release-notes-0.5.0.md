@@ -2,6 +2,7 @@
 
 ## 简体中文
 
+- 修复使用寻色浮窗后关闭主窗口仍残留后台进程的问题。
 - 精准寻色增加台服、韩服兼容客户端的地址自动发现，减少仅因地址移动而提示版本不支持的情况。
 - 自动适配仍需通过布局和当前色板验证；结构变化或验证失败时停止，不保证所有未来更新都兼容。韩服、日服支持状态仍为测试中。
 - 截图寻色将长缩放动作分段反馈，按完整路线预留预算，并在无响应或连续无改善时结束定位、微调或恢复，减少末段反复缩放。
@@ -16,6 +17,7 @@
 
 ## 繁體中文
 
+- 修正使用尋色浮窗後關閉主視窗仍殘留背景程序的問題。
 - 精準尋色新增台服、韓服相容客戶端的位址自動探索，減少僅因位址移動而顯示版本不支援的情況。
 - 自動適配仍須通過結構及目前色板驗證；結構變動或驗證失敗時停止，不保證未來所有更新皆相容。韓服、日服仍在測試中。
 - 截圖尋色將長縮放動作分段回饋，依完整路線預留時間，並在無回應或連續未改善時結束定位、微調或恢復，減少末段反覆縮放。
@@ -30,6 +32,7 @@
 
 ## English
 
+- Fix background processes remaining after closing the main window following use of the search overlay.
 - Precise Search can discover addresses for compatible Taiwan and Korean client updates, reducing unsupported-version errors caused solely by moved addresses.
 - Discovery still requires layout and current-palette verification. Incompatible changes or failed checks stop the search; future updates are not guaranteed to work. Korean and Japanese support remains in testing.
 - Screenshot Search splits long zoom sequences into feedback batches, budgets the complete route, and stops positioning, refinement or recovery when input has no effect or progress stalls, reducing repeated late zoom adjustments.
@@ -44,6 +47,7 @@
 
 ## 日本語
 
+- 検索フローティングウィンドウの使用後、メイン画面を閉じてもプロセスが残る問題を修正しました。
 - 精密検索で互換性のある台湾版・韓国版のアドレスを自動検出し、アドレス移動だけによる未対応エラーを減らします。
 - 自動検出後も構造と現在のパレットを検証します。非互換の変更や検証失敗時は停止し、将来のすべての更新への対応は保証しません。韓国版・日本版は引き続きテスト中です。
 - スクリーンショット検索の長いズーム操作を分割し、途中で再計測します。経路全体の時間を確保し、無反応や改善の停滞時には位置合わせ・微調整・復元を終了して、終盤の繰り返しズームを減らします。
@@ -58,6 +62,7 @@
 
 ## 한국어
 
+- 검색 오버레이 사용 후 메인 창을 닫아도 백그라운드 프로세스가 남는 문제를 수정했습니다.
 - 정밀 검색에서 호환되는 대만·한국 클라이언트의 주소를 자동 탐색하여, 주소 이동만으로 발생하는 버전 미지원 오류를 줄입니다.
 - 자동 탐색 후에도 구조와 현재 팔레트를 검증합니다. 호환되지 않는 변경이나 검증 실패 시 중지하며, 향후 모든 업데이트의 호환을 보장하지 않습니다. 한국·일본 서버는 계속 테스트 중입니다.
 - 스크린샷 검색의 긴 확대·축소 동작을 나누고 중간 결과를 확인합니다. 전체 경로의 시간을 확보하며, 무반응이나 개선 정체 시 위치 보정·미세 조정·복원을 끝내 후반의 반복 확대·축소를 줄입니다.
