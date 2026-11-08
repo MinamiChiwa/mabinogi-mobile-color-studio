@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import sys
 
-APP_VERSION = '0.5.0'
+APP_VERSION = '0.5.1'
 POLICY_REVISION = 'native-screenshot-joint-destination-v6'
 
 
