@@ -151,14 +151,15 @@ def test_all_reader_layouts_must_exist_and_match_types_offsets_and_parents():
     with pytest.raises(ValueError,match='layout'):adaptation.validate_layout(build)
 
 
-@pytest.mark.parametrize('offsets,own,accepted', [([8],[8],True),([8,24],[8],False),([8],[],False),([8],[24],False)])
-def test_class_marker_must_be_unique_and_referenced_by_its_own_methods(monkeypatch, offsets, own, accepted):
+@pytest.mark.parametrize('offsets,own,accepted', [([8],[8],True),([8,24],[8],True),
+    ([8,24],[8,24],False),([8],[],False),([8],[24],False)])
+def test_class_marker_requires_unique_own_reference(monkeypatch, offsets, own, accepted):
     definition=[0,0,7]
     marker=0x20000001|(7<<1)
     raw=bytearray(64)
     for offset in offsets:struct.pack_into('<Q',raw,offset,marker)
     build=SimpleNamespace(d=raw,check=lambda:None,pe=SimpleNamespace(get_rva_from_offset=lambda x:x))
-    monkeypatch.setattr(adaptation,'_references',lambda *args:{(rva,marker,'mov') for rva in own})
+    monkeypatch.setattr(adaptation,'_references',lambda *args:{(rva,struct.unpack_from('<Q',raw,rva)[0],'mov') for rva in own})
     if accepted:assert adaptation._class_slot(build,(0,definition))==(8,marker)
     else:
         with pytest.raises(ValueError,match='Ambiguous'):adaptation._class_slot(build,(0,definition))

@@ -17,7 +17,7 @@ from .managed_layout_contract import CONTRACT_ID, LAYOUTS
 
 PALETTE = 'MM.Client.Presentation.UI.Instances.StageScene.Dyeing.DyeingPaletteInstanceImpl'
 INPUT = 'MM.Client.Framework.InputSystem.MMInputSystem'
-DISCOVERY_VERSION = 1
+DISCOVERY_VERSION = 2
 _AUTHORITY = object()
 _cache = OrderedDict()
 _lock = Lock()
@@ -63,7 +63,9 @@ def _references(build, entry, method_name=None):
             continue
         for instruction in build.instructions(method['rva']):
             for operand in instruction.operands:
-                if operand.type == capstone.x86.X86_OP_MEM and operand.mem.base == capstone.x86.X86_REG_RIP:
+                if (operand.type == capstone.x86.X86_OP_MEM
+                        and operand.mem.base == capstone.x86.X86_REG_RIP
+                        and operand.size == 8 and operand.access & capstone.CS_AC_READ):
                     address = instruction.address + instruction.size + operand.mem.disp
                     section = build.pe.get_section_by_rva(address - build.base)
                     if section is not None and section.Characteristics & 0x80000000 and address % 8 == 0:
@@ -80,21 +82,13 @@ def _references(build, entry, method_name=None):
 
 def _class_slot(build, entry):
     marker = 0x20000001 | (entry[1][2] << 1)
-    needle = struct.pack('<Q', marker)
-    matches = set()
-    offset = 0
-    while True:
-        build.check()
-        offset = build.d.find(needle, offset)
-        if offset < 0:
-            break
-        if offset % 8 == 0:
-            matches.add(build.pe.get_rva_from_offset(offset))
-        offset += 1
+    # A marker value can also occur in unrelated code, resources or data.
+    # Only a mapped writable slot referenced by this class is evidence.
+    # _references verifies pointer width/access, alignment and file backing.
     own = {rva for rva, value, _ in _references(build, entry) if value == marker}
-    if len(matches) != 1 or matches != own:
+    if len(own) != 1:
         raise ValueError('Ambiguous or unreferenced metadata class slot')
-    return matches.pop(), marker
+    return own.pop(), marker
 
 
 def discover_adapter(files, hashes, check=lambda: None):
@@ -113,7 +107,7 @@ def discover_adapter(files, hashes, check=lambda: None):
         if len(mouse) != 1:
             raise ValueError('Ambiguous metadata mouse getter cache')
         evidence = hashlib.sha256(json.dumps(LAYOUTS, sort_keys=True).encode()).hexdigest()
-        return BuildAdapter('adaptive-v1-' + hashes['gameassembly'][:16], hashes['gameassembly'],
+        return BuildAdapter('adaptive-v2-' + hashes['gameassembly'][:16], hashes['gameassembly'],
             hashes['metadata'], palette, 'legacy-mouse-v1',
             palette_uninitialized_marker=palette_marker, input_class_rva=input_slot,
             input_class_uninitialized_marker=input_marker, mouse_getter_cache_rva=mouse.pop(),
