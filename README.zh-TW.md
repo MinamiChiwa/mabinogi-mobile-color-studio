@@ -2,6 +2,12 @@
 
 [简体中文](README.md) · [繁體中文](README.zh-TW.md) · [English](README.en.md) · [日本語](README.ja.md) · [한국어](README.ko.md)
 
+> **☕ 支持作者**
+>
+> 如果你覺得本專案有幫助，不妨贊助作者一杯咖啡。
+>
+> 作者：**南千和** · [愛發電](https://afdian.com/a/minamichiwa) · [Patreon](https://patreon.com/chiwaminami)
+
 **ColorStudio 0.5.0** 是 Windows 自動尋色工具，支援台服，韓服與日服仍在測試中。工具依您設定的目標顏色操作色板，結果由您在遊戲內手動確認。
 
 相容的台服、韓服客戶端更新可自動尋找位址，並在目前色板驗證通過後繼續精準尋色；不相容版本會停止。截圖模式改善末段縮放與恢復的收斂。診斷工作階段保留最近 10 次完成記錄，寫入中與剛更新的記錄暫不清理。
@@ -68,4 +74,4 @@
 
 [伺服器說明](docs/server-adaptation/server-selection.md) · [開發與測試](TESTING.md)
 
-作者：**南千和** · [愛發電](https://afdian.com/a/minamichiwa) · [Patreon](https://patreon.com/chiwaminami)。贊助完全自願，不影響功能。本工具由 AI 輔助開發。
+本工具由 AI 輔助開發。

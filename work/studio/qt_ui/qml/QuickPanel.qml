@@ -510,11 +510,22 @@ Item {
             Text {
                 Layout.fillWidth: true
                 Layout.preferredWidth: 0
+                text: Loc.t('如果你觉得本项目有帮助，不妨赞助作者一杯咖啡。')
+                color: panel.cText
+                font.pixelSize: 12
+                font.weight: Font.DemiBold
+                lineHeight: 1.4
+                wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+            }
+
+            Text {
+                Layout.fillWidth: true
+                Layout.preferredWidth: 0
                 text: Loc.t('赞助完全自愿，不论是否赞助都能使用全部功能。')
                 color: panel.cMuted2
                 font.pixelSize: 10
                 lineHeight: 1.5
-                wrapMode: Text.WordWrap
+                wrapMode: Text.WrapAtWordBoundaryOrAnywhere
             }
 
             Repeater {
