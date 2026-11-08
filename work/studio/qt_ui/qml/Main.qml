@@ -18,7 +18,7 @@ Window {
     readonly property int padBottom: 14
 
     // ---- V2 统一区块高度（单一来源，改这里就够）----
-    readonly property int appBarH: root.narrow ? 40 + 32 : 40
+    readonly property int appBarH: root.narrow ? 42 + actionsRow.implicitHeight : 40
     readonly property int envBarH: root.narrow ? 86 : 46
     readonly property int noteH: 12
     readonly property int runBarH: root.threeCol ? 108 : runStack.implicitHeight + 22
@@ -216,23 +216,20 @@ Window {
                         }
                     }
 
-                    Row {
+                    Flow {
                         id: actionsRow
-                        // 宽屏排在窗口控制左侧；窄屏换到第二行右对齐
+                        // 窄屏按可用宽度换行，保留各语言按钮的完整文字。
                         anchors.right: root.narrow ? parent.right : windowControls.left
                         anchors.rightMargin: root.narrow ? 0 : 6
                         anchors.top: root.narrow ? brandRow.bottom : parent.top
-                        anchors.topMargin: root.narrow ? 2 : 0
-                        height: root.narrow ? 30 : 40
+                        anchors.topMargin: root.narrow ? 2 : 5
+                        width: root.narrow ? parent.width : implicitWidth
                         spacing: 6
 
-                        // 主题切换：浅色 / 深色（原型未规定，按 4.1 令牌两列实现）
-                        // 与右侧按钮同高（30）并垂直居中；Row 里不设 verticalCenter 会贴顶，
-                        // 与旁边包在 30 高 Item 里的按钮错开 5px。
+                        // 主题与操作按钮统一为 30 像素高，随 Flow 一起换行。
                         Item {
                             width: themeBtn.implicitWidth
                             height: 30
-                            anchors.verticalCenter: parent.verticalCenter
 
                             UiButton {
                                 id: themeBtn
@@ -249,7 +246,6 @@ Window {
                             delegate: Item {
                                 width: hdrBtn.implicitWidth
                                 height: 30
-                                anchors.verticalCenter: parent.verticalCenter
 
                                 UiButton {
                                     id: hdrBtn
