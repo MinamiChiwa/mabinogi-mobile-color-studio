@@ -2,6 +2,12 @@
 
 [简体中文](README.md) · [繁體中文](README.zh-TW.md) · [English](README.en.md) · [日本語](README.ja.md) · [한국어](README.ko.md)
 
+> **☕ 개발자 후원**
+>
+> 이 프로젝트가 도움이 되었다면 개발자에게 커피 한 잔을 후원해 주세요.
+>
+> 제작: **南千和(MinamiChiwa)** · [Afdian](https://afdian.com/a/minamichiwa) · [Patreon](https://patreon.com/chiwaminami)
+
 **ColorStudio 0.5.0**는 마비노기 모바일 대만 서버를 지원하는 Windows용 색상 검색 도구입니다. 한국·일본 서버는 테스트 중입니다. 설정한 목표 색상에 맞춰 팔레트를 조작하며, 결과를 적용할지는 게임에서 직접 결정합니다.
 
 호환되는 대만·한국 클라이언트 업데이트에서는 주소를 자동 탐색하고 현재 팔레트 검증을 통과한 경우에만 정밀 검색을 계속합니다. 호환되지 않는 클라이언트는 중지합니다. 스크린샷 검색의 후반 확대·축소와 복원 수렴을 개선했습니다. 진단 로그는 완료된 최근 10회분을 보관하며, 쓰는 중이거나 방금 갱신된 로그는 일시적으로 보호합니다.
@@ -68,4 +74,4 @@
 
 [서버 안내](docs/server-adaptation/server-selection.md) · [개발 및 테스트](TESTING.md)
 
-제작: **南千和(MinamiChiwa)** · [Afdian](https://afdian.com/a/minamichiwa) · [Patreon](https://patreon.com/chiwaminami). 후원은 자율이며 기능에 영향을 주지 않습니다. AI의 도움을 받아 개발한 도구입니다.
+AI의 도움을 받아 개발한 도구입니다.

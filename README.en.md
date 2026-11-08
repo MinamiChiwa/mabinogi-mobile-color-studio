@@ -2,6 +2,12 @@
 
 [简体中文](README.md) · [繁體中文](README.zh-TW.md) · [English](README.en.md) · [日本語](README.ja.md) · [한국어](README.ko.md)
 
+> **☕ Support the author**
+>
+> If you find this project helpful, consider buying the author a coffee.
+>
+> By **MinamiChiwa** · [Afdian](https://afdian.com/a/minamichiwa) · [Patreon](https://patreon.com/chiwaminami)
+
 **ColorStudio 0.5.0** is a Windows color search tool for the Taiwan server of Mabinogi Mobile. Korean and Japanese support is in testing. It adjusts the palette for your selected targets; you decide whether to apply the result in the game.
 
 Compatible Taiwan and Korean client updates can have their addresses discovered automatically; Precise Search proceeds only after current-palette checks pass. Incompatible clients are rejected. Screenshot Search improves late zoom and recovery convergence. Diagnostic storage keeps the latest 10 completed sessions, temporarily protecting active or recently updated sessions.
@@ -68,4 +74,4 @@ Data normally lives in `data` beside the app. If that folder is not writable, th
 
 [Server guide](docs/server-adaptation/server-selection.md) · [Development and tests](TESTING.md)
 
-By **MinamiChiwa** · [Afdian](https://afdian.com/a/minamichiwa) · [Patreon](https://patreon.com/chiwaminami). Donations are optional and do not affect features. Developed with AI assistance.
+Developed with AI assistance.

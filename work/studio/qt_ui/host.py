@@ -481,7 +481,7 @@ class QtHost(core.Business, QObject):
             # 文案只放简体中文原文，显示由 QML 的 Loc.t() 翻译；
             # 这样切语言时不需要 Python 重新推一遍，也不会残留旧语言。
             headerActions=[
-                {'key': 'support', 'label': '支持作者', 'kind': 'ghost'},
+                {'key': 'support', 'label': '支持作者', 'kind': 'primary'},
                 {'key': 'github', 'label': 'GitHub', 'kind': 'secondary'},
                 {'key': 'update', 'label': '检查更新', 'kind': 'secondary'},
                 {'key': 'tutorial', 'label': '?', 'kind': 'secondary'},
@@ -764,7 +764,8 @@ class QtHost(core.Business, QObject):
             return
         window = dialogs.show_info(
             None, tr('支持作者'),
-            [(tr('赞助完全自愿'), tr('赞助完全自愿，不论是否赞助，都可以正常使用本工具的全部功能。')),
+            [(tr('支持作者'), tr('如果你觉得本项目有帮助，不妨赞助作者一杯咖啡。')),
+             (tr('赞助完全自愿'), tr('赞助完全自愿，不论是否赞助，都可以正常使用本工具的全部功能。')),
              (tr('说明'), tr('选择您偏好的平台支持后续开发，感谢您的支持。'))],
             [(tr('爱发电'), AFDIAN), ('Patreon', PATREON), ('GitHub', GITHUB)])
         self._track_dialog('support', window)
